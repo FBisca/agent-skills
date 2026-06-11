@@ -35,7 +35,6 @@ Do not move to Step 4 until the interview is over.
 
 Write a plan file to `docs/plans/<feature-slug>.plan.md`.
 
-
 ### What every plan must answer
 
 These are **questions, not section headings**. Choose headings that fit the work. Every plan must make the following five things unambiguous to a reader who has never seen it before:
@@ -50,12 +49,14 @@ If a plan does not answer all five, it is not finished.
 
 ### Rules for Phases
 
-- Each Phase must contain at minimum: **goal**, **deliverables**, **definition of done**. This is what `/plan-worktree-executor` needs to execute it.
+- Each Phase must contain at minimum: **goal**, **deliverables**, **definition of done**. This is what `/orchestrate` needs to execute it.
 - Each Phase must be independently reviewable and mergeable.
 - Each Phase must be demonstrable — there is something concrete to show when it lands.
 - No Phase may depend on a later Phase in the same plan.
 - Prefer 3–6 Phases per plan. If the scope is smaller, 1–2 Phases is fine.
 - If the planning requires more than 6 Phases, it is probably too big. Suggest splitting the work into multiple plans.
+- Each Phase must use a triage process for its work items: - `TO-DO` — not started. - `IN PROGRESS` — currently being worked on. - `COMPLETE` — finished.
+- Each deliverable inside a Phase should have one of these statuses.
 
 ---
 
@@ -65,3 +66,4 @@ After writing the file, tell the user:
 
 1. The full path of the plan file.
 2. A one-line summary of each Phase.
+3. That they can use `/orchestrate` to implement the plan when ready.
