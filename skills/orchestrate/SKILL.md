@@ -68,7 +68,9 @@ If the user did not provide the exact unit, ask for the exact unit.
 
 5. Confirm with the user, if not specified, how the work should be built, using worktrees or in the current branch.
 
-6. After confirmation, start delegation.
+6. If worktrees are used, confirm if the implementers should open a Pull Request when the implementation is complete.
+
+7. After confirmation, start delegation.
 
 ## Verify Predecessor
 
