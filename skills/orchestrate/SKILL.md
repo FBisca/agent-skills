@@ -1,7 +1,6 @@
 ---
 name: orchestrate
 description: Orchestrate execution of one phase, chunk, or deliverable from an implementation plan using a focused implementation subagent.
-disable-model-invocation: true
 argument-hint: "[plan-path-or-active-plan] [Phase|Chunk|Deliverable N]"
 ---
 
