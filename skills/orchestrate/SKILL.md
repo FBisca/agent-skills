@@ -163,3 +163,7 @@ After the subagent returns, tell the user:
 ## Implementation Follow-ups
 
 When the implementation is complete, update the active plan ledger and offer the user the option to orchestrate the next unit in the plan.
+
+## Mandatory Rules
+
+- Never mention in the code, Pull Requests or commits the Plan, Phases, Chunks, or Deliverable. The code should be unaware of the plan structure, instead use meaningful wording that describes the actual implementation.
