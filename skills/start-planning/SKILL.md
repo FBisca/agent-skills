@@ -33,7 +33,7 @@ Do not move to Step 4 until the interview is over.
 
 ## Step 4 — Write the plan
 
-Write a plan file to `docs/plans/<feature-slug>.plan.md`.
+Write a plan file to `docs/plans/YYYY-MM-DD-<feature-slug>.plan.md`, where the date is the day the plan is written. It stays fixed when the plan is later edited — it records when the thinking happened, not when it was last touched.
 
 ### What every plan must answer
 
