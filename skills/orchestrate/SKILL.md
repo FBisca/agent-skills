@@ -1,169 +1,83 @@
 ---
 name: orchestrate
-description: Orchestrate execution of one phase, chunk, or deliverable from an implementation plan using a focused implementation subagent.
-argument-hint: "[plan-path-or-active-plan] [Phase|Chunk|Deliverable N]"
+description: Execute selected units from an implementation plan with focused implementer agents. Reuse related workers and coordinate independent work across repositories.
 ---
 
----
+# Orchestrate
 
-Orchestrate the implementation of an existing markdown implementation plan
+Arguments: `[plan-path-or-active-plan] [Phase|Chunk|Deliverable N|next]`.
 
-It should not do the implementation itself unless delegation is unavailable.
+Own task selection, dependencies, worker assignments, and integration. Delegate code changes to `implementer`. Implement locally only when delegation is unavailable; report that fallback.
 
-It should prepare a clean implementation packet and delegate the actual code work to the `implementer` subagent.
+## Select the work
 
-## Responsibilities
+- Reuse the active plan and previous user choices. `next` means the next uncompleted unit whose dependencies are ready.
+- Execute only the requested scope. Within that scope, select independent work without another confirmation. Ask only when the plan, scope, or a material decision is unresolved.
+- Use the assigned checkout, including the current branch when appropriate. Use isolated worktrees for concurrent changes that need separate checkouts. Preserve existing user changes.
+- Verify predecessor behavior in the **actual implementation checkout**. A predecessor need not be on `main`. A completion message or commit in another checkout is insufficient.
+- Set file or directory ownership per worker. Serialize overlapping edits in one checkout. Assign an integration owner for changes across branches or repositories.
+- Existing authorization persists. Starting a worker does not authorize commits, PRs, merges, cleanup, or work beyond the selected scope.
 
-This skill owns:
+## Select the execution mode
 
-1. Identify the plan.
-2. Identify the exact units to orchestrate and units that can be parellelized.
-3. Reuse the active plan from this chat when possible.
-4. Build a compact implementation packet.
-5. Delegate to `implementer`.
-6. Report the final result to the user.
+| Work | Mode |
+| --- | --- |
+| Related sequential work in the same subsystem and checkout | Resume the existing implementer after the context check below. |
+| Independent work with little shared context | Start a focused implementer with a compact packet. |
+| Independent workers that need repeated coordination | Use available native peer messaging; use Claude Agent Teams when its shared tasks and teammates help. |
+| Existing sessions in different repositories | Use available cross-session messaging with the assigned sessions. Otherwise relay through the orchestrator. |
 
-The subagent owns:
+Inspect the tools exposed in this session before choosing calls. Do not infer capabilities from a feature flag alone.
 
-1. Reading the focused code context.
-2. Implementing the selected unit.
-3. Running relevant checks and quality gates.
-4. Communicating blockers if they arise.
-5. Returning a structured result when complete.
+- **Codex / MultiAgent V2:** select `agent_type: implementer` and, when available, `fork_turns: none`. Verify Terra/high in exposed runtime configuration. Full-history forks can inherit the parent's model and effort; existing sessions may retain old role definitions. Report mismatches instead of silently selecting another model.
+- Use the runtime's follow-up/resume operation for an idle worker. In a surface with separate tools, `send_message` steers a running worker and `followup_task` starts another turn. Do not assume that a message wakes an idle agent on every runtime.
+- **Claude:** use the `implementer` type for either a subagent or teammate. Resume by the returned agent ID. A fresh spawn with the same name is not resumption.
+- For visible Claude teammates, use the existing Herdmates integration. Read [runtime guidance](references/runtimes.md) before pane work or cross-repository execution. Do not start a second worker to display an existing one.
+- Honor runtime concurrency limits. Parallel execution can reduce elapsed time while increasing token use.
 
-## Active Plan Reuse
+## Check context before reuse
 
-Keep a compact ledger in the main chat so the user can run:
+Check the worker's subsystem, checkout state, last result, and available context telemetry at each task boundary. Read the pane's own measurement first (`herdr` in the state helper) before deciding resume versus fresh; a worker's self-reported `unknown` is not a reading. Record `unknown` only when that read fails.
 
-```text
-/orchestrate apps/api/plans/example.plan.md Phase 1
-/orchestrate Phase 2
-/orchestrate Phase 3
-```
+- Resume when retained knowledge helps the next task and there is room for its expected reads, results, and reasoning.
+- Use the **child's effective context window**. Current context occupancy, cumulative token use, and cached input are different measurements.
+- Record unavailable measurements as `unknown`. Do not estimate occupancy from transcript bytes, task count, or an agent's unsupported percentage claim.
+- Before compaction or replacement, save the objective, ownership, decisions, interface revisions, files, checks, and unresolved work.
+- Prefer a new worker when the subsystem changes, assumptions are stale, or repeated errors show lost context. Compaction alone does not require replacement; verify what survived.
+- After compaction or external edits, recheck affected files and constraints. A Git HEAD alone does not identify uncommitted changes.
+- Do not apply a universal task-count or percentage cutoff. When measured context plus the estimated next-task reserve exceeds the effective window, checkpoint and compact through a supported runtime operation or use a fresh worker.
 
-without rereading the whole codebase each time.
+## Prepare and dispatch
 
-If the user invokes this skill with only `Phase 2`, `Chunk 3`, `next`, or similar, reuse the active plan from the ledger.
-If there is no active plan and the user did not provide a plan path or plan content, ask for the plan.
-If the user did not provide the exact unit, ask for the exact unit.
+Give each new worker a compact packet containing:
 
-## Intake
+1. Task ID, purpose, selected plan excerpt, and acceptance criteria.
+2. Exact checkout, branch, file ownership, and exclusions.
+3. Relevant files and symbols, established decisions, and dependency evidence.
+4. Checks to run, assigned peers, and integration owner.
 
-1. Resolve the plan source:
-   - explicit plan path
-   - pasted plan content
-   - active plan from the ledger
+Give a resumed worker only the new task, changed constraints, relevant peer updates, and changed checkout state. Do not repeat the full plan or broad discovery. The orchestrator maps scope; the worker reads implementation details.
 
-2. Resolve the target unit:
-   - `Phase 1`
-   - `Chunk 2`
-   - `Deliverable 3`
-   - equivalent heading
+Use [the state helper](references/state.md) to reserve assignments before dispatch and bind returned runtime IDs afterward. Keep one ledger per active plan, outside tracked product files; share its absolute path across repositories. The helper validates records, not code behavior, and never spawns agents.
 
-3. Identify parallelizable units if the plan allows for it.
+If spawn delivery is uncertain, inspect the runtime and reservation before retrying. Never turn a timeout into a duplicate assignment. A blocked worker retains its assignment until resumed or explicitly released after it has stopped.
 
-4. Confirm which units to execute with the user, if not specified and there are multiple units that can be done in parallel.
-   (e.g. "Phase 2, Chunk 2 and Chunk 3 can be done in either order or in parallel. Which would you like to do?").
+## Communicate and verify
 
-5. Confirm with the user, if not specified, how the work should be built, using worktrees or in the current branch.
+- Send messages only when they unblock work, change an interface, report a failure, or deliver a result. Prefer direct assigned-peer messages to broadcasts.
+- Include task ID, repository, interface revision or checkout evidence, the change or question, and the needed action. Messages do not transfer files or expand edit authority.
+- Let workers ask focused questions. The orchestrator owns scope changes and resolves incompatible interface decisions.
+- Prefer native completion notifications or blocking event waits. Avoid repeated status polling and repeated unchanged reports.
+- Workers run relevant checks and return commands, outcomes, and omissions. Inspect their diff and evidence; rerun checks only for changed inputs, integration, failures, or unresolved risk.
+- Require verification on the combined result when repositories or branches interact. A pane state of `idle` or `done` is not evidence of task completion.
+- Record the result and handoff. Use available runtime usage data for comparisons; include parent and worker costs, cache use, time, and correctness. Never claim measured savings without measurements.
 
-6. If worktrees are used, confirm if the implementers should open a Pull Request when the implementation is complete.
+## Report
 
-7. After confirmation, start delegation.
+Report the result, checkout/branch, checks, and blockers briefly. Keep worker IDs and detailed state in the ledger. Continue within the authorized scope; stop at its boundary.
 
-## Verify Predecessor
+When a finished worker is shut down, prune its worktree in the same step: first prove the checkout is clean (`git status --porcelain` empty — no modified, staged, or untracked files) and its branch is pushed or merged; then `git worktree remove <path>` and `git worktree prune`. Anything uncommitted stops the removal — report it and leave the worktree in place. Never `--force`, never remove a worktree a live worker still holds, and never delete the branch.
 
-Before delegating, verify that the previous unit is already on `main`.
+A worker is **finished** when its task is checkpointed COMPLETE and its successor task is assigned to a different worker (or there is none). Send a finished worker a shutdown request and say so in the report, then prune its worktree as above; an idle finished worker is clutter and cached context, not capacity. Keep a worker alive only while it holds the next assigned unit, or while its PR is under review and a correction round is plausible — and state which reason applies.
 
-Examples:
-
-```text
-Phase 2 depends on Phase 1
-Chunk 3 depends on Chunk 2
-Deliverable 2 depends on Deliverable 1
-```
-
-If this is the first unit, record:
-
-```text
-No predecessor verification required.
-```
-
-If there is a predecessor, verify it using concrete checks on latest `main`:
-
-- expected files exist
-- expected symbols exist
-- expected routes, schemas, migrations, or tests exist
-- expected behavior appears in code or test coverage
-
-If the predecessor is missing or uncertain, stop and report the blocker.
-
-Do not delegate implementation when predecessor verification failed.
-
-## Instructions for Implementer
-
-The `implementer` subagent may run on a cheap mini model.
-
-Before delegating, make the packet extra explicit:
-
-- exact selected unit
-- worktree path
-- branch
-- what to change
-- what not to change
-- relevant plan excerpt
-- checks to run
-
-Do not delegate vague architecture, broad refactors, or unclear tasks to `implementer`.
-
-If the unit is too broad or unclear, stop and report the blocker instead of delegating.
-
-## Delegate
-
-Delegate to:
-
-```text
-implementer
-```
-
-Tell the subagent:
-
-```text
-Implement only the selected unit from this plan.
-
-## INSTRUCTIONS AND CONTEXT
-${IMPLEMENTATION_CONTEXT}
-
-## WHAT TO CHANGE
-${WHAT_TO_CHANGE}
-
-## WHAT NOT TO CHANGE
-${WHAT_NOT_TO_CHANGE}
-
-## RELEVANT PLAN EXCERPT
-${RELEVANT_PLAN_EXCERPT}
-
-## CHECKS TO RUN
-${CHECKS_TO_RUN}
-```
-
-## Final Response
-
-After the subagent returns, tell the user:
-
-1. Plan path.
-2. Selected unit.
-3. Worktree path.
-4. Branch.
-5. Quality gate result.
-6. Whether the worktree was deleted.
-7. Any blockers or manual follow-up.
-8. Updated active plan ledger summary.
-
-## Implementation Follow-ups
-
-When the implementation is complete, update the active plan ledger and offer the user the option to orchestrate the next unit in the plan.
-
-## Mandatory Rules
-
-- Never mention in the code, Pull Requests or commits the Plan, Phases, Chunks, or Deliverable. The code should be unaware of the plan structure, instead use meaningful wording that describes the actual implementation.
+Never mention plan phases, chunks, or deliverable numbers in product code, commit messages, or PR descriptions. Describe the implemented behavior.
