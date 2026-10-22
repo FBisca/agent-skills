@@ -87,6 +87,9 @@ export const master = (input, output) => {
     "volume=10dB,alimiter=limit=-2dB:attack=3:release=80:level=false";
   const bed = "anoisesrc=color=pink:amplitude=0.003:sample_rate=48000,aformat=channel_layouts=stereo";
   const graph = loudnorm => `[0:a]${chain}[v];${bed}[n];[v][n]amix=inputs=2:duration=first:normalize=0,${loudnorm}[o]`;
+  // loudnorm's linear gain can lift the pre-limiter's -2 dB ceiling past the target; a 4x-oversampled
+  // limiter after it catches those true peaks without moving the loudness.
+  const truePeakGuard = "aresample=192000,alimiter=limit=-2dB:attack=1:release=50:level=false,aresample=48000";
   const target = "I=-14:TP=-1.5:LRA=9"; // -1.5 leaves room for the AAC encode overshoot (lands near -1.1 to -1.7 dBTP)
   const probe = spawnSync(
     "ffmpeg",
@@ -100,7 +103,7 @@ export const master = (input, output) => {
   const measured = `measured_I=${m.input_i}:measured_TP=${m.input_tp}:measured_LRA=${m.input_lra}:measured_thresh=${m.input_thresh}:offset=${m.target_offset}`;
   execFileSync("ffmpeg", [
     "-hide_banner", "-loglevel", "error", "-y", "-i", input,
-    "-filter_complex", graph(`loudnorm=${target}:${measured}:linear=true,aresample=48000`),
+    "-filter_complex", graph(`loudnorm=${target}:${measured}:linear=true,${truePeakGuard}`),
     "-map", "0:v", "-map", "[o]", "-c:v", "copy", "-c:a", "aac", "-b:a", "384k", "-movflags", "+faststart", output
   ]);
 };

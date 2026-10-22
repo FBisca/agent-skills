@@ -28,7 +28,8 @@ const LEXICON = [
   [/\bvs\.?(?=\s)/gi, "versus"],
   [/\betc\./gi, "and so on"],
   [/\band\/or\b/gi, "and or"],
-  [/\bA\/B\b/g, "A B"],
+  [/\bA\/B\b/g, "AB"],
+  [/\b[A-Z](?: [A-Z]\b)+/g, m => m.replace(/ /g, "")], // "A I" reads as "uh eye": a lone A is the article; joined capitals are spelled
   [/\bI\/O\b/g, "I O"],
   [/\b([A-Z][A-Za-z]*)\.md\b/g, "$1 dot M D"],
   [/\bQwen\b/g, "chwen"],

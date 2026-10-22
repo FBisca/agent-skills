@@ -20,7 +20,7 @@ A tutorial film in four layers: the script teaches, the narrator records it, the
 
 ## Steps
 
-1. **Source.** Read the real material: the code and its files, the PR diff, or the lesson note. Then write down three things:
+1. **Source.** Read the real material: the code and its files, the PR diff, or the lesson note. When the video belongs to a project whose index note links a video format note, read it too: its rules override this skill's defaults. Then write down three things:
    - The `message`: the one sentence the viewer leaves with.
    - One running example, with concrete actors, ids and figures.
    - The facts allowed on screen.
@@ -48,16 +48,18 @@ A tutorial film in four layers: the script teaches, the narrator records it, the
 
    Done when every Frame `src` and its `.motion.json` exist on disk. Completion notifications don't count; step 6 lists what is missing, and you re-dispatch only those workers.
 6. **Assemble and check.** Run `node <ev>/scripts/assemble.mjs <project>`. It checks for missing files and fonts, assembles `index.html` (frames plus each scene's voice), injects and verifies the transitions, runs `hf check`, and writes contact sheets at each frame's poster time. Look at every sheet for text that reads wrong, casing off the table in `references/visuals.md`, overflow, front-loaded frames and broken callbacks. Fix the frame, set it to `status: animated`, and re-run. Done when the script exits 0 and the sheets look right.
-7. **Final look.** Run `hf preview --background`, open the URL it prints, and tell the user they can edit there. If it printed a "Keep editing by chatting with Framey" line, add that the **Edit with Framey** button opens the HyperFrames desktop app. Ask one question: render, or revise first? Stop the preview with `hf preview --stop` once they answer.
-8. **Finish.** Run `node <ev>/scripts/finish.mjs <project>` in the background (~4 min for 8 min of video). It renders, masters the audio to −14 LUFS / −1 dBTP, verifies the master and writes `<videos-dir>/<slug>.mp4`. Done when it prints the duration, loudness and true peak.
-9. **Hand over.** Embed `![[<slug>.mp4]]` in the source note (a `## Video` section) and the project index, and mark any version it replaces as superseded. Report the path, duration, scene count and loudness. Pass on the render's Framey line in your own words, and offer `open <file>`.
+7. **Review.** Before the user sees a cut, run the `scene-reviewer` agent (Agent tool) on the project, passing the render path and the user's notes when they exist. Fix its Blocker and Fix findings, re-assemble, and re-run it on the frames you touched (`scenes`). Done when it returns no Blocker or Fix, or the user has heard why one stays.
+8. **Final look.** Run `hf preview --background`, open the URL it prints, and tell the user they can edit there. If it printed a "Keep editing by chatting with Framey" line, add that the **Edit with Framey** button opens the HyperFrames desktop app. Ask one question: render, or revise first? Stop the preview with `hf preview --stop` once they answer.
+9. **Finish.** Run `node <ev>/scripts/finish.mjs <project>` in the background (~4 min for 8 min of video). It renders, masters the audio to −14 LUFS / −1 dBTP, verifies the master and writes `<videos-dir>/<slug>.mp4`. Done when it prints the duration, loudness and true peak.
+10. **Hand over.** Embed `![[<slug>.mp4]]` in the source note (a `## Video` section) and the project index, and mark any version it replaces as superseded. Report the path, duration, scene count and loudness. Pass on the render's Framey line in your own words, and offer `open <file>`.
 
 ## Changing a built video
 
 - **Narration:** edit the script and run `node <ev>/scripts/narrate.mjs <script> <project>`. It names the scenes whose timing changed. Update those Frame blocks from `cues.md`, rebuild those frames, then run assemble.
 - **A scene:** edit `compositions/frames/NN-<id>.html`, or re-dispatch that frame's worker file. Then run assemble.
+- **Before handing a change back:** run step 7 with the user's notes; the render they watched becomes its baseline for regressions.
 - **Edits the user made in Studio or the desktop app:** they are already in the files. Run `hf catch-up` first if a command asks for it.
 
 ## Cost
 
-W1.1 (25 scenes, 8 min, workers on Opus) took ~14% of a weekly Max window. Nearly all of it went to the nine frame workers, which built their own render harnesses; the worker prompt now limits them to lint, and they run on Sonnet. A 5-hour session limit stopped one worker mid-wave, and the files it had written survived. If Sonnet frames come back weak on the contact sheet, re-dispatch just those workers without the `model` override. To spend less still, use ~15 scenes and give each worker 3 frames. Check `hf usage --json` before steps 5 and 8.
+W1.1 (25 scenes, 8 min, workers on Opus) took ~14% of a weekly Max window. Nearly all of it went to the nine frame workers, which built their own render harnesses; the worker prompt now limits them to lint, and they run on Sonnet. A 5-hour session limit stopped one worker mid-wave, and the files it had written survived. If Sonnet frames come back weak on the contact sheet, re-dispatch just those workers without the `model` override. To spend less still, use ~15 scenes and give each worker 3 frames. Check `hf usage --json` before steps 5 and 9.

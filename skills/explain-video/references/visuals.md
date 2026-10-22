@@ -9,6 +9,7 @@ Each scene is one invented visual idea that develops with the voice. That, more 
 - **Guardrail from the rejected v2:** no bullet-list slides, plain data tables, lane-and-arrow sequence diagrams, identical card grids, or narration sentences on screen. When a beat seems to need one, show its surface or a metaphor: a list of failures becomes evidence cards pinned to a board, a request flow becomes a transcript that streams, a price table becomes a dial that turns.
 - **Callbacks:** the opening's evidence returns in the payoff, and the model diagram returns wherever it's used. Specify each recurring prop once under `## Shared props` and draw it identically every time.
 - **Framing variety:** no two consecutive frames share a framing (close-up, wide board, split, full-bleed type, code surface).
+- **Readable on the accent:** text or icons on a bright accent fill (a chartreuse chip, highlight or bookmark) use the dark ground color, never white.
 - **One accent moment per frame** (`coral:` in code-editorial): the single thing that draws on.
 - **Real figures only:** every number comes from the script or its sources.
 - **The bottom ~17% stays clear.**
@@ -48,6 +49,8 @@ Each kind of text has one casing; lowercase belongs only to literal code and uni
 - **Held breathers:** 2–4 per film, right after a big idea. Name them in the Video direction.
 - **Cite each frame's motion** from `<hf>/hyperframes-animation/blueprints-index.md` (`blueprint: <id> (Adapt)`: keep the signature and restate it in the block) or, when no blueprint fits, the rules from `rules-index.md` it composes (`blueprint: compose`). Ids come from those indexes; the packet builder inlines their bodies for the worker. W1.1 adapted 13 blueprints across 16 frames and composed 9.
 - **Named looks** (a terminal run, a chart, a marker highlight): run `hf catalog --query "<look>" --json` before planning to build one, install the picks with `hf add <name> --no-clipboard --json` before dispatch, and name the component in the block.
+
+**Definitions hold.** When a visual completes a unit the viewer must learn (one turn, one request, one cycle), hold the finished state for at least 1.5 s, with narration that names it ("That was turn one."), before the next unit starts.
 
 ## Transitions
 
