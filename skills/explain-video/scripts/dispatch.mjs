@@ -8,7 +8,7 @@
 //    explicit --groups of frame numbers (group frames that share props so one worker draws them alike)
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { fail, hfCli, hfSkill, parseArgs, run, storyboardFrames } from "./lib.mjs";
+import { fail, hfCli, hfSkill, parseArgs, run, SKILL_DIR, storyboardFrames } from "./lib.mjs";
 
 const { positional: [projectArg], opts } = parseArgs(["per", "groups"]);
 if (!projectArg) fail('usage: dispatch.mjs <project-dir> [--per 3 | --groups "01,02,22|03,23,25|…"]');
@@ -19,6 +19,8 @@ const hf = join(dir, ".hyperframes");
 const md = readFileSync(join(dir, "STORYBOARD.md"), "utf8");
 const section = name => md.match(new RegExp(`^## ${name}[^\\n]*\\n([\\s\\S]*?)(?=^## |(?![\\s\\S]))`, "m"))?.[1].trim();
 const direction = section("Video direction");
+// The casing table is film-independent, so it comes from the skill's own reference rather than each storyboard.
+const casing = readFileSync(join(SKILL_DIR, "references", "visuals.md"), "utf8").match(/^## Casing\n([\s\S]*?)(?=^## )/m)?.[1].trim();
 if (!direction) fail("STORYBOARD.md has no `## Video direction` section (references/visuals.md)");
 const props = section("Shared props");
 const frames = storyboardFrames(dir);
@@ -43,7 +45,7 @@ ${components.length ? `- Installed registry components you may adapt when your b
 ### Video direction (applies to every frame)
 
 ${direction}
-${props ? `\n### Shared props (draw them exactly like this so frames match across workers)\n\n${props}\n` : ""}`
+${casing ? `\n### Casing (every visible word)\n\n${casing}\n` : ""}${props ? `\n### Shared props (draw them exactly like this so frames match across workers)\n\n${props}\n` : ""}`
 );
 
 const workers = Math.ceil(frames.length / per);

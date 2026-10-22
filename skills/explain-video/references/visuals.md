@@ -13,6 +13,25 @@ Each scene is one invented visual idea that develops with the voice. That, more 
 - **Real figures only:** every number comes from the script or its sources.
 - **The bottom ~17% stays clear.**
 
+## Casing
+
+Each kind of text has one casing; lowercase belongs only to literal code and units.
+
+| Text | Casing | Example |
+|---|---|---|
+| Headlines and questions | Sentence case | "Why did it ignore NEVER?" |
+| Concept names and diagram labels | Capitalized | Weights · Context · Harness · Attention |
+| Descriptors, chips, captions, axis and state labels | Sentence case | "Attention budget" · "Tool result" · "Frozen · cutoff" |
+| Kickers (small tracked mono, ≤ 3 words) | ALL CAPS | ✱ MYSTERY 1 |
+| Code, file names, commands, tokens, config values | Exactly as in the source | `CLAUDE.md` · `dates.parseStrict()` · `effort: low` |
+| Quoted source text | Exactly as written, in mono | NEVER (quoted from CLAUDE.md) |
+| Products and proper nouns | Official casing | Claude Code · GPT-6 · Bash, Edit, Read |
+| Units after a number | Lowercase | 12.40 / session · 200 ms · 1M tokens |
+
+- A word that continues a sentence (a headline built word by word, a unit phrase after a figure) keeps sentence case: "Steering models through context".
+- Emphasis comes from italic or the accent, never from capitals; ALL CAPS is for kickers and verbatim quotes only.
+- The table covers every string that reaches the screen, including text a script types, swaps or counts in (status words, typed lines, label arrays).
+
 ## Motion
 
 - **Every reveal lands on its cue.** Scene lines carry times from `.hyperframes/cues.md`; at t=0 only what the voice is saying is on screen. A frame that front-loads and then holds is the slideshow failure. `~` times are estimates inside a spoken chunk: give those reveals a little slack, or split the sentence in the script.
