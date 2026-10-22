@@ -32,6 +32,14 @@ Each kind of text has one casing; lowercase belongs only to literal code and uni
 - Emphasis comes from italic or the accent, never from capitals; ALL CAPS is for kickers and verbatim quotes only.
 - The table covers every string that reaches the screen, including text a script types, swaps or counts in (status words, typed lines, label arrays).
 
+## Real products and companies
+
+- A real product or company named on screen (Claude Code, Anthropic, GitHub, OpenAI) carries its official mark: before the name in a chip or label, at text height, and before a credit line ("✱ J-SPACE · [mark] ANTHROPIC").
+- Marks come only from `node <ev>/scripts/logos.mjs <project> <slug…>` (official traced SVGs, slugs as on simpleicons.org), staged before dispatch. Draw them from `assets/logos/logos.json` as an inline `<svg viewBox="0 0 24 24"><path d="…"/></svg>`.
+- Colour: the brand colour from the manifest, or one flat colour of the look (white or ink) when the brand colour fails contrast on its ground. The shape stays as delivered: no outline, stretch, effect or redrawing; it may fade or move as a whole.
+- Referential use only: the mark identifies the thing being discussed. It never stands in for the series' own brand, sits beside the series logo, or implies endorsement; follow the `guidelines` link when the manifest has one.
+- A product without a mark in Simple Icons keeps its name as a wordmark in official casing. Commands, tool names and files (`npm test`, Bash, CLAUDE.md) stay text.
+
 ## Motion
 
 - **Every reveal lands on its cue.** Scene lines carry times from `.hyperframes/cues.md`; at t=0 only what the voice is saying is on screen. A frame that front-loads and then holds is the slideshow failure. `~` times are estimates inside a spoken chunk: give those reveals a little slack, or split the sentence in the script.

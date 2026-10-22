@@ -19,8 +19,13 @@ const hf = join(dir, ".hyperframes");
 const md = readFileSync(join(dir, "STORYBOARD.md"), "utf8");
 const section = name => md.match(new RegExp(`^## ${name}[^\\n]*\\n([\\s\\S]*?)(?=^## |(?![\\s\\S]))`, "m"))?.[1].trim();
 const direction = section("Video direction");
-// The casing table is film-independent, so it comes from the skill's own reference rather than each storyboard.
-const casing = readFileSync(join(SKILL_DIR, "references", "visuals.md"), "utf8").match(/^## Casing\n([\s\S]*?)(?=^## )/m)?.[1].trim();
+// Casing and brand marks are film-independent, so they come from the skill's own reference, not each storyboard.
+const visuals = readFileSync(join(SKILL_DIR, "references", "visuals.md"), "utf8");
+const rule = name => visuals.match(new RegExp(`^## ${name}\\n([\\s\\S]*?)(?=^## )`, "m"))?.[1].trim();
+const casing = rule("Casing");
+const brands = rule("Real products and companies");
+const logosFile = join(dir, "assets", "logos", "logos.json");
+const logos = existsSync(logosFile) ? Object.entries(JSON.parse(readFileSync(logosFile, "utf8"))) : [];
 if (!direction) fail("STORYBOARD.md has no `## Video direction` section (references/visuals.md)");
 const props = section("Shared props");
 const frames = storyboardFrames(dir);
@@ -41,11 +46,11 @@ writeFileSync(
 - Timing: every reveal lands on the time in your block's Scene lines; they are measured from the narration. At t=0 only what the voice is saying is on screen.
 - Glyphs the staged fonts lack (✱, arrows, check marks, ≈) are drawn as inline SVG.
 - Naming: start every id and class with your frame's number, e.g. \`f04-slip\` (the animation map can't parse names that start with a digit).
-${components.length ? `- Installed registry components you may adapt when your block names them (read each file's WIRING comment; recolor to frame.md tokens): ${components.join(", ")}\n` : ""}
+${logos.length ? `- Staged brand marks (inline the \`path\` from PROJECT_DIR/assets/logos/logos.json): ${logos.map(([slug, l]) => `${l.title} (${slug}, ${l.hex})`).join(", ")}\n` : ""}${components.length ? `- Installed registry components you may adapt when your block names them (read each file's WIRING comment; recolor to frame.md tokens): ${components.join(", ")}\n` : ""}
 ### Video direction (applies to every frame)
 
 ${direction}
-${casing ? `\n### Casing (every visible word)\n\n${casing}\n` : ""}${props ? `\n### Shared props (draw them exactly like this so frames match across workers)\n\n${props}\n` : ""}`
+${casing ? `\n### Casing (every visible word)\n\n${casing}\n` : ""}${brands ? `\n### Real products and companies\n\n${brands}\n` : ""}${props ? `\n### Shared props (draw them exactly like this so frames match across workers)\n\n${props}\n` : ""}`
 );
 
 const workers = Math.ceil(frames.length / per);

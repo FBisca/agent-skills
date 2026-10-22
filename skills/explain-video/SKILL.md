@@ -39,7 +39,7 @@ A tutorial film in four layers: the script teaches, the narrator records it, the
    - One Frame block per scene, with every reveal timed from `cues.md`.
    - Motion cited from `<ev>/hyperframes-0.8.184/hyperframes-animation/{blueprints,rules}-index.md`.
 
-   Search the registry for any named look, and install the picks now, before dispatch. Done when:
+   Search the registry for any named look, and install the picks now, before dispatch. Stage the marks of real products named on screen with `node <ev>/scripts/logos.mjs <project> <slug…>`. Done when:
    - Every scene has a block with a distinct visual idea, a citation, `focal`, `coral`, `transition_in` and timed Scene lines.
    - No block uses a guardrail form.
 5. **Build.** Run `hf usage --json` and tell the user the weekly figure. Then:
