@@ -1,0 +1,8 @@
+{
+  "name": "explain-video-narrator",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "kokoro-js": "^1.2.1"
+  }
+}
