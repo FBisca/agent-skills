@@ -1,69 +1,73 @@
 ---
 name: start-planning
-description: Create an implementation plan for a feature or initiative. Use when the user wants to plan a feature, start an implementation plan, or says "let's plan X".
+description: Plan one feature spec-driven, from its sources to WHEN/THEN scenarios and vertical tickets, then stop for approval. Use when the user wants to plan a feature, says "let's plan X", or hands over a PRD, Linear issue or vault note to build.
 ---
 
-# Start Planning
+# Start planning
 
-## Step 1 — Intake
+**Input:** a feature, plus whatever already describes it: a PRD, Linear issues, vault notes, a living spec.
+**Output:** one approved **plan** at `docs/plans/YYYY-MM-DD-<slug>.plan.md`, dated the day it is written and never re-dated.
+**Hand-off:** `/orchestrate <plan-path>` builds it.
 
-If the user has not yet provided a clear feature idea or spec, ask:
+Three documents, three jobs: the **PRD** says why and for whom; the **plan** turns one piece of it into testable scenarios and tickets; the **living spec** (`docs/specs/<area>.md`) records what the system does today.
 
-> What feature or initiative do you want to plan? Give me a brief description — one or two sentences is enough to start.
+## 1. Gather
 
-Wait for the answer before continuing.
+When no PRD covers the feature, ask the user to run `/to-spec` and stop. Resume once the PRD exists. A product question that surfaces later goes back to the PRD owner, not into the plan.
 
----
+Dispatch a fresh-context subagent to gather. It lists every source with its link (the PRD, the Linear project and issues, the vault project note and its decision notes, RFCs, the living spec for the area), extracts each decision they already settle with its source, and reads the code the feature touches. When a decision depends on real data (backfill, migration, existing records), it runs read-only queries and returns the counts and edge cases: empty sets, conflicts, departed or archived owners.
 
-## Step 2 — Understand the domain context
+Done when the subagent has returned the Sources table and every settled decision with its source.
 
-Before interviewing the user, orient yourself by reading relevant documentation and code. This will help you ask better questions and write a more informed plan.
+## 2. Grill the gaps
 
-Do not dump file contents to the user. Use them to ask better questions.
+Call the Skill tool with `grilling` on the decisions the sources leave open or contradict, bringing Gather's counts and edge cases into the questions. Settled decisions enter the plan unasked, with their source.
 
----
+Done when the grilling frontier is empty.
 
-## Step 3 — Interview with grill-me
+## 3. Write the plan
 
-Invoke the `/grill-me` skill now.
+Keep these headings and columns: other skills parse them.
 
-Do not move to Step 4 until the interview is over.
+```markdown
+# Plan: <feature>
 
----
+Slug: `<slug>`. Living spec: `docs/specs/<area>.md`. Status: AWAITING APPROVAL.
 
-## Step 4 — Write the plan
+## Why now
+## Sources        (table: Source | What it settles)
+## Decisions      (table: # | Choice | Rejected | Why | Source)
+## Scenarios
+- **S1** WHEN <condition>, THEN <observable outcome>.
+## Out of scope
+## Risks          (security, performance, migration, rollback: each covered or n/a)
+## Seams          (where tests attach: the highest existing seam, as few as possible)
+## Tickets
+| # | What it delivers | Satisfies | Blocked by | Paths | Owner | Status |
+|---|---|---|---|---|---|---|
+| T1 | <end-to-end behaviour> | S1, S2 | none | src/feature/, tests/feature.test.ts | agent | TO-DO |
+```
 
-Write a plan file to `docs/plans/YYYY-MM-DD-<feature-slug>.plan.md`, where the date is the day the plan is written. It stays fixed when the plan is later edited — it records when the thinking happened, not when it was last touched.
+Each scenario is one observable behaviour that a test would catch if it broke. IDs are `S<n>`, with an optional letter suffix (`S4a`). Every requirement becomes a scenario; one you can't phrase as WHEN/THEN is an open decision, so take it back to step 2.
 
-### What every plan must answer
+Done when every requirement is a scenario, every decision row names its rejected option and source, and Risks has all four lines.
 
-These are **questions, not section headings**. Choose headings that fit the work. Every plan must make the following five things unambiguous to a reader who has never seen it before:
+## 4. Slice into tickets
 
-1. **Why now** — what triggered this work, what breaks without it, what scenario or constraint motivates it.
-2. **What changes in the system** — which records, services, agents, files, or contracts shift. Name them.
-3. **Locked vs. open** — which design decisions are settled (and the reasoning), which are still being explored. If everything is open, say so explicitly.
-4. **How it will be delivered** — the work split into Phases, each independently mergeable with clear goal, deliverables, and definition of done.
-5. **How we'll know it worked** — observable behaviour, tests, metrics, or quality gates that distinguish "done" from "not done".
+Each ticket is a **tracer bullet**: one narrow path through every layer it needs (schema, API, UI, test), landing as one PR under ~800 hand-written lines.
 
-If a plan does not answer all five, it is not finished.
+- **Satisfies**: the S-IDs the ticket makes true, as a comma list or a range (`S1–S4`). Every scenario sits in some ticket's Satisfies.
+- **Blocked by**: the ticket IDs that must merge first, comma-separated, or `none`. A blocked ticket branches from main after its blockers merge; stacked branches break under squash merge.
+- **Paths**: the repo-relative files, directories (ending `/`) or globs the ticket may change, comma-separated. The build is fenced to them.
+- **Owner**: `agent` for code. Every step a person runs or approves (prod data apply, sign-off, deploy) is its own ticket with that person as Owner; a code PR never closes it.
+- **Status**: TO-DO, IN PROGRESS or COMPLETE.
 
-### Rules for Phases
+A wide mechanical refactor runs as expand–contract: expand, one ticket per migrate batch, then contract.
 
-- Each Phase must contain at minimum: **goal**, **deliverables**, **definition of done**. This is what `/orchestrate` needs to execute it.
-- Each Phase must be independently reviewable and mergeable.
-- Each Phase must be demonstrable — there is something concrete to show when it lands.
-- No Phase may depend on a later Phase in the same plan.
-- Prefer 3–6 Phases per plan. If the scope is smaller, 1–2 Phases is fine.
-- If the planning requires more than 6 Phases, it is probably too big. Suggest splitting the work into multiple plans.
-- Each Phase must use a triage process for its work items: - `TO-DO` — not started. - `IN PROGRESS` — currently being worked on. - `COMPLETE` — finished.
-- Each deliverable inside a Phase should have one of these statuses.
+When the repo is tracked in Linear, create one sub-issue per ticket under the feature issue. The plan stays the source of truth.
 
----
+Done when every scenario appears in some ticket's Satisfies.
 
-## Step 5 — Confirm and close
+## 5. Approve
 
-After writing the file, tell the user:
-
-1. The full path of the plan file.
-2. A one-line summary of each Phase.
-3. That they can use `/orchestrate` to implement the plan when ready.
+Show the plan path, the decisions, the scenarios and the tickets table, then stop for one approval. Build nothing at this point. On approval, set `Status: APPROVED <date>` and hand off to `/orchestrate <plan-path>`.
