@@ -7,11 +7,11 @@ Output: one `PASS|FAIL|SKIPPED <check>: detail` line per check. Exit 0 if nothin
 
 Checks (no --gate = structural only):
   structural: stage-value, assumption-values, premortem-links, gate-reason, hours-logged
-  --gate 1:   structural + frame-sources, unknown-to-assumption, top3-ready
-  --gate 2:   gate 1 + assumptions-closed, answers-sourced, decider-signoff
+  --gate 1:   structural + frame-sources, frame-owners, unknown-to-assumption, top3-ready
+  --gate 2:   gate 1 + assumptions-closed, answers-sourced, people-cap, decider-signoff
 A structural check whose file is absent prints SKIPPED. A gate check whose file is absent FAILs
 (gate 1 needs frame.md, assumptions.md, premortem.md; gate 2 also needs answers.md, gates.md).
-`entry: decided` + --gate 2: frame-sources, unknown-to-assumption, top3-ready, premortem-links print
+`entry: decided` + --gate 2: frame-sources, frame-owners, unknown-to-assumption, top3-ready, premortem-links print
 SKIPPED; the other checks run.
 
 Contract decisions (files as in the plan's idea-folder table):
@@ -35,6 +35,12 @@ Contract decisions (files as in the plan's idea-folder table):
   assumption-values). Matching is case-insensitive. Empty owner/test/result cells are allowed by
   assumption-values (other checks need them). Cells split on unescaped `|` only; `\|` (Obsidian
   alias `[[note\|alias]]`) stays inside the cell.
+- frame-owners (gates 1 and 2): every `Source: unknown` question section has an `Owner: <type>` line,
+  type one of the owner values above. Owner parsing (frame and answers alike): case-insensitive, first
+  token of the value (`Owner: Finance (role)` is finance, `Owner: Engineering via Gather` is engineering). Questions with
+  another Source need none.
+- people-cap (gate 2): at most 12 answers.md entries (PEOPLE_CAP) may have an Owner other than
+  engineering. An entry with no Owner counts against the cap; an absent answers.md counts 0 (PASS). It runs for `entry: decided` too.
 - An assumption cites frame question Q<n> when the token `Q<n>` appears in its assumption cell.
 - top3-ready: at least 3 assumptions with importance high have a non-empty owner and test.
 - assumptions-closed: each high-importance assumption has a non-empty result (`accepted by <role>`
@@ -59,6 +65,7 @@ STAGES = ["framing", "gate1", "answering", "gate2", "prd"]
 VALID_STAGES = STAGES + ["killed", "reshaped"]
 RISKS = {"value", "usability", "feasibility", "viability"}
 OWNERS = {"operator/user", "finance", "compliance", "decider", "engineering"}
+PEOPLE_CAP = 12  # max answers.md entries whose Owner is not engineering
 LEVELS = {"high", "med", "low"}
 GATE_LINE = re.compile(
     r"^\s*[-*]\s+\d{4}-\d\d-\d\d\s+gate([12]):\s*(kill|reshape|continue|pass by [^:]+?)\s*(?::\s*(.*?))?\s*$")
@@ -190,18 +197,34 @@ def frame_questions(text):
         m = re.match(r"(Q\d+)\b", head)
         if m:
             src = re.search(r"^\s*Source:\s*(me|unknown|lookup\s+\S.*?)\s*$", body, re.M | re.I)
-            out.append((m.group(1), src.group(1).split()[0].lower() if src else None))
+            out.append((m.group(1), src.group(1).split()[0].lower() if src else None, body))
     return out
 
 
 def check_frame_sources(text):
-    bad = [q for q, s in frame_questions(text) if s is None]
+    bad = [q for q, s, _ in frame_questions(text) if s is None]
     return result(not bad, "frame-sources", "no Source: " + ", ".join(bad) if bad else "")
+
+
+def owner_of(body):
+    """The `Owner:` value's first token, lowercased (`Owner: Finance (role)` -> finance), else ""."""
+    m = re.search(r"^\s*Owner:\s*(\S+)", body, re.M | re.I)
+    return m.group(1).lower().rstrip(",.;:)") if m else ""
+
+
+def check_frame_owners(text):
+    bad = [q for q, src, body in frame_questions(text) if src == "unknown" and owner_of(body) not in OWNERS]
+    return result(not bad, "frame-owners", "no D10 Owner: " + ", ".join(bad) if bad else "")
+
+
+def check_people_cap(text):
+    n = sum(1 for _, body in sections(text or "") if owner_of(body) != "engineering")
+    return result(n <= PEOPLE_CAP, "people-cap", f"{n} items sent to people (max {PEOPLE_CAP})")
 
 
 def check_unknown(text, rows):
     cited = " ".join(r.get("assumption", "") for r in rows)
-    bad = [q for q, s in frame_questions(text) if s == "unknown" and not re.search(rf"\b{q}\b", cited)]
+    bad = [q for q, s, _ in frame_questions(text) if s == "unknown" and not re.search(rf"\b{q}\b", cited)]
     return result(not bad, "unknown-to-assumption", "uncited: " + ", ".join(bad) if bad else "")
 
 
@@ -218,14 +241,15 @@ def check_closed(rows):
 def check_answers(text):
     bad = []
     for head, body in sections(text):
-        miss = [f for f in ("Owner", "Date", "Link") if not re.search(rf"^\s*{f}:\s*\S", body, re.M)]
+        miss = [f for f in ("Owner", "Date", "Link")
+                if not (owner_of(body) if f == "Owner" else re.search(rf"^\s*{f}:\s*\S", body, re.M))]
         if miss:
             bad.append(f"{head.split()[0] if head else '?'} lacks " + "/".join(miss))
     return result(not bad, "answers-sourced", "; ".join(bad))
 
 
 def nothing_open(frame, rows):
-    unknown = any(s == "unknown" for _, s in frame_questions(frame or ""))
+    unknown = any(s == "unknown" for _, s, _ in frame_questions(frame or ""))
     return not unknown and not [r for r in high(rows) if not r.get("result")]
 
 
@@ -265,7 +289,8 @@ def run(folder, gate):
     out = [check_stage(idea)]
 
     def need(name, file, gate_needs, fn):
-        if skip_gate1 and name in ("frame-sources", "unknown-to-assumption", "top3-ready", "premortem-links"):
+        if skip_gate1 and name in ("frame-sources", "frame-owners", "unknown-to-assumption", "top3-ready",
+                    "premortem-links"):
             return ("SKIPPED", name, "entry: decided")
         if docs[file] is None:
             return missing(name, file) if gate >= gate_needs else ("SKIPPED", name, f"{file} absent")
@@ -277,6 +302,7 @@ def run(folder, gate):
     out.append(check_hours(idea))
     if gate >= 1:
         out.append(need("frame-sources", "frame.md", 1, lambda: check_frame_sources(docs["frame.md"])))
+        out.append(need("frame-owners", "frame.md", 1, lambda: check_frame_owners(docs["frame.md"])))
         out.append(need("unknown-to-assumption", "frame.md", 1,
                         lambda: check_unknown(docs["frame.md"], rows)))
         out.append(need("top3-ready", "assumptions.md", 1, lambda: check_top3(rows)))
@@ -286,6 +312,7 @@ def run(folder, gate):
             out.append(result(True, "answers-sourced", "no answers.md; nothing was open"))
         else:
             out.append(need("answers-sourced", "answers.md", 2, lambda: check_answers(docs["answers.md"])))
+        out.append(check_people_cap(docs["answers.md"]))
         out.append(need("decider-signoff", "gates.md", 2,
                         lambda: check_signoff(docs["gates.md"], idea.get("decider", ""))))
     return out

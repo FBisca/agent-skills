@@ -33,6 +33,7 @@ FRAME = """# Frame
 Source: me
 ## Q2 What does it cost?
 Source: unknown
+Owner: Finance
 ## Q3 Is there data?
 Source: lookup https://example.com/x
 """
@@ -184,7 +185,7 @@ class IdeaCheckTests(unittest.TestCase):
         (self.dir / "premortem.md").unlink()
         code, out, _ = self.run_check("--gate", "2")
         self.assertEqual(code, 0, out)
-        for name in ("frame-sources", "unknown-to-assumption", "top3-ready", "premortem-links"):
+        for name in ("frame-sources", "frame-owners", "unknown-to-assumption", "top3-ready", "premortem-links"):
             self.assertIn(f"SKIPPED {name}", out)
         for name in ("assumptions-closed", "answers-sourced", "decider-signoff", "hours-logged"):
             self.assertIn(f"PASS {name}", out)
@@ -203,7 +204,7 @@ class IdeaCheckTests(unittest.TestCase):
         self.assertTrue(all(l.startswith("PASS ") for l in lines), out)
         names = [l.split()[1].rstrip(":") for l in lines]
         self.assertEqual(len(names), len(set(names)))
-        self.assertEqual(len(names), 11)
+        self.assertEqual(len(names), 13)
 
     def test_S9_escaped_pipe_does_not_shift_columns(self):
         rows = [(ROWS[0][0], "value", r"See [[note\|alias]] (Q2)", *ROWS[0][3:7], ""), *ROWS[1:]]
@@ -271,6 +272,52 @@ class IdeaCheckTests(unittest.TestCase):
         (self.dir / "folder.md").mkdir()
         (self.dir / "bin.md").write_bytes(b"\xff\xfe\x00bad")
         self.assertEqual(self.run_check()[0], 0)
+
+    def test_S26_unknown_question_without_owner_fails_and_is_named(self):
+        for frame in (FRAME.replace("Owner: Finance\n", ""), FRAME.replace("Owner: Finance", "Owner: intern")):
+            self.write("frame.md", frame)
+            for gate in ("1", "2"):
+                code, out, _ = self.run_check("--gate", gate)
+                self.assertEqual(code, 1)
+                self.assertRegex(out, r"FAIL frame-owners.*Q2")
+
+    def test_S26_owner_is_case_insensitive_and_only_unknowns_need_one(self):
+        self.write("frame.md", FRAME.replace("Owner: Finance", "owner:  Operator/User"))
+        self.assertIn("PASS frame-owners", self.run_check("--gate", "1")[1])
+
+    def test_S26_decided_entry_skips_frame_owners(self):
+        self.idea(entry="decided")
+        self.write("frame.md", FRAME.replace("Owner: Finance\n", ""))
+        self.assertIn("SKIPPED frame-owners", self.run_check("--gate", "2")[1])
+
+    def test_S27_more_than_twelve_people_items_fails(self):
+        def answers(n_people, n_eng):
+            e = "## Q{i}\nOwner: {o}\nDate: 2026-10-20\nSummary: s\nLink: https://example.com/a\n"
+            return "".join(e.format(i=i, o="finance") for i in range(n_people)) + \
+                "".join(e.format(i=100 + i, o="Engineering") for i in range(n_eng))
+        self.write("answers.md", answers(13, 5))
+        code, out, _ = self.run_check("--gate", "2")
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL people-cap", out)
+        self.write("answers.md", answers(12, 5))
+        self.assertIn("PASS people-cap", self.run_check("--gate", "2")[1])
+
+    def test_S26_owner_matches_on_first_token(self):
+        self.write("frame.md", FRAME.replace("Owner: Finance", "Owner: finance (role)"))
+        self.assertIn("PASS frame-owners", self.run_check("--gate", "1")[1])
+
+    def test_S27_owner_matches_on_first_token_and_missing_owner_counts(self):
+        e = "## Q{i}\n{o}Date: 2026-10-20\nSummary: s\nLink: https://example.com/a\n"
+        eng = "".join(e.format(i=i, o="Owner: Engineering via Gather\n") for i in range(20))
+        self.write("answers.md", eng)
+        self.assertIn("PASS people-cap", self.run_check("--gate", "2")[1])
+        self.write("answers.md", eng + "".join(e.format(i=50 + i, o="") for i in range(13)))
+        self.assertIn("FAIL people-cap", self.run_check("--gate", "2")[1])
+
+    def test_S27_absent_answers_passes_people_cap(self):
+        (self.dir / "answers.md").unlink()
+        self.write("frame.md", FRAME.replace("Source: unknown", "Source: me"))
+        self.assertIn("PASS people-cap", self.run_check("--gate", "2")[1])
 
 
 if __name__ == "__main__":
