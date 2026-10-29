@@ -79,7 +79,7 @@ If spawn delivery is uncertain, inspect the runtime and reservation before retry
 - Include task ID, repository, interface revision or checkout evidence, the change or question, and the needed action. Messages do not transfer files or expand edit authority.
 - Let workers ask focused questions. The orchestrator owns scope changes and resolves incompatible interface decisions.
 - Prefer native completion notifications or blocking event waits. Avoid repeated status polling and repeated unchanged reports.
-- Wait for PR checks with `wait-checks <owner>/<repo>#<pr> ...` (on PATH from the dotfiles `bin/`), run in the background: one PASS/FAIL line per PR, plus the failed log on FAIL. Do not write ad-hoc watch loops.
+- Wait for PR checks with `~/bin/wait-checks <owner>/<repo>#<pr> ...` (full path: shells started before `~/bin` existed don't have it on PATH), run in the background: one PASS/FAIL line per PR, plus the failed log on FAIL. Do not write ad-hoc watch loops.
 - Workers run relevant checks and return commands, outcomes, and omissions. Inspect their diff and evidence. Rerun checks only for changed inputs, integration, failures, or unresolved risk.
 - Require verification on the combined result when repositories or branches interact. A pane state of `idle` or `done` is not evidence of task completion.
 - Record the result and handoff. Use available runtime usage data for comparisons; include parent and worker costs, cache use, time, and correctness. Never claim measured savings without measurements.
