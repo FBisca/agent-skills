@@ -1,0 +1,5 @@
+interface:
+  display_name: "Idea Frame"
+  short_description: "Grill a raw idea into a frame, assumptions and pre-mortem, then gate it"
+policy:
+  allow_implicit_invocation: false

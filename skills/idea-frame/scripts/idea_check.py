@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Deterministic idea-folder gate (converge-style): structural checks, plus gate 1 / gate 2 checks.
+r"""Deterministic idea-folder gate (converge-style): structural checks, plus gate 1 / gate 2 checks.
 
 Usage: idea_check.py <folder> [--gate 1|2]
 Output: one `PASS|FAIL|SKIPPED <check>: detail` line per check. Exit 0 if nothing FAILs, 1 on any FAIL,
-2 on `REFUSED <path>: <what>` (no `idea.md`; printed to stdout and stderr, no checks run).
+2 on `REFUSED <path>: <what>` (not exactly one index note; printed to stdout and stderr, no checks run).
 
 Checks (no --gate = structural only):
   structural: stage-value, assumption-values, premortem-links, gate-reason, hours-logged
@@ -15,7 +15,10 @@ A structural check whose file is absent prints SKIPPED. A gate check whose file 
 SKIPPED; the other checks run.
 
 Contract decisions (files as in the plan's idea-folder table):
-- idea.md frontmatter is flat `key: value` lines between `---` fences; surrounding quotes on a value are
+- The index note is the ONE root-level `.md` whose frontmatter has `type: project`, titled like the idea
+  (`Robo-Doc.md`); frame, assumptions, premortem, answers and gates `.md` are never candidates, and their own frontmatter is ignored by every check. A BOM is
+  tolerated; directories named `*.md`, non-UTF-8 files and subfolders are not candidates. Zero or
+  several candidates is REFUSED. Its frontmatter is flat `key: value` lines between `---` fences; surrounding quotes on a value are
   stripped (`stage: "gate1"`). `stage` must be one of
   framing, gate1, answering, gate2, prd, killed, reshaped. `entry` defaults to raw.
 - Stage order is framing, gate1, answering, gate2, prd. The completed stages are those strictly before
@@ -45,7 +48,7 @@ Contract decisions (files as in the plan's idea-folder table):
   empty result; otherwise it FAILs.
 - gates.md: `- YYYY-MM-DD gate1|gate2: kill|reshape|continue|pass by <role>[: <reason>]`; kill and
   reshape need a non-empty reason. decider-signoff needs a `gate2: pass by <role>` line whose role
-  equals idea.md's `decider` (case-insensitive).
+  equals the index note's `decider` (case-insensitive).
 """
 import argparse
 import re
@@ -64,9 +67,18 @@ GATE_LINE = re.compile(
 NEVER = 9  # `need` level for structural checks: an absent file is SKIPPED at every gate
 
 
+def load(path):
+    """Text of a file (BOM dropped), or None if it is not a readable UTF-8 file."""
+    try:
+        return path.read_text(encoding="utf-8-sig") if path.is_file() else None
+    except (UnicodeDecodeError, OSError):
+        return None
+
+
 def read(folder, name):
-    p = Path(folder) / name
-    return p.read_text() if p.is_file() else None
+    """A side file's body: its own frontmatter is never read by any check."""
+    text = load(Path(folder) / name)
+    return text if text is None else re.sub(r"\A---\s*\n.*?\n---[ \t]*\n?", "", text, count=1, flags=re.S)
 
 
 def frontmatter(text):
@@ -224,10 +236,26 @@ def check_signoff(text, decider):
                   f"need `gate2: pass by {decider or '<decider>'}`")
 
 
+SIDE_FILES = {"frame.md", "assumptions.md", "premortem.md", "answers.md", "gates.md"}
+
+
+def find_index(folder):
+    """(text, None) of the one root-level .md with `type: project`, else (None, why)."""
+    found = []
+    for p in sorted(Path(folder).glob("*.md")):
+        text = None if p.name in SIDE_FILES else load(p)
+        if text is not None and frontmatter(text).get("type") == "project":
+            found.append(text)
+    if len(found) != 1:
+        return None, (f"{len(found)} index notes" if found else "no index note")
+    return found[0], None
+
+
 def run(folder, gate):
-    text = read(folder, "idea.md")
+    """Result lines, or a refusal string."""
+    text, why = find_index(folder)
     if text is None:
-        return None
+        return why
     idea = frontmatter(text)
     idea["_hours"] = (re.split(r"^## Hours\s*$", text, flags=re.M) + [""])[1].split("\n## ")[0]
     skip_gate1 = gate == 2 and idea.get("entry") == "decided"
@@ -269,8 +297,8 @@ def main(argv=None):
     ap.add_argument("--gate", type=int, choices=[1, 2], default=0)
     a = ap.parse_args(argv)
     results = run(a.folder, a.gate)
-    if results is None:
-        msg = f"REFUSED {Path(a.folder) / 'idea.md'}: no idea.md"
+    if isinstance(results, str):
+        msg = f"REFUSED {a.folder}: {results} (need exactly one root-level .md with `type: project`)"
         print(msg)
         print(msg, file=sys.stderr)
         return 2
