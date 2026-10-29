@@ -1,6 +1,6 @@
 ---
 name: assemble-crew
-description: Proposes a crew for a task: the job as a verb, the fields that do that job best, each member's specific responsibility, and an adversary who tries to break the result. Run only when Felippe types /assemble-crew.
+description: Proposes a crew for a task: the job as a verb, the fields that do that job best, each member's specific responsibility, and an adversary who tries to break the result. Run only when the user types /assemble-crew.
 disable-model-invocation: true
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: deep-prompt
-description: Deepens a task prompt before rewriting it: what a top professional would add, the rawest source material, their methods and tools, and an outside check that the result is right. Run only when Felippe types /deep-prompt.
+description: Deepens a task prompt before rewriting it: what a top professional would add, the rawest source material, their methods and tools, and an outside check that the result is right. Run only when the user types /deep-prompt.
 disable-model-invocation: true
 ---
 
