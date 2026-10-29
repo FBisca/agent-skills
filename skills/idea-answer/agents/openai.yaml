@@ -1,0 +1,5 @@
+interface:
+  display_name: "Idea Answer"
+  short_description: "Route an idea's open questions to their owners and run gate 2"
+policy:
+  allow_implicit_invocation: false
