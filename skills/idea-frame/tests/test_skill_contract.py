@@ -32,7 +32,6 @@ class IdeaFrameContract(unittest.TestCase):
         last = skill.rstrip().splitlines()[-1]
         self.assertTrue(last.startswith("Done when"))
         self.assertIn("`/idea-answer <folder>`", last)
-        self.assertIn("**Hand-off:** `/idea-answer <folder>`", skill)
         self.assertLessEqual(len(skill.splitlines()), 120)
 
     def test_S16_uses_vault_template_and_notes(self):
@@ -54,9 +53,19 @@ class IdeaFrameContract(unittest.TestCase):
                   "engineering: how the system behaves, e.g. ",
                   "never operators; goes to `/start-planning` Gather",
                   "operator/user: how people react to or use it, e.g. ",
-                  "decider: scope and priority, e.g. "):
+                  "decider: scope and priority, e.g. ",
+                  "product-behaviour rules (what the product does in a case): the person who owns that behaviour"):
             self.assertIn(p, text)
         self.assertIn("Every `Source: unknown` question gets an `Owner: <type>` line", text)
+
+    def test_S30_continue_hands_off_to_to_spec_then_optional_answer_round(self):
+        skill = read("SKILL.md")
+        last = skill.rstrip().splitlines()[-1]
+        self.assertIn("**Hand-off:** on continue, `/to-spec` with the idea folder loaded", skill)
+        self.assertIn("read `frame.md` and `assumptions.md` into the conversation", skill)
+        self.assertIn("Further Notes must list every open assumption (`A<n>`, risk, owner type) as an open question", skill)
+        self.assertIn("`/to-spec` with the idea folder loaded (Further Notes list each open assumption with its owner)", last)
+        self.assertIn("`/idea-answer <folder>` only for the 3–5 items he picks", last)
 
 
 if __name__ == "__main__":

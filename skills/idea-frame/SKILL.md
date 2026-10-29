@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 **Input:** one sentence describing the idea.
 **Output:** the idea folder `~/developer/vault/01-projects/<slug>/` with the index note `<Title>.md`, `frame.md`, `assumptions.md`, `premortem.md`, `gates.md`, and an `idea-check --gate 1` result shown to Felippe.
-**Hand-off:** `/idea-answer <folder>`
+**Hand-off:** on continue, `/to-spec` with the idea folder loaded, then optionally `/idea-answer <folder>` for the 3–5 items Felippe picks.
 
 The folder contract (file formats, allowed values, check rules) is the docstring of `~/.claude/skills/idea-frame/scripts/idea_check.py`. Read it before writing any file; the gate fails on anything it does not allow. Vault rules apply: no client or investor names, no message bodies, no secrets.
 
@@ -18,6 +18,7 @@ The folder contract (file formats, allowed values, check rules) is the docstring
 - engineering: how the system behaves, e.g. "does the API return the sync date?"; never operators; goes to `/start-planning` Gather
 - operator/user: how people react to or use it, e.g. "how do ops handle a failed transfer today?"
 - decider: scope and priority, e.g. "is mobile in scope for v1?"
+- product-behaviour rules (what the product does in a case): the person who owns that behaviour (operator/user if ops runs it, decider if it is a product call); don't default to decider
 
 ## Steps
 
@@ -35,9 +36,9 @@ The folder contract (file formats, allowed values, check rules) is the docstring
    - otherwise continue only if the top 3 assumptions each have an owner type and a test.
    Append to `gates.md` (never overwrite) the line `- YYYY-MM-DD gate1: continue|kill|reshape: <reason>` and log the gate time as `- YYYY-MM-DD gate1 <n>h`. Then run and show the output of `python3 ~/.claude/skills/idea-frame/scripts/idea_check.py <folder> --gate 1`. Fix every FAIL (ask Felippe where the fix is a judgment) and rerun until none remain.
 5. **Outcome.**
-   - continue: set `stage: answering`.
+   - continue: set `stage: answering`; read `frame.md` and `assumptions.md` into the conversation, and tell Felippe to run `/to-spec`: its Further Notes must list every open assumption (`A<n>`, risk, owner type) as an open question. Then offer `/idea-answer <folder>` for the 3–5 items he picks.
    - kill: set `stage: killed`, `status: dropped`; after his yes, move the whole folder to `04-archive/`.
    - reshape: set `stage: reshaped`, then `stage: framing` while reframing in the same folder; keep the history and append to `gates.md`, never overwrite.
    Update `updated:` on every edit.
 
-Done when `idea_check.py <folder> --gate 1` shows no FAIL and `gates.md` has the gate 1 line; on continue, name `/idea-answer <folder>` as the next command.
+Done when `idea_check.py <folder> --gate 1` shows no FAIL and `gates.md` has the gate 1 line; on continue, name `/to-spec` with the idea folder loaded (Further Notes list each open assumption with its owner), then `/idea-answer <folder>` only for the 3–5 items he picks.
