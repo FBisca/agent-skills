@@ -46,5 +46,18 @@ class IdeaFrameContract(unittest.TestCase):
             self.assertIn(p, skill)
 
 
+    def test_S28_owner_guidance_and_cap(self):
+        text = read("SKILL.md")
+        for p in ("**Owner guidance**",
+                  'finance: business and finance rules, e.g. "what fee must this clear?"; ask the ops owner of that rule; record owner finance',
+                  "compliance: legal, security, data access, e.g. ",
+                  "engineering: how the system behaves, e.g. ",
+                  "never operators; goes to `/start-planning` Gather",
+                  "operator/user: how people react to or use it, e.g. ",
+                  "decider: scope and priority, e.g. "):
+            self.assertIn(p, text)
+        self.assertIn("Every `Source: unknown` question gets an `Owner: <type>` line", text)
+
+
 if __name__ == "__main__":
     unittest.main()

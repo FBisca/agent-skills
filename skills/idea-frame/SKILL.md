@@ -12,6 +12,13 @@ disable-model-invocation: true
 
 The folder contract (file formats, allowed values, check rules) is the docstring of `~/.claude/skills/idea-frame/scripts/idea_check.py`. Read it before writing any file; the gate fails on anything it does not allow. Vault rules apply: no client or investor names, no message bodies, no secrets.
 
+**Owner guidance** (route by what the question is about):
+- finance: business and finance rules, e.g. "what fee must this clear?"; ask the ops owner of that rule; record owner finance
+- compliance: legal, security, data access, e.g. "may we store these documents outside the EU?"
+- engineering: how the system behaves, e.g. "does the API return the sync date?"; never operators; goes to `/start-planning` Gather
+- operator/user: how people react to or use it, e.g. "how do ops handle a failed transfer today?"
+- decider: scope and priority, e.g. "is mobile in scope for v1?"
+
 ## Steps
 
 1. **Folder.** Derive a short `<Title>` from the sentence and a kebab `<slug>` from the title. If the folder exists, stop and ask. Create the index note `<Title>.md` (the only root-level note with `type: project`) from `~/developer/vault/90-templates/project.md`, keeping its sections (Outcome, `## Now`, Tasks base embed, `## Notes`, `## Decisions`). Frontmatter: `type: project`, `status: idea`, `stage: framing`, `entry: raw`, `decider: <role>` (ask Felippe which role decides; a role, never a name), `area`, `created`, `updated`, `tags: []`. Outcome = the sentence. Add `## Hours`. Under `## Notes` list `[[frame]] [[assumptions]] [[premortem]] [[gates]]`. Every side note gets frontmatter `type: note`, `area`, `project: "[[<Title>]]"`, `created`, `updated`, `tags: []`.
@@ -20,7 +27,7 @@ The folder contract (file formats, allowed values, check rules) is the docstring
    - Felippe may answer `unknown`. An `unknown` is recorded as `Source: unknown` and becomes an assumption to test; it is never forced into a decision.
    - Stop when the frontier is empty and Felippe confirms.
 3. **Write the frame.** From the grilling:
-   - `frame.md`: one `## Q<n> <question>` per question with its `Source:` line and the answer. `Q<n>` keeps counting across rounds; ids are unique.
+   - `frame.md`: one `## Q<n> <question>` per question with its `Source:` line and the answer. `Q<n>` keeps counting across rounds; ids are unique. Every `Source: unknown` question gets an `Owner: <type>` line (a D10 type, chosen with the owner guidance above); `idea_check --gate 1` fails without it.
    - `assumptions.md`: the table `id | risk | assumption | importance | evidence | owner | test | result`. Every `Source: unknown` question is cited as `Q<n>` in the assumption cell of at least one row. importance and evidence are `high|med|low`; owner is one of `operator/user, finance, compliance, decider, engineering`; every high-importance assumption gets an owner and a test. Engineering questions are left for `/start-planning` Gather.
    - `premortem.md`: about 8 reasons the idea failed, each a bullet ending `→ PRD: <what the PRD must say>` or `→ A<n>`.
 4. **Gate 1.** Set `stage: gate1` while the gate is decided. Log the framing time in the index note's `## Hours` (`- YYYY-MM-DD framing <n>h`, ask if unknown). Put the kill criteria to Felippe and wait for his call:

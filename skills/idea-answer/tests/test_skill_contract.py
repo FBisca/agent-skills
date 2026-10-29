@@ -36,7 +36,7 @@ class IdeaAnswerContract(unittest.TestCase):
             "`type: note`, `area`, `project: \"[[<Title>]]\"`, `created`, `updated`, `tags: []`",
             "add `[[answers]]` to the index note's `## Notes`",
             "under `## Hours` in the index note",
-            "`Owner: <role>`, `Date: YYYY-MM-DD`, `Link: <link>`, `Summary:`",
+            "`Owner: <type> (<role>)` (the type first, so the cap counts it), `Date: YYYY-MM-DD`, `Link: <link>`, `Summary:`",
             "`accepted by <decider role>: engineering, to /start-planning Gather`",
             "`Summary: open → PRD Open Questions`",
             "the index note (`<Title>.md`, the one root-level note with `type: project`)",
@@ -50,6 +50,25 @@ class IdeaAnswerContract(unittest.TestCase):
         self.assertRegex(read("SKILL.md"), r"(?s)Hand-off:\*\*.*`/to-spec`.*`/goldfish")
         self.assertNotIn("idea.md", t)
         self.assertLessEqual(len(read("SKILL.md").splitlines()), 120)
+
+
+    def test_S28_owner_guidance_and_cap(self):
+        text = read("SKILL.md")
+        for p in ("**Owner guidance**",
+                  'finance: business and finance rules, e.g. "what fee must this clear?"; ask the ops owner of that rule; record owner finance',
+                  "compliance: legal, security, data access, e.g. ",
+                  "engineering: how the system behaves, e.g. ",
+                  "never operators; goes to `/start-planning` Gather",
+                  "operator/user: how people react to or use it, e.g. ",
+                  "decider: scope and priority, e.g. "):
+            self.assertIn(p, text)
+        for p in ("Rank the open items by importance", "send at most 12 to people",
+                  "owner is not engineering", "marked low priority", "`people-cap`",
+                  "`accepted by <decider role>: low priority, not asked`",
+                  "except items cut for low priority",
+                  "`Owner: <type> (<role>)`"):
+            self.assertIn(p, text)
+        self.assertLessEqual(len(text.splitlines()), 120)
 
 
 if __name__ == "__main__":
