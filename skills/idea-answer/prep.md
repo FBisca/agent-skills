@@ -11,7 +11,7 @@ Ask (Mom Test, 2-4):
 Kills the idea: <the answer that means no>
 Changes the idea: <the answer that reshapes scope>
 Usability? suggest `/prototype` for a session instead.
-Outreach: not drafted. Draft only after Felippe's yes.
+Outreach: not drafted. Draft only after the user's yes.
 ```
 
 Never in a question: the solution's name or pitch, "would you", "if we built".

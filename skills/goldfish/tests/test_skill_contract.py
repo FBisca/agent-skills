@@ -40,6 +40,10 @@ class GoldfishContract(unittest.TestCase):
         self.assertTrue((ROOT / "LICENSE").exists())
         self.assertIn("Apache License", read("LICENSE"))
 
+    def test_S32_names_no_person(self):
+        hits = [p.name for p in ROOT.rglob("*.md") if "felippe" in p.read_text().lower()]
+        self.assertEqual(hits, [])
+
 
 if __name__ == "__main__":
     unittest.main()
