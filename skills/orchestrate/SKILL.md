@@ -38,13 +38,13 @@ Own ticket selection, dependencies, worker assignments, and integration. Delegat
 | Independent workers that need repeated coordination | Use available native peer messaging; use Claude Agent Teams when its shared tasks and teammates help. |
 | Existing sessions in different repositories | Use available cross-session messaging with the assigned sessions. Otherwise relay through the orchestrator. |
 
-Before delegating, run `agent-runtime contract` (skill `agent-runtime`) and use its verbs; the contract, not this skill, names the runtime's tools. Choose the `spawn` kind by the routing rule: `lookup` for short read-only work, `worker` for implementation, long tasks, Codex, or anything the user should watch. Implementation goes to `implementer` as a `worker`. Resume an idle worker with the contract's `resume` verb; a fresh spawn with the same name is not resumption. Do not assume a message wakes it. Read [cross-repository work](references/cross-repository.md) before execution across repositories. The gap rule applies: when a verb does not cover the need, propose the change in chat and ask before a raw command.
+Before delegating, run `~/bin/agent-runtime contract` (skill `agent-runtime`; full path: hc workers lack `~/bin` on PATH) and use its verbs; the contract, not this skill, names the runtime's tools. Choose the `spawn` kind by the routing rule: `lookup` for short read-only work, `worker` for implementation, long tasks, Codex, or anything the user should watch. Implementation goes to `implementer` as a `worker`. Resume an idle worker with the contract's `resume` verb; a fresh spawn with the same name is not resumption. Do not assume a message wakes it. Read [cross-repository work](references/cross-repository.md) before execution across repositories. The gap rule applies: when a verb does not cover the need, propose the change in chat and ask before a raw command.
 
 - Honor runtime concurrency limits. Parallel execution can reduce elapsed time while increasing token use.
 
 ## Check context before reuse
 
-Check the worker's subsystem, checkout state, last result, and available context telemetry at each task boundary. Read worker state with `agent-runtime status <name>` or `list`, and its `native` fields first, before deciding resume versus fresh; a worker's self-reported `unknown` is not a reading. Record `unknown` only when that read fails.
+Check the worker's subsystem, checkout state, last result, and available context telemetry at each task boundary. Read worker state with `~/bin/agent-runtime status <name>` or `list`, and its `native` fields first, before deciding resume versus fresh; a worker's self-reported `unknown` is not a reading. Record `unknown` only when that read fails.
 
 - Resume when retained knowledge helps the next task and there is room for its expected reads, results, and reasoning.
 - Use the **child's effective context window**. Current context occupancy, cumulative token use, and cached input are different measurements.
