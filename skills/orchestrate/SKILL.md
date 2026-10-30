@@ -35,16 +35,16 @@ Own ticket selection, dependencies, worker assignments, and integration. Delegat
 | --- | --- |
 | Related sequential work in the same subsystem and checkout | Resume the existing implementer after the context check below. |
 | Independent work with little shared context | Start a focused implementer with a compact packet. |
-| Independent workers that need repeated coordination | Use available native peer messaging; use Claude Agent Teams when its shared tasks and teammates help. |
+| Independent workers that need repeated coordination | Use agent-runtime `message` and the `task` tool for shared tasks. |
 | Existing sessions in different repositories | Use available cross-session messaging with the assigned sessions. Otherwise relay through the orchestrator. |
 
-Delegate only through the `agent-runtime` tools: `spawn` (kind `lookup` for short read-only work, `worker` for implementation, long tasks, Codex, or anything the user should watch), `message`, `resume`, `wait`, `status`, `list`, `collect`, `stop`. Implementation goes to `implementer` as a `worker`. Resume an idle worker with `resume`; a fresh spawn with the same name is not resumption. Do not assume a message wakes it. Read [cross-repository work](references/cross-repository.md) before execution across repositories.
+Delegate only through the `agent-runtime` tools: `spawn` (kind `lookup` is rejected: use the CLI's own subagent tool; `worker` for implementation, long tasks, Codex, or anything the user should watch), `message`, `resume`, `wait`, `task`, `status`, `list`, `collect`, `stop`. Implementation goes to `implementer` as a `worker`. Resume an idle worker with `resume`; a fresh spawn with the same name is not resumption. Do not assume a message wakes it. `spawn` and `resume` return promptly: dispatch every worker, then make one `wait(all)` per work period and read reports, assignment states and peer messages from its result, passing the returned `receipt` on the next call. `status`/`collect` are a fallback for diagnosing a silent worker, not the normal flow. Read [cross-repository work](references/cross-repository.md) before execution across repositories.
 
 - Honor runtime concurrency limits. Parallel execution can reduce elapsed time while increasing token use.
 
 ## Check context before reuse
 
-Check the worker's subsystem, checkout state, last result, and available context telemetry at each task boundary. Read worker state with the `agent-runtime` `status` tool (or `list`), and its `native` fields first, before deciding resume versus fresh; a worker's self-reported `unknown` is not a reading. Record `unknown` only when that read fails.
+Check the worker's subsystem, checkout state, last result, and available context telemetry at each task boundary. Read worker state from the latest `wait` result, or the `status` tool (or `list`) as a fallback, and the assignment `state`/`runtime_state` fields first, before deciding resume versus fresh; a worker's self-reported `unknown` is not a reading. Record `unknown` only when that read fails.
 
 - Resume when retained knowledge helps the next task and there is room for its expected reads, results, and reasoning.
 - Use the **child's effective context window**. Current context occupancy, cumulative token use, and cached input are different measurements.
@@ -74,7 +74,7 @@ If spawn delivery is uncertain, inspect the runtime and reservation before retry
 - Send messages only when they unblock work, change an interface, report a failure, or deliver a result. Prefer direct assigned-peer messages to broadcasts.
 - Include task ID, repository, interface revision or checkout evidence, the change or question, and the needed action. Messages do not transfer files or expand edit authority.
 - Let workers ask focused questions. The orchestrator owns scope changes and resolves incompatible interface decisions.
-- Prefer native completion notifications or blocking event waits. Avoid repeated status polling and repeated unchanged reports.
+- Prefer one blocking `wait(all)` per work period over native notifications. Avoid repeated status polling and repeated unchanged reports.
 - Wait for PR checks with `~/bin/wait-checks <owner>/<repo>#<pr> ...` (full path: shells started before `~/bin` existed don't have it on PATH), run in the background: one PASS/FAIL line per PR, plus the failed log on FAIL. Do not write ad-hoc watch loops.
 - Workers run relevant checks and return commands, outcomes, and omissions. Inspect their diff and evidence. Rerun checks only for changed inputs, integration, failures, or unresolved risk.
 - Require verification on the combined result when repositories or branches interact. A pane state of `idle` or `done` is not evidence of task completion.
