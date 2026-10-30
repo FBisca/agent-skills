@@ -237,18 +237,14 @@ def metrics(samples):
     return {"groups": output, "note": "partial observations are not full workflow cost; include orchestrator and workers; summed request duration is not parallel wall time"}
 
 
-def herdr_snapshot(pane, session):
-    require(os.environ.get("HERDR_ENV") == "1", "Herdr inspection requires a Herdr-managed caller")
-    require(os.environ.get("HERDR_SOCKET_PATH") and os.environ.get("HERDR_PANE_ID"), "missing Herdr caller identity")
-    require(session and session.strip(), "supply the exact Herdr session name")
-    inherited = os.environ.get("HERDR_SESSION")
-    require(not inherited or inherited == session, "session differs from caller's session")
-    target = pane or os.environ["HERDR_PANE_ID"]
-    require(not target.startswith("-"), "invalid pane ID")
-    # Return raw structured evidence; do not guess registration field names across versions.
-    result = json.loads(run(["herdr", "pane", "get", target, "--session", session]))
-    return {"session": session, "pane": target, "snapshot": result,
-            "note": "read only; verify live agent identity before mapping a task to this pane"}
+def resolve_runtime():
+    """Ask the agent-runtime skill which runtime this session runs in; never fail inspect."""
+    sibling = Path(__file__).resolve().parents[2] / "agent-runtime" / "scripts" / "agent-runtime.py"
+    argv = [sys.executable, str(sibling)] if sibling.is_file() else ["agent-runtime"]
+    try:
+        return json.loads(run(argv + ["resolve", "--json"]))
+    except (ValueError, OSError, subprocess.TimeoutExpired):
+        return {"runtime": "unknown"}
 
 
 def main():
@@ -277,22 +273,17 @@ def main():
     sub.add_argument("--reserve-tokens", type=int, required=True)
     sub.add_argument("--max-age-seconds", type=int, default=300)
     commands.add_parser("metrics").add_argument("--samples", required=True)
-    sub = commands.add_parser("herdr", help="Read one pane; never create, attach, or close an agent")
-    sub.add_argument("--pane")
-    sub.add_argument("--session", required=True)
     args = parser.parse_args()
     if args.command == "inspect":
         return {**checkout_snapshot(args.checkout),
-                "executables": {c: shutil.which(c) for c in ("codex", "claude", "herdr", "herdmates")},
-                "herdr_caller": os.environ.get("HERDR_ENV") == "1",
+                "executables": {c: shutil.which(c) for c in ("codex", "claude")},
+                "agent_runtime": resolve_runtime(),
                 "native_agent_capabilities": "inspect this session's tool schema",
                 "context": "unknown; supply current child runtime telemetry"}
     if args.command == "context":
         return context_verdict(read_json(args.sample), args.reserve_tokens, args.max_age_seconds)
     if args.command == "metrics":
         return metrics(read_json(args.samples))
-    if args.command == "herdr":
-        return herdr_snapshot(args.pane, args.session)
     with ledger(args.state) as data:
         if args.command == "claim":
             result = claim(data, read_json(args.packet))

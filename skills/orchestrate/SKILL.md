@@ -38,17 +38,13 @@ Own ticket selection, dependencies, worker assignments, and integration. Delegat
 | Independent workers that need repeated coordination | Use available native peer messaging; use Claude Agent Teams when its shared tasks and teammates help. |
 | Existing sessions in different repositories | Use available cross-session messaging with the assigned sessions. Otherwise relay through the orchestrator. |
 
-Inspect the tools exposed in this session before choosing calls. Do not infer capabilities from a feature flag alone.
+Before delegating, run `agent-runtime contract` (skill `agent-runtime`) and use its verbs; the contract, not this skill, names the runtime's tools. Choose the `spawn` kind by the routing rule: `lookup` for short read-only work, `worker` for implementation, long tasks, Codex, or anything the user should watch. Implementation goes to `implementer` as a `worker`. Resume an idle worker with the contract's `resume` verb; a fresh spawn with the same name is not resumption. Do not assume a message wakes it. Read [cross-repository work](references/cross-repository.md) before execution across repositories. The gap rule applies: when a verb does not cover the need, propose the change in chat and ask before a raw command.
 
-- **Codex / MultiAgent V2:** select `agent_type: implementer` and, when available, `fork_turns: none`. Verify Terra/high in exposed runtime configuration. Full-history forks can inherit the parent's model and effort; existing sessions may retain old role definitions. Report mismatches instead of silently selecting another model.
-- Use the runtime's follow-up/resume operation for an idle worker. In a surface with separate tools, `send_message` steers a running worker and `followup_task` starts another turn. Do not assume that a message wakes an idle agent on every runtime.
-- **Claude:** use the `implementer` type for either a subagent or teammate. Resume by the returned agent ID. A fresh spawn with the same name is not resumption.
-- For visible Claude teammates, use the existing Herdmates integration. Read [runtime guidance](references/runtimes.md) before pane work or cross-repository execution. Do not start a second worker to display an existing one.
 - Honor runtime concurrency limits. Parallel execution can reduce elapsed time while increasing token use.
 
 ## Check context before reuse
 
-Check the worker's subsystem, checkout state, last result, and available context telemetry at each task boundary. Read the pane's own measurement first (`herdr` in the state helper) before deciding resume versus fresh; a worker's self-reported `unknown` is not a reading. Record `unknown` only when that read fails.
+Check the worker's subsystem, checkout state, last result, and available context telemetry at each task boundary. Read worker state with `agent-runtime status <name>` or `list`, and its `native` fields first, before deciding resume versus fresh; a worker's self-reported `unknown` is not a reading. Record `unknown` only when that read fails.
 
 - Resume when retained knowledge helps the next task and there is room for its expected reads, results, and reasoning.
 - Use the **child's effective context window**. Current context occupancy, cumulative token use, and cached input are different measurements.

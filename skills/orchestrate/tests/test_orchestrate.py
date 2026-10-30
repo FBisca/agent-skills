@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -176,20 +177,39 @@ class ContextAndTransportTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             app.metrics([dict(sample, kind="cumulative")])
 
-    def test_herdr_missing_identity_never_calls_cli(self):
-        with patch.dict(os.environ, {}, clear=True), patch.object(app, "run") as run:
-            with self.assertRaises(ValueError):
-                app.herdr_snapshot("w1:p1", "default")
-            run.assert_not_called()
+    def test_S23_inspect_includes_resolver_and_herdr_subcommand_is_gone(self):
+        def cli(*argv):
+            return subprocess.run([sys.executable, "-B", str(SCRIPT), *argv],
+                                  capture_output=True, text=True,
+                                  env={"PATH": os.environ["PATH"]})
+        result = cli("inspect", "--checkout", str(SCRIPT.parents[5]))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        info = json.loads(result.stdout)
+        self.assertEqual(info["agent_runtime"]["runtime"], "native")
+        self.assertNotIn("herdr", info["executables"])
+        self.assertNotEqual(cli("herdr", "--session", "x").returncode, 0)
+        self.assertFalse(hasattr(app, "herdr_snapshot"))
 
-    def test_herdr_inspection_uses_explicit_session_and_no_mutation(self):
-        env = {"HERDR_ENV": "1", "HERDR_SOCKET_PATH": "/tmp/example.sock",
-               "HERDR_PANE_ID": "w1:p1", "HERDR_SESSION": "test"}
-        with patch.dict(os.environ, env, clear=True), patch.object(app, "run", return_value='{"result":{}}') as run:
-            app.herdr_snapshot("w1:p2", "test")
-            run.assert_called_once_with(["herdr", "pane", "get", "w1:p2", "--session", "test"])
-            with self.assertRaises(ValueError):
-                app.herdr_snapshot("w1:p2", "different")
+    def test_S23_inspect_survives_resolver_failure(self):
+        with patch.object(app, "run", side_effect=ValueError("boom")):
+            self.assertEqual(app.resolve_runtime(), {"runtime": "unknown"})
+
+    def test_S22_bodies_name_no_runtime_outside_agent_runtime_pointer(self):
+        agents = Path(__file__).resolve().parents[4]
+        files = [Path(__file__).resolve().parents[1] / "SKILL.md",
+                 agents / ".claude" / "agents" / "implementer.md",
+                 agents / ".codex" / "agents" / "implementer.toml"]
+        for path in files:
+            text = path.read_text(encoding="utf-8")
+            if path.suffix == ".md":
+                parts = text.split("---", 2)
+                text = parts[2] if len(parts) == 3 else text
+            for line in text.splitlines():
+                if "agent-runtime" in line:
+                    continue
+                self.assertIsNone(re.search(r"\b(hc|herdmates|herdr)\b", line, re.I),
+                                  "%s: %s" % (path.name, line))
+
 
 if __name__ == "__main__":
     unittest.main()

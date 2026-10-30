@@ -66,7 +66,7 @@ The worker sends a compact result. The orchestrator normalizes it to JSON and re
 python3 <skill-dir>/scripts/orchestrate.py checkpoint --state <ledger> --task <task-id> --report <report.json>
 ```
 
-`COMPLETE` requires a runtime ID, confirmed acceptance, no remaining work, and passing evidence for every required check. This validates the report contract; it does not independently prove the report true. `PARTIAL` keeps ownership. `BLOCKED` also requires `blocker` and a next action in `remaining`. A failed or omitted check needs a `reason`. Store short decisions, not transcripts. Optional `context` and `presentation` objects can preserve observed telemetry and verified Herdr IDs.
+`COMPLETE` requires a runtime ID, confirmed acceptance, no remaining work, and passing evidence for every required check. This validates the report contract; it does not independently prove the report true. `PARTIAL` keeps ownership. `BLOCKED` also requires `blocker` and a next action in `remaining`. A failed or omitted check needs a `reason`. Store short decisions, not transcripts. Optional `context` and `presentation` objects can preserve observed telemetry and verified runtime IDs.
 
 If replacing a worker for an unfinished task, first stop or confirm it stopped using native tools. Then:
 
