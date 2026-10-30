@@ -1,21 +1,21 @@
 ---
 name: start-planning
-description: Plan one feature spec-driven, from its sources to WHEN/THEN scenarios and vertical tickets, then stop for approval. Use when the user wants to plan a feature, says "let's plan X", or hands over a PRD, Linear issue or vault note to build.
+description: Plan one feature spec-driven, from its sources to WHEN/THEN scenarios and vertical tickets, then stop for approval. Use when the user wants to plan a feature, idea or task, says "let's plan X", or hands over a PRD, Linear issue or vault note to build.
 ---
 
 # Start planning
 
-**Input:** a feature, plus whatever already describes it: a PRD, Linear issues, vault notes, a living spec.
+**Input:** a feature, idea or task, plus whatever already describes it: a PRD, Linear issues, vault notes, a living spec, or only the request itself.
 **Output:** one approved **plan** at `docs/plans/YYYY-MM-DD-<slug>.plan.md`, dated the day it is written and never re-dated.
 **Hand-off:** `/orchestrate <plan-path>` builds it.
 
-Three documents, three jobs: the **PRD** says why and for whom; the **plan** turns one piece of it into testable scenarios and tickets; the **living spec** (`docs/specs/<area>.md`) records what the system does today.
+Three documents, three jobs: the **PRD**, when there is one, says why and for whom; the **plan** turns one piece of the work into testable scenarios and tickets; the **living spec** (`docs/specs/<area>.md`) records what the system does today.
 
 ## 1. Gather
 
-When no PRD covers the feature, ask the user to run `/to-spec` and stop. Resume once the PRD exists. A product question that surfaces later goes back to the PRD owner, not into the plan.
+A PRD is not a gate. Plan an idea or task from the request and whatever sources exist; the request itself is a source. Suggest `/to-spec` only when the work hinges on a product decision (who it is for, what users get, whether to build it) that no PRD settles, and keep planning unless the user chooses to write one. A product question that surfaces later goes to the PRD owner, or to the user when there is no PRD, not into the plan.
 
-Dispatch a fresh-context subagent to gather. It lists every source with its link (the PRD, the Linear project and issues, the vault project note and its decision notes, RFCs, the living spec for the area), extracts each decision they already settle with its source, and reads the code the feature touches. When a decision depends on real data (backfill, migration, existing records), it runs read-only queries and returns the counts and edge cases: empty sets, conflicts, departed or archived owners.
+Dispatch a fresh-context subagent to gather. It lists every source with its link (the request, the PRD if any, the Linear project and issues, the vault project note and its decision notes, RFCs, the living spec for the area), extracts each decision they already settle with its source, and reads the code the feature touches. When a decision depends on real data (backfill, migration, existing records), it runs read-only queries and returns the counts and edge cases: empty sets, conflicts, departed or archived owners.
 
 Done when the subagent has returned the Sources table and every settled decision with its source.
 
