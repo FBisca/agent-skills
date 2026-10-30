@@ -238,8 +238,8 @@ def metrics(samples):
 
 
 def resolve_runtime():
-    """Ask the agent-runtime skill which runtime this session runs in; never fail inspect."""
-    sibling = Path(__file__).resolve().parents[2] / "agent-runtime" / "scripts" / "agent-runtime.py"
+    """Ask the agent-runtime CLI which runtime this session runs in; never fail inspect."""
+    sibling = Path(__file__).resolve().parents[4] / "plugins" / "agent-runtime" / "server" / "agent_runtime.py"
     argv = [sys.executable, str(sibling)] if sibling.is_file() else ["agent-runtime"]
     try:
         return json.loads(run(argv + ["resolve", "--json"]))

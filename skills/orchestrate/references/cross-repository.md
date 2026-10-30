@@ -1,6 +1,6 @@
 # Work across repositories
 
-Read this reference only for cross-repository execution. Runtime mechanics live in the `agent-runtime` skill.
+Read this reference only for cross-repository execution. Runtime mechanics live in the `agent-runtime` tools.
 
 - Keep one orchestration ledger for the active plan and one exact checkout assignment per worker.
 - Identify peers by their native runtime/session IDs, not repository names alone.

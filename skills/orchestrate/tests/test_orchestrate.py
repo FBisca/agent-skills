@@ -196,22 +196,20 @@ class ContextAndTransportTests(unittest.TestCase):
         with patch.object(app, "run", side_effect=ValueError("boom")):
             self.assertEqual(app.resolve_runtime(), {"runtime": "unknown"})
 
-    def test_bodies_name_no_runtime_outside_agent_runtime_pointer(self):
-        """agent-runtime/R22"""
+    def test_bodies_point_to_tools_and_skill_is_gone(self):
+        """agent-runtime-tools/S21"""
         agents = Path(__file__).resolve().parents[4]
         files = [Path(__file__).resolve().parents[1] / "SKILL.md",
                  agents / ".claude" / "agents" / "implementer.md",
                  agents / ".codex" / "agents" / "implementer.toml"]
         for path in files:
             text = path.read_text(encoding="utf-8")
-            if path.suffix == ".md":
-                parts = text.split("---", 2)
-                text = parts[2] if len(parts) == 3 else text
-            for line in text.splitlines():
-                if "agent-runtime" in line:
-                    continue
-                self.assertIsNone(re.search(r"\b(hc|herdmates|herdr)\b", line, re.I),
-                                  "%s: %s" % (path.name, line))
+            self.assertIn("agent-runtime", text, path.name)
+            self.assertNotIn("agent-runtime contract", text, path.name)
+            self.assertIsNone(re.search(r"\bhc (run|send)\b", text), path.name)
+        self.assertIn("mcp__plugin_agent-runtime_agent-runtime__report", files[1].read_text(encoding="utf-8"))
+        self.assertIn("report tool", files[2].read_text(encoding="utf-8"))
+        self.assertFalse((agents / ".agents" / "skills" / "agent-runtime").exists())
 
 
 if __name__ == "__main__":
