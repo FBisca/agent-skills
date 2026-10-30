@@ -38,9 +38,9 @@ Owner: Finance
 Source: lookup https://example.com/x
 """
 ROWS = [
-    ("A1", "value", "Clients want it (Q2)", "high", "low", "operator/user", "interview 5", "confirmed"),
-    ("A2", "feasibility", "API exists", "high", "med", "engineering", "spike", "accepted by decider"),
-    ("A3", "viability", "Cost fits", "high", "low", "finance", "model", "ok"),
+    ("A1", "value", "Clients want it (Q2)", "high", "low", "operator/user", "interview: 3 of 5 ops leads describe it", "confirmed"),
+    ("A2", "feasibility", "API exists", "high", "med", "engineering", "spike: API returns the sync date", "accepted by decider"),
+    ("A3", "viability", "Cost fits", "high", "low", "finance", "data: cost under the fee cap", "ok"),
     ("A4", "usability", "Easy", "low", "low", "decider", "", ""),
 ]
 PREMORTEM = "# Pre-mortem\n- Nobody uses it → PRD: adoption plan\n- Cost blows up → A3\n"
@@ -204,7 +204,7 @@ class IdeaCheckTests(unittest.TestCase):
         self.assertTrue(all(l.startswith("PASS ") for l in lines), out)
         names = [l.split()[1].rstrip(":") for l in lines]
         self.assertEqual(len(names), len(set(names)))
-        self.assertEqual(len(names), 13)
+        self.assertEqual(len(names), 14)
 
     def test_S9_escaped_pipe_does_not_shift_columns(self):
         rows = [(ROWS[0][0], "value", r"See [[note\|alias]] (Q2)", *ROWS[0][3:7], ""), *ROWS[1:]]
@@ -318,6 +318,38 @@ class IdeaCheckTests(unittest.TestCase):
         (self.dir / "answers.md").unlink()
         self.write("frame.md", FRAME.replace("Source: unknown", "Source: me"))
         self.assertIn("PASS people-cap", self.run_check("--gate", "2")[1])
+
+    def test_S34_ethical_risk_passes_and_unknown_risk_fails(self):
+        rows = [(ROWS[0][0], "ethical", *ROWS[0][2:]), *ROWS[1:]]
+        self.write("assumptions.md", table(rows))
+        self.assertIn("PASS assumption-values", self.run_check()[1])
+        rows = [(ROWS[0][0], "legal", *ROWS[0][2:]), *ROWS[1:]]
+        self.write("assumptions.md", table(rows))
+        self.assertIn("FAIL assumption-values", self.run_check()[1])
+
+    def test_S36_high_importance_test_needs_type_and_criterion(self):
+        for bad in ("interview 5", "model", "interview:", "interview:  ", "poll: 5 of 10 say yes", ""):
+            rows = [(*ROWS[0][:6], bad, ROWS[0][7]), ROWS[1], (*ROWS[2][:6], bad, ROWS[2][7]), ROWS[3]]
+            self.write("assumptions.md", table(rows))
+            for gate in ("1", "2"):
+                code, out, _ = self.run_check("--gate", gate)
+                self.assertEqual(code, 1, (bad, out))
+                self.assertRegex(out, r"FAIL test-criterion.*A1, A3")
+        for good in ("Interview: 3 of 5 leads", "prototype: 4 of 5 finish unaided", "survey: 20% reply",
+                     "data: p50 under 2d", "spike: call returns in 1 try"):
+            rows = [(*ROWS[0][:6], good, ROWS[0][7]), *ROWS[1:]]
+            self.write("assumptions.md", table(rows))
+            self.assertIn("PASS test-criterion", self.run_check("--gate", "1")[1])
+
+    def test_S36_low_importance_free_text_and_decided_entry(self):
+        rows = [*ROWS[:3], (*ROWS[3][:6], "just try it", ""),
+                ("A5", "value", "Nice", "med", "low", "decider", "ask around", "")]
+        self.write("assumptions.md", table(rows))
+        self.assertIn("PASS test-criterion", self.run_check("--gate", "1")[1])
+        self.idea(entry="decided")
+        rows = [(*ROWS[0][:6], "free text", ROWS[0][7]), *ROWS[1:]]
+        self.write("assumptions.md", table(rows))
+        self.assertRegex(self.run_check("--gate", "2")[1], r"FAIL test-criterion.*A1")
 
 
 if __name__ == "__main__":

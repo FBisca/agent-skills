@@ -18,5 +18,9 @@ Seed the design tree with these branches. Each question becomes a `Q<n>` in `fra
 - **usability**: can they use it unaided, inside their current work?
 - **feasibility**: can we build it with the people, data and systems we have?
 - **viability**: does it work for the business: cost, compliance, support, timing?
+- **ethical**: could it harm someone; would users object if they knew?
 
 For each risk ask: what would have to be true, and what would kill it?
+
+## Story map
+After the branches, list the actors (user, system, our team) and the steps each takes to get value. At each step ask: what must be true here? Each answer that is not a lookup becomes an assumption row (the user's belief counts as not a lookup).

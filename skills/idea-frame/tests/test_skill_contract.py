@@ -20,7 +20,7 @@ class IdeaFrameContract(unittest.TestCase):
         self.assertIn("`unknown` is recorded as `Source: unknown` and becomes an assumption to test", skill)
         self.assertIn("never forced into a decision", skill)
         for p in ("Heilmeier", "What are you trying to do", "How is success measured",
-                  "Internal FAQ", "value", "usability", "feasibility", "viability"):
+                  "Internal FAQ", "value", "usability", "feasibility", "viability", "ethical"):
             self.assertIn(p, seeds)
 
     def test_S16_writes_files_runs_gate_and_hands_off(self):
@@ -71,6 +71,36 @@ class IdeaFrameContract(unittest.TestCase):
     def test_S32_names_no_person(self):
         hits = [p.name for p in ROOT.rglob("*.md") if "felippe" in p.read_text().lower()]
         self.assertEqual(hits, [])
+
+    def test_S33_story_map_pass_in_seeds_and_skill(self):
+        skill, seeds = read("SKILL.md"), read("seeds.md")
+        for p in ("## Story map", "actors", "user, system, our team", "what must be true here?", "not a lookup"):
+            self.assertIn(p, seeds)
+        self.assertIn("assumption row", seeds)
+        self.assertIn("story-map pass", skill)
+
+    def test_S34_seeds_has_ethical_branch_and_owner_guidance(self):
+        seeds, skill = read("seeds.md"), read("SKILL.md")
+        self.assertIn("**ethical**", seeds)
+        self.assertIn("- ethical risk (could it harm someone, would users object if they knew): compliance, or the decider when it is a product call", skill)
+        self.assertNotIn("- ethical:", skill)
+        self.assertIn("compliance, or the decider when it is a product call", skill)
+
+    def test_S35_levels_defined_and_map_reordered_before_gate_1(self):
+        skill = read("SKILL.md")
+        check = read("scripts/idea_check.py")
+        for p in ("importance high: the idea dies if false; med: it changes the design; low: a detail",
+                  "evidence high: a lookup or data; med: one first-hand report; low: an opinion, including the user's own"):
+            self.assertIn(p, check)
+            self.assertNotIn(p, skill)
+        self.assertIn("level definitions in the `idea_check.py` docstring", skill)
+        for p in ("sorted by importance high→low, then evidence low→high",
+                  "the user reorders the rows",
+                  "row order in `assumptions.md`",
+                  "top 3 assumptions are the first 3 rows",
+                  "from belief (not a lookup) gets evidence low",
+                  "`<type>: <success criterion>`", "interview, prototype, data, survey, spike"):
+            self.assertIn(p, skill)
 
 
 if __name__ == "__main__":

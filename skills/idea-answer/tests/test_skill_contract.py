@@ -68,7 +68,7 @@ class IdeaAnswerContract(unittest.TestCase):
 
     def test_S31_asks_which_three_to_five_items_and_routes_only_those(self):
         text = read("SKILL.md")
-        for p in ("Show the open items ranked by importance and ask the user which 3–5 to take to people",
+        for p in ("Show the open items in that order and ask the user which 3–5 to take to people",
                   "Route and prepare only those",
                   "The rest stay in `assumptions.md` untouched until gate 2",
                   "after `/to-spec` writes `PRD.md`, set `stage: prd`",
@@ -80,6 +80,25 @@ class IdeaAnswerContract(unittest.TestCase):
     def test_S32_names_no_person(self):
         hits = [p.name for p in ROOT.rglob("*.md") if "felippe" in p.read_text().lower()]
         self.assertEqual(hits, [])
+
+    def test_S34_ethical_owner_guidance(self):
+        self.assertIn("- ethical risk (could it harm someone, would users object if they knew): compliance, or the decider when it is a product call", read("SKILL.md"))
+        self.assertNotIn("- ethical:", read("SKILL.md"))
+
+    def test_S36_tests_use_type_criterion_and_prep_uses_criterion(self):
+        t = skill_text()
+        self.assertIn("test as `<type>: <success criterion>`", t)
+        self.assertIn("for an `A<n>` row the bar is its test criterion: missing it kills or changes the idea", t)
+        self.assertNotIn("the row's criterion is the answer that kills", t)
+        prep = read("prep.md")
+        self.assertIn("Passes if: <the row's test criterion, verbatim>", prep)
+        self.assertIn("Kills the idea: <criterion missed:", prep)
+        self.assertIn("data or spike: no conversation", prep)
+        self.assertIn("level definitions in the `idea_check.py` docstring", read("SKILL.md"))
+
+    def test_S35_ranking_follows_row_order(self):
+        t = read("SKILL.md")
+        self.assertIn("Rank in `assumptions.md` row order (agreed at gate 1); unknown frame questions by importance", t)
 
 
 if __name__ == "__main__":

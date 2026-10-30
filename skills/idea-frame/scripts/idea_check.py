@@ -7,11 +7,11 @@ Output: one `PASS|FAIL|SKIPPED <check>: detail` line per check. Exit 0 if nothin
 
 Checks (no --gate = structural only):
   structural: stage-value, assumption-values, premortem-links, gate-reason, hours-logged
-  --gate 1:   structural + frame-sources, frame-owners, unknown-to-assumption, top3-ready
+  --gate 1:   structural + frame-sources, frame-owners, unknown-to-assumption, top3-ready, test-criterion
   --gate 2:   gate 1 + assumptions-closed, answers-sourced, people-cap, decider-signoff
 A structural check whose file is absent prints SKIPPED. A gate check whose file is absent FAILs
 (gate 1 needs frame.md, assumptions.md, premortem.md; gate 2 also needs answers.md, gates.md).
-`entry: decided` + --gate 2: frame-sources, frame-owners, unknown-to-assumption, top3-ready, premortem-links print
+`entry: decided` + --gate 2 (test-criterion still runs): frame-sources, frame-owners, unknown-to-assumption, top3-ready, premortem-links print
 SKIPPED; the other checks run.
 
 Contract decisions (files as in the plan's idea-folder table):
@@ -30,7 +30,9 @@ Contract decisions (files as in the plan's idea-folder table):
   text after `lookup`, spaces allowed (`Source: lookup [[Idea to PRD - PRD]]`).
 - assumptions.md: markdown table with header `id | risk | assumption | importance | evidence | owner |
   test | result` (column order free, matched by name). Ids are `A<n>`. risk: value, usability,
-  feasibility, viability. owner: operator/user, finance, compliance, decider, engineering.
+  feasibility, viability, ethical. owner: operator/user, finance, compliance, decider, engineering.
+  Levels: importance high: the idea dies if false; med: it changes the design; low: a detail.
+  evidence high: a lookup or data; med: one first-hand report; low: an opinion, including the user's own.
   importance and evidence: each MUST be exactly high, med or low (an empty or other value FAILs
   assumption-values). Matching is case-insensitive. Empty owner/test/result cells are allowed by
   assumption-values (other checks need them). Cells split on unescaped `|` only; `\|` (Obsidian
@@ -42,6 +44,9 @@ Contract decisions (files as in the plan's idea-folder table):
 - people-cap (gate 2): at most 12 answers.md entries (PEOPLE_CAP) may have an Owner other than
   engineering. An entry with no Owner counts against the cap; an absent answers.md counts 0 (PASS). It runs for `entry: decided` too.
 - An assumption cites frame question Q<n> when the token `Q<n>` appears in its assumption cell.
+- test-criterion (gates 1 and 2, also `entry: decided`): each high-importance assumption's test cell is
+  `<type>: <success criterion>`, type (case-insensitive) one of interview, prototype, data, survey,
+  spike, criterion non-empty; else FAIL naming the row id. Other rows are not checked.
 - top3-ready: at least 3 assumptions with importance high have a non-empty owner and test.
 - assumptions-closed: each high-importance assumption has a non-empty result (`accepted by <role>`
   is a result).
@@ -63,7 +68,8 @@ from pathlib import Path
 
 STAGES = ["framing", "gate1", "answering", "gate2", "prd"]
 VALID_STAGES = STAGES + ["killed", "reshaped"]
-RISKS = {"value", "usability", "feasibility", "viability"}
+RISKS = {"value", "usability", "feasibility", "viability", "ethical"}
+TEST_TYPES = ("interview", "prototype", "data", "survey", "spike")
 OWNERS = {"operator/user", "finance", "compliance", "decider", "engineering"}
 PEOPLE_CAP = 12  # max answers.md entries whose Owner is not engineering
 LEVELS = {"high", "med", "low"}
@@ -233,6 +239,12 @@ def check_top3(rows):
     return result(n >= 3, "top3-ready", f"{n} high-importance assumptions with owner and test (need 3)")
 
 
+def check_test_criterion(rows):
+    pat = re.compile(r"(?:%s):\s*\S" % "|".join(TEST_TYPES), re.I)
+    bad = [r.get("id", "?") for r in high(rows) if not pat.match(r.get("test", ""))]
+    return result(not bad, "test-criterion", "need `<type>: <criterion>`: " + ", ".join(bad) if bad else "")
+
+
 def check_closed(rows):
     bad = [r.get("id", "?") for r in high(rows) if not r.get("result")]
     return result(not bad, "assumptions-closed", "open: " + ", ".join(bad) if bad else "")
@@ -306,6 +318,7 @@ def run(folder, gate):
         out.append(need("unknown-to-assumption", "frame.md", 1,
                         lambda: check_unknown(docs["frame.md"], rows)))
         out.append(need("top3-ready", "assumptions.md", 1, lambda: check_top3(rows)))
+        out.append(need("test-criterion", "assumptions.md", 1, lambda: check_test_criterion(rows)))
     if gate >= 2:
         out.append(need("assumptions-closed", "assumptions.md", 2, lambda: check_closed(rows)))
         if docs["answers.md"] is None and nothing_open(docs["frame.md"], rows):
