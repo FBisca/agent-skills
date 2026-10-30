@@ -177,7 +177,8 @@ class ContextAndTransportTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             app.metrics([dict(sample, kind="cumulative")])
 
-    def test_S23_inspect_includes_resolver_and_herdr_subcommand_is_gone(self):
+    def test_inspect_includes_resolver_and_herdr_subcommand_is_gone(self):
+        """agent-runtime/R23"""
         def cli(*argv):
             return subprocess.run([sys.executable, "-B", str(SCRIPT), *argv],
                                   capture_output=True, text=True,
@@ -190,11 +191,13 @@ class ContextAndTransportTests(unittest.TestCase):
         self.assertNotEqual(cli("herdr", "--session", "x").returncode, 0)
         self.assertFalse(hasattr(app, "herdr_snapshot"))
 
-    def test_S23_inspect_survives_resolver_failure(self):
+    def test_inspect_survives_resolver_failure(self):
+        """agent-runtime/R23"""
         with patch.object(app, "run", side_effect=ValueError("boom")):
             self.assertEqual(app.resolve_runtime(), {"runtime": "unknown"})
 
-    def test_S22_bodies_name_no_runtime_outside_agent_runtime_pointer(self):
+    def test_bodies_name_no_runtime_outside_agent_runtime_pointer(self):
+        """agent-runtime/R22"""
         agents = Path(__file__).resolve().parents[4]
         files = [Path(__file__).resolve().parents[1] / "SKILL.md",
                  agents / ".claude" / "agents" / "implementer.md",
