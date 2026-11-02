@@ -1,101 +1,68 @@
 #!/usr/bin/env python3
-r"""Deterministic idea-folder gate (converge-style): structural checks, plus gate 1 / gate 2 checks.
+r"""Deterministic idea-folder gate (converge-style). This docstring is the idea-folder contract (v2).
 
 Usage: idea_check.py <folder> [--gate 1|2]
 Output: one `PASS|FAIL|SKIPPED <check>: detail` line per check. Exit 0 if nothing FAILs, 1 on any FAIL,
 2 on `REFUSED <path>: <what>` (not exactly one index note; printed to stdout and stderr, no checks run).
 
-Checks (no --gate = structural only):
-  structural: stage-value, assumption-values, premortem-links, gate-reason, hours-logged
-  --gate 1:   structural + frame-sources, frame-owners, frame-terms, frame-language,
-              unknown-to-assumption, top3-ready, test-criterion
-  --gate 2:   gate 1 + assumptions-closed, answers-sourced, people-cap, decider-signoff
-A structural check whose file is absent prints SKIPPED. A gate check whose file is absent FAILs
-(gate 1 needs frame.md, assumptions.md, premortem.md, gates.md for frame-language; gate 2 also needs answers.md).
-`entry: decided` + --gate 2 (test-criterion still runs): frame-sources, frame-owners, frame-terms, frame-language, unknown-to-assumption, top3-ready, premortem-links print
-SKIPPED; the other checks run.
+Checks:
+  no --gate:  stage-value, gate-reason, hours-logged
+  --gate 1:   + question-owners, test-criterion
+  --gate 2:   + assumptions-closed, answers-sourced, decider-signoff, brief-read
+`entry: decided` skips nothing.
+A gate check whose file is absent FAILs (assumptions.md at gate 1 and 2, Brief.md for brief-read).
+At a gate, assumptions.md without all seven header columns, or with zero data rows, FAILs every
+assumptions-based check (`missing columns: ...` / `no questions recorded`); a row without an id is named `row <n>`.
+An absent answers.md has no entries, so answers-sourced PASSes. No other file is checked: frame.md
+holds grilling notes only; there is no premortem.md or gates.md.
 
-Contract decisions (files as in the plan's idea-folder table):
-- The index note is the ONE root-level `.md` whose frontmatter has `type: project`, titled like the idea
-  (`Robo-Doc.md`); frame, assumptions, premortem, answers and gates `.md` are never candidates, and their own frontmatter is ignored by every check. A BOM is
-  tolerated; directories named `*.md`, non-UTF-8 files and subfolders are not candidates. Zero or
-  several candidates is REFUSED. Its frontmatter is flat `key: value` lines between `---` fences; surrounding quotes on a value are
-  stripped (`stage: "gate1"`). `stage` must be one of
-  framing, gate1, answering, gate2, prd, killed, reshaped. `entry` defaults to raw.
-- Stage order is framing, gate1, answering, gate2, prd. The completed stages are those strictly before
-  the current stage; killed and reshaped complete only framing. `entry: decided` needs no
-  framing/gate1 hours. Each completed stage needs a
-  `- YYYY-MM-DD <stage> <n>h` line under `## Hours`.
-- frame.md: sections `## Q<n> <question>`; each needs `Source: me`, `Source: lookup <link>` or
-  `Source: unknown`. The keyword is case-insensitive (`Source: Unknown`); a lookup link is any
-  text after `lookup`, spaces allowed (`Source: lookup [[Idea to PRD - PRD]]`).
-- assumptions.md: markdown table with header `id | risk | assumption | importance | evidence | owner |
-  test | result` (column order free, matched by name). Ids are `A<n>`. risk: value, usability,
-  feasibility, viability, ethical. owner: operator/user, finance, compliance, decider, engineering.
-  Levels: importance high: the idea dies if false; med: it changes the design; low: a detail.
-  evidence high: a lookup or data; med: one first-hand report; low: an opinion, including the user's own.
-  importance and evidence: each MUST be exactly high, med or low (an empty or other value FAILs
-  assumption-values). Matching is case-insensitive. Empty owner/test/result cells are allowed by
-  assumption-values (other checks need them). Cells split on unescaped `|` only; `\|` (Obsidian
-  alias `[[note\|alias]]`) stays inside the cell.
-- frame-owners (gates 1 and 2): every `Source: unknown` question section has an `Owner: <type>` line,
-  type one of the owner values above. Owner parsing (frame and answers alike): case-insensitive, first
-  token of the value (`Owner: Finance (role)` is finance, `Owner: Engineering via Gather` is engineering). Questions with
-  another Source need none.
-- people-cap (gate 2): at most 12 answers.md entries (PEOPLE_CAP) may have an Owner other than
-  engineering. An entry with no Owner counts against the cap; an absent answers.md counts 0 (PASS). It runs for `entry: decided` too.
-- frame-terms (gates 1 and 2): frame.md has a `## Terms` section holding a markdown table with header
-  `term | meaning | link` (columns matched by name; header-only passes). Every row needs a non-empty
-  term and meaning; the link cell may be empty, else ONE link of the form:
-    https://...        accepted as is, never fetched;
-    ~/path or /path    an existing file, optional `:line` suffix with line <= the file's line count;
-    [[note]]           also `[[note|alias]]`, `[[note\|alias]]`, `[[note#h]]`: exactly one `note.md` under
-                       the vault root (nearest ancestor of the idea folder holding `.obsidian`;
-                       dot-folders skipped; case-insensitive, `.md` optional); a `/` in the link matches the path suffix.
-  Anything else (`H-8118`, `f355ab6`, `packages/x.ts`) FAILs with `write as https URL, ~/path or [[note]]`.
-  One FAIL lists every bad row, `; `-joined, each starting with its term.
-- frame-language (gates 1 and 2): gates.md's LATEST `language:` line (`- YYYY-MM-DD language: ...`, bullet `-`
-  or `*`) must be `pass <sha12>` or `accepted <sha12> by <role>` (non-empty role), sha12 equal to sha12 of frame.md: the first 12 hex of the sha256 of its UTF-8 text
-  without frontmatter, stripped of surrounding whitespace (a frontmatter or trailing-whitespace edit keeps the
-  pass; a newer `blocked` or malformed line cancels it). `pass` is appended after the idea-frame `reader.md` subagent
-  returns `pass`; `accepted` is the user's override, appended only after the 3rd blocked reader round. Else FAIL `no pass for frame <sha12>` (current sha12); a missing gates.md FAILs `gates.md missing; frame <sha12>`.
-- An assumption cites frame question Q<n> when the token `Q<n>` appears in its assumption cell.
-- test-criterion (gates 1 and 2, also `entry: decided`): each high-importance assumption's test cell is
-  `<type>: <success criterion>`, type (case-insensitive) one of interview, prototype, data, survey,
-  spike, criterion non-empty; else FAIL naming the row id. Other rows are not checked.
-- top3-ready: at least 3 assumptions with importance high have a non-empty owner and test.
-- assumptions-closed: each high-importance assumption has a non-empty result (`accepted by <role>`
-  is a result).
-- premortem.md: items are lines starting `-`, `*` or `1.`; each must end `→ PRD: <text>` or `→ A<n>`
-  (`->` accepted); trailing punctuation after `A<n>` (`→ A3.`) is allowed. When
-  assumptions.md exists, the cited `A<n>` must be an id in it, else FAIL.
-- answers.md: entries are `## ` sections; each needs `Owner:`, `Date:`, `Link:` with a value
-  (`Summary:` is not checked). At gate 2 a missing answers.md PASSes answers-sourced only when
-  nothing was open: no frame question has `Source: unknown` and no high-importance assumption has an
-  empty result; otherwise it FAILs.
-- gates.md: `- YYYY-MM-DD gate1|gate2: kill|reshape|continue|pass by <role>[: <reason>]`; kill and
-  reshape need a non-empty reason. decider-signoff needs a `gate2: pass by <role>` line whose role
-  equals the index note's `decider` (case-insensitive).
+Folder contract:
+- Index note: the ONE root-level `.md` whose frontmatter has `type: project`, titled like the idea
+  (`Robo-Doc.md`); assumptions, answers, frame and Brief `.md` are never candidates and their own
+  frontmatter is ignored. A BOM is tolerated; directories named `*.md`, non-UTF-8 files and subfolders
+  are not candidates. Zero or several candidates is REFUSED. Frontmatter is flat `key: value` lines
+  between `---` fences; surrounding quotes on a value are stripped. `stage` is one of framing, gate1,
+  answering, gate2, prd, killed, reshaped. `entry` defaults to raw. `decider` is the role who signs gate 2.
+- `## Hours` in the index note: lines `- YYYY-MM-DD <label> <n>h`. Past framing (any stage but framing),
+  hours-logged needs at least one such line with n > 0; the label is free, no per-stage line is required.
+- `## Gates` in the index note (heading case-insensitive, every such section read; gate keywords case-insensitive): lines `- YYYY-MM-DD gate1|gate2: kill|reshape|continue|pass by <role>[: <reason>]`
+  and `- YYYY-MM-DD cold-read: pass <sha12>` or `accepted <sha12> by <role>` (bullet `-` or `*`).
+  gate-reason: a kill or reshape line needs a non-empty reason, and any line containing `gate1:` or `gate2:`
+  that does not fit the grammar above (`killed`, a typo) FAILs.
+- assumptions.md: markdown table, header `id | assumption | if wrong | owner | source | test | result`
+  (columns matched by name, order free; owner is a free-text role). Cells split on unescaped `|`;
+  `\|` stays inside the cell.
+  question-owners (gates 1, 2): a row with an empty result needs a non-empty owner; FAIL names the row id.
+  test-criterion (gates 1, 2): a non-empty test cell is `<type>: <criterion>`, type (case-insensitive)
+  interview, prototype, data, survey or spike, criterion non-empty; an empty test passes.
+  assumptions-closed (gate 2): every result is `confirmed`, `killed`, `changed: <what>` or
+  `accepted by <role>: <reason>; revisit: <trigger>` (non-blank role; case-insensitive); anything else FAILs naming the row.
+- answers.md: entries are `## ` sections. answers-sourced (gate 2): each entry needs a non-empty `Owner:`,
+  a `Date:` that is a real YYYY-MM-DD no later than today, a non-empty `Link:` and a non-empty
+  `Summary:`; FAIL names the entry (its first heading word).
+- decider-signoff (gate 2): the LATEST `gate2` line in `## Gates` is `pass by <role>`, role equal to the
+  index `decider` (case-insensitive), and no kill or reshape line (any gate) comes after it.
+- brief-read (gate 2): `Brief.md` (exact filename) exists, has a `## Terms` section, and the LATEST `cold-read:` line is
+  `pass <sha12>` or `accepted <sha12> by <role>` (non-empty role), sha12 = the first 12 hex of the sha256
+  of the Brief's UTF-8 text without frontmatter, stripped of surrounding whitespace. Else FAIL naming
+  the current sha12.
 """
 import argparse
+import datetime
 import hashlib
-import os
 import re
 import sys
 from pathlib import Path
 
-STAGES = ["framing", "gate1", "answering", "gate2", "prd"]
-VALID_STAGES = STAGES + ["killed", "reshaped"]
-RISKS = {"value", "usability", "feasibility", "viability", "ethical"}
+VALID_STAGES = ["framing", "gate1", "answering", "gate2", "prd", "killed", "reshaped"]
+COLUMNS = ("id", "assumption", "if wrong", "owner", "source", "test", "result")
 TEST_TYPES = ("interview", "prototype", "data", "survey", "spike")
-OWNERS = {"operator/user", "finance", "compliance", "decider", "engineering"}
-PEOPLE_CAP = 12  # max answers.md entries whose Owner is not engineering
-LEVELS = {"high", "med", "low"}
+SIDE_FILES = {"assumptions.md", "answers.md", "frame.md", "brief.md"}  # compared lowercased
 GATE_LINE = re.compile(
-    r"^\s*[-*]\s+\d{4}-\d\d-\d\d\s+gate([12]):\s*(kill|reshape|continue|pass by [^:]+?)\s*(?::\s*(.*?))?\s*$")
-
-
-NEVER = 9  # `need` level for structural checks: an absent file is SKIPPED at every gate
+    r"^\s*[-*]\s+\d{4}-\d\d-\d\d\s+gate([12]):\s*(kill|reshape|continue|pass by [^:]+?)\s*(?::\s*(.*?))?\s*$", re.I)
+COLD_LINE = re.compile(r"^\s*[-*]\s+\d{4}-\d\d-\d\d\s+cold-read:(.*)$")
+HOURS_LINE = re.compile(r"^\s*[-*]\s+\d{4}-\d\d-\d\d\s+\S+\s+(\d+(?:\.\d+)?)h\b", re.M)
+CLOSED = re.compile(r"confirmed|killed|changed:\s*\S.*|accepted by\s+[^:;\s][^:;]*:\s*[^;\s][^;]*;\s*revisit:\s*\S.*", re.I)
 
 
 def load(path):
@@ -122,19 +89,26 @@ def frontmatter(text):
     return out
 
 
-def sections(text, prefix="## "):
+def sections(text):
     """[(heading, body)] for each `## ` section."""
     out, cur = [], None
     for line in text.splitlines():
-        if line.startswith(prefix):
-            cur = [line[len(prefix):].strip(), []]
+        if line.startswith("## "):
+            cur = [line[3:].strip(), []]
             out.append(cur)
         elif cur:
             cur[1].append(line)
     return [(h, "\n".join(b)) for h, b in out]
 
 
-def assumptions(text):
+def section(text, name):
+    """Body of every `## <name>` section (heading case-insensitive), joined; None when there is none."""
+    bodies = [b for h, b in sections(text) if h.lower() == name.lower()]
+    return "\n".join(bodies) if bodies else None
+
+
+def table_rows(text):
+    """(header columns, data rows as dicts); columns is None when there is no table."""
     rows, cols = [], None
     for line in text.splitlines():
         if not line.strip().startswith("|"):
@@ -144,240 +118,105 @@ def assumptions(text):
             cols = [c.lower() for c in cells]
         elif not all(re.fullmatch(r":?-+:?", c) for c in cells if c):
             rows.append(dict(zip(cols, cells + [""] * (len(cols) - len(cells)))))
-    return rows
-
-
-def vault_root(folder):
-    """Nearest ancestor of the folder (itself included) holding a `.obsidian` directory, else None."""
-    here = Path(folder).resolve()
-    return next((p for p in (here, *here.parents) if (p / ".obsidian").is_dir()), None)
-
-
-def notes_named(root, target):
-    """Paths under root of `<target>.md` (a `/` in target matches the path suffix); case-insensitive, dot-folders skipped."""
-    want = re.sub(r"(?i)\.md$", "", target.strip("/")).lower() + ".md"
-    hits = []
-    for base, dirs, files in os.walk(root):
-        dirs[:] = [d for d in dirs if not d.startswith(".")]
-        for f in files:
-            rel = (Path(base) / f).relative_to(root).as_posix().lower()
-            if rel == want or rel.endswith("/" + want):
-                hits.append(rel)
-    return hits
-
-
-def link_problem(link, folder):
-    """Why a Terms link is unacceptable, or "" when it is fine."""
-    if not link or re.fullmatch(r"https://\S+", link):
-        return ""
-    if m := re.fullmatch(r"\[\[([^\]]+)\]\]", link):
-        root = vault_root(folder)
-        if root is None:
-            return "no vault root"
-        target = re.split(r"[|#]", m.group(1))[0].strip()
-        n = len(notes_named(root, target))
-        return "" if n == 1 else f"{n} notes match [[{target}]]"
-    if m := re.fullmatch(r"((?:~/|/).*?)(?::(\d+))?", link):
-        path = Path(m.group(1)).expanduser()
-        if not path.is_file():
-            return f"no file {m.group(1)}"
-        if not m.group(2):
-            return ""
-        try:
-            lines = len(path.read_text(encoding="utf-8", errors="replace").splitlines())
-        except OSError:
-            return f"cannot read {m.group(1)}"
-        return "" if 1 <= int(m.group(2)) <= lines else f"line {m.group(2)} outside 1..{lines}"
-    return "write as https URL, ~/path or [[note]]"
-
-
-def check_terms(text, folder):
-    body = next((b for h, b in sections(text) if h == "Terms"), None)
-    if body is None:
-        return result(False, "frame-terms", "no ## Terms")
-    head = next((l for l in body.splitlines() if l.strip().startswith("|")), "")
-    cols = [c.strip().lower() for c in re.split(r"(?<!\\)\|", head.strip().strip("|"))]
-    if not head or "term" not in cols or "meaning" not in cols:
-        return result(False, "frame-terms", "no term | meaning | link table")
-    bad = []
-    for r in assumptions(body):
-        term = r.get("term", "")
-        why = "no meaning" if not r.get("meaning") else link_problem(r.get("link", ""), folder)
-        if not term:
-            bad.append("(no term): " + (why or "no term"))
-        elif why:
-            bad.append(f"{term}: {why}")
-    return result(not bad, "frame-terms", "; ".join(bad))
-
-
-def completed(stage, entry):
-    done = [] if stage not in STAGES else STAGES[:STAGES.index(stage)]
-    if stage in ("killed", "reshaped"):
-        done = ["framing"]
-    return [s for s in done if not (entry == "decided" and s in ("framing", "gate1"))]
+    return cols, rows
 
 
 def result(ok, name, detail=""):
     return (("PASS" if ok else "FAIL"), name, detail)
 
 
-def missing(name, file):
-    return result(False, name, f"{file} missing")
-
-
-def high(rows):
-    return [r for r in rows if r.get("importance", "").lower() == "high"]
-
-
 def check_stage(idea):
     stage = idea.get("stage", "")
-    ok = stage in VALID_STAGES
-    return result(ok, "stage-value", stage or "stage missing")
+    return result(stage in VALID_STAGES, "stage-value", stage or "stage missing")
 
 
-def check_values(rows):
+def check_gate_reason(gates):
     bad = []
-    for r in rows:
-        for col, allowed in (("risk", RISKS), ("owner", OWNERS), ("importance", LEVELS), ("evidence", LEVELS)):
-            v = r.get(col, "").lower()
-            if (v or col != "owner") and v not in allowed:  # an empty owner is top3-ready's concern
-                bad.append(f"{r.get('id', '?')} {col}={r.get(col, '')!r}")
-    return result(not bad, "assumption-values", "; ".join(bad))
+    for l in gates.splitlines():
+        if re.search(r"gate[12]:", l, re.I):
+            m = GATE_LINE.match(l)
+            if not m or (m.group(2).lower() in ("kill", "reshape") and not m.group(3)):
+                bad.append(l.strip())
+    return result(not bad, "gate-reason", "no reason or malformed: " + "; ".join(bad) if bad else "")
 
 
-def check_premortem(text, ids):
-    """ids: assumption ids to validate `→ A<n>` against, or None when assumptions.md is absent."""
-    bad = []
-    for line in text.splitlines():
-        if re.match(r"\s*(?:[-*]|\d+[.)])\s+\S", line):
-            m = re.search(r"(?:→|->)\s*(?:PRD:\s*\S.*|(A\d+)[.,;!]*)\s*$", line)
-            if not m:
-                bad.append("no link: " + line.strip()[:60])
-            elif m.group(1) and ids is not None and m.group(1) not in ids:
-                bad.append(f"{m.group(1)} is not in assumptions.md")
-    return result(not bad, "premortem-links", "; ".join(bad))
-
-
-def parse_gates(text):
-    return [m for m in (GATE_LINE.match(l) for l in text.splitlines()) if m]
-
-
-def check_gate_reason(text):
-    bad = [l.strip() for l in text.splitlines()
-           if re.search(r"gate[12]:\s*(?:kill|reshape)\b", l)
-           and not ((m := GATE_LINE.match(l)) and m.group(3))]
-    return result(not bad, "gate-reason", "no reason: " + "; ".join(bad) if bad else "")
-
-
-def check_hours(idea):
+def check_hours(idea, hours):
     stage = idea.get("stage", "")
     if stage not in VALID_STAGES:
         return ("SKIPPED", "hours-logged", "invalid stage")
-    hours = set(re.findall(r"^\s*[-*]\s+\d{4}-\d\d-\d\d\s+(\w+)\s+[\d.]+h\b", idea["_hours"], re.M))
-    need = [s for s in completed(stage, idea.get("entry", "raw")) if s not in hours]
-    return result(not need, "hours-logged", "no hours for " + ", ".join(need) if need else "")
+    total = sum(float(h) for h in HOURS_LINE.findall(hours))
+    return result(stage == "framing" or total > 0, "hours-logged", f"{total:g}h logged")
 
 
-def frame_questions(text):
-    out = []
-    for head, body in sections(text):
-        m = re.match(r"(Q\d+)\b", head)
-        if m:
-            src = re.search(r"^\s*Source:\s*(me|unknown|lookup\s+\S.*?)\s*$", body, re.M | re.I)
-            out.append((m.group(1), src.group(1).split()[0].lower() if src else None, body))
-    return out
+def row_names(rows, keep):
+    """Ids of the rows keep() selects; a row without an id is named `row <n>` (1-based)."""
+    return [r.get("id") or f"row {i}" for i, r in enumerate(rows, 1) if keep(r)]
 
 
-def check_frame_sources(text):
-    bad = [q for q, s, _ in frame_questions(text) if s is None]
-    return result(not bad, "frame-sources", "no Source: " + ", ".join(bad) if bad else "")
-
-
-def owner_of(body):
-    """The `Owner:` value's first token, lowercased (`Owner: Finance (role)` -> finance), else ""."""
-    m = re.search(r"^\s*Owner:\s*(\S+)", body, re.M | re.I)
-    return m.group(1).lower().rstrip(",.;:)") if m else ""
-
-
-def check_frame_owners(text):
-    bad = [q for q, src, body in frame_questions(text) if src == "unknown" and owner_of(body) not in OWNERS]
-    return result(not bad, "frame-owners", "no D10 Owner: " + ", ".join(bad) if bad else "")
-
-
-LANGUAGE_LINE = re.compile(r"^\s*[-*]\s+\d{4}-\d\d-\d\d\s+language:(.*)$")
-
-
-def frame_sha(frame):
-    """sha12 of the frame body (frontmatter already stripped by read()), outer whitespace ignored."""
-    return hashlib.sha256(frame.strip().encode("utf-8")).hexdigest()[:12]
-
-
-def check_language(frame, gates):
-    sha = frame_sha(frame)
-    if gates is None:
-        return result(False, "frame-language", f"gates.md missing; frame {sha}")
-    lines = [m.group(1).strip() for m in map(LANGUAGE_LINE.match, gates.splitlines()) if m]
-    ok = bool(lines) and re.fullmatch(rf"pass\s+{sha}|accepted\s+{sha}\s+by\s+\S.*", lines[-1], re.I) is not None
-    return result(ok, "frame-language", f"frame {sha}" if ok else f"no pass for frame {sha}")
-
-
-def check_people_cap(text):
-    n = sum(1 for _, body in sections(text or "") if owner_of(body) != "engineering")
-    return result(n <= PEOPLE_CAP, "people-cap", f"{n} items sent to people (max {PEOPLE_CAP})")
-
-
-def check_unknown(text, rows):
-    cited = " ".join(r.get("assumption", "") for r in rows)
-    bad = [q for q, s, _ in frame_questions(text) if s == "unknown" and not re.search(rf"\b{q}\b", cited)]
-    return result(not bad, "unknown-to-assumption", "uncited: " + ", ".join(bad) if bad else "")
-
-
-def check_top3(rows):
-    n = sum(1 for r in high(rows) if r.get("owner") and r.get("test"))
-    return result(n >= 3, "top3-ready", f"{n} high-importance assumptions with owner and test (need 3)")
+def check_owners(rows):
+    bad = row_names(rows, lambda r: not r.get("result") and not r.get("owner"))
+    return result(not bad, "question-owners", "no owner: " + ", ".join(bad) if bad else "")
 
 
 def check_test_criterion(rows):
     pat = re.compile(r"(?:%s):\s*\S" % "|".join(TEST_TYPES), re.I)
-    bad = [r.get("id", "?") for r in high(rows) if not pat.match(r.get("test", ""))]
+    bad = row_names(rows, lambda r: r.get("test") and not pat.match(r["test"]))
     return result(not bad, "test-criterion", "need `<type>: <criterion>`: " + ", ".join(bad) if bad else "")
 
 
 def check_closed(rows):
-    bad = [r.get("id", "?") for r in high(rows) if not r.get("result")]
-    return result(not bad, "assumptions-closed", "open: " + ", ".join(bad) if bad else "")
+    bad = row_names(rows, lambda r: not CLOSED.fullmatch(r.get("result", "")))
+    return result(not bad, "assumptions-closed", "not closed: " + ", ".join(bad) if bad else "")
+
+
+def field(body, name):
+    m = re.search(rf"^\s*{name}:[ \t]*(\S.*?)\s*$", body, re.M | re.I)
+    return m.group(1) if m else ""
+
+
+def real_past_date(value):
+    try:
+        return datetime.date.fromisoformat(value) <= datetime.date.today() and bool(re.fullmatch(r"\d{4}-\d\d-\d\d", value))
+    except ValueError:
+        return False
 
 
 def check_answers(text):
     bad = []
-    for head, body in sections(text):
-        miss = [f for f in ("Owner", "Date", "Link")
-                if not (owner_of(body) if f == "Owner" else re.search(rf"^\s*{f}:\s*\S", body, re.M))]
+    for head, body in sections(text or ""):
+        miss = [f for f in ("Owner", "Date", "Link", "Summary")
+                if not (real_past_date(field(body, f)) if f == "Date" else field(body, f))]
         if miss:
             bad.append(f"{head.split()[0] if head else '?'} lacks " + "/".join(miss))
     return result(not bad, "answers-sourced", "; ".join(bad))
 
 
-def nothing_open(frame, rows):
-    unknown = any(s == "unknown" for _, s, _ in frame_questions(frame or ""))
-    return not unknown and not [r for r in high(rows) if not r.get("result")]
+def check_signoff(gates, decider):
+    lines = [m for m in map(GATE_LINE.match, gates.splitlines()) if m]
+    last = max((i for i, m in enumerate(lines) if m.group(1) == "2"), default=None)
+    head = lines[last].group(2) if last is not None else ""
+    role = head[len("pass by "):].strip() if head.lower().startswith("pass by ") else ""
+    ok = bool(decider) and role.lower() == decider.lower() and not any(
+        m.group(2).lower() in ("kill", "reshape") for m in lines[last + 1:])
+    return result(ok, "decider-signoff", f"need latest gate2 `pass by {decider or '<decider>'}`" if not ok else "")
 
 
-def check_signoff(text, decider):
-    roles = [m.group(2)[len("pass by "):].strip().lower() for m in parse_gates(text)
-             if m.group(1) == "2" and m.group(2).startswith("pass by ")]
-    return result(decider.lower() in roles and bool(decider), "decider-signoff",
-                  f"need `gate2: pass by {decider or '<decider>'}`")
-
-
-SIDE_FILES = {"frame.md", "assumptions.md", "premortem.md", "answers.md", "gates.md"}
+def check_brief(brief, gates):
+    if brief is None:
+        return result(False, "brief-read", "Brief.md missing")
+    sha = hashlib.sha256(brief.strip().encode("utf-8")).hexdigest()[:12]
+    if section(brief, "Terms") is None:
+        return result(False, "brief-read", f"Brief.md has no ## Terms; brief {sha}")
+    lines = [m.group(1).strip() for m in map(COLD_LINE.match, gates.splitlines()) if m]
+    ok = bool(lines) and re.fullmatch(rf"pass\s+{sha}|accepted\s+{sha}\s+by\s+\S.*", lines[-1], re.I) is not None
+    return result(ok, "brief-read", f"brief {sha}" if ok else f"no cold-read pass for brief {sha}")
 
 
 def find_index(folder):
     """(text, None) of the one root-level .md with `type: project`, else (None, why)."""
     found = []
     for p in sorted(Path(folder).glob("*.md")):
-        text = None if p.name in SIDE_FILES else load(p)
+        text = None if p.name.lower() in SIDE_FILES else load(p)
         if text is not None and frontmatter(text).get("type") == "project":
             found.append(text)
     if len(found) != 1:
@@ -391,44 +230,26 @@ def run(folder, gate):
     if text is None:
         return why
     idea = frontmatter(text)
-    idea["_hours"] = (re.split(r"^## Hours\s*$", text, flags=re.M) + [""])[1].split("\n## ")[0]
-    skip_gate1 = gate == 2 and idea.get("entry") == "decided"
-    docs = {n: read(folder, n) for n in ("frame.md", "assumptions.md", "premortem.md", "answers.md", "gates.md")}
-    rows = assumptions(docs["assumptions.md"] or "")
-    ids = {r.get("id", "") for r in rows} if docs["assumptions.md"] is not None else None
-    out = [check_stage(idea)]
-
-    def need(name, file, gate_needs, fn):
-        if skip_gate1 and name in ("frame-sources", "frame-owners", "frame-terms", "frame-language",
-                    "unknown-to-assumption", "top3-ready", "premortem-links"):
-            return ("SKIPPED", name, "entry: decided")
-        if docs[file] is None:
-            return missing(name, file) if gate >= gate_needs else ("SKIPPED", name, f"{file} absent")
-        return fn()
-
-    out.append(need("assumption-values", "assumptions.md", NEVER, lambda: check_values(rows)))
-    out.append(need("premortem-links", "premortem.md", 1, lambda: check_premortem(docs["premortem.md"], ids)))
-    out.append(need("gate-reason", "gates.md", NEVER, lambda: check_gate_reason(docs["gates.md"])))
-    out.append(check_hours(idea))
+    gates = section(text, "Gates") or ""
+    out = [check_stage(idea), check_gate_reason(gates), check_hours(idea, section(text, "Hours") or "")]
     if gate >= 1:
-        out.append(need("frame-sources", "frame.md", 1, lambda: check_frame_sources(docs["frame.md"])))
-        out.append(need("frame-owners", "frame.md", 1, lambda: check_frame_owners(docs["frame.md"])))
-        out.append(need("frame-terms", "frame.md", 1, lambda: check_terms(docs["frame.md"], folder)))
-        out.append(need("frame-language", "frame.md", 1,
-                        lambda: check_language(docs["frame.md"], docs["gates.md"])))
-        out.append(need("unknown-to-assumption", "frame.md", 1,
-                        lambda: check_unknown(docs["frame.md"], rows)))
-        out.append(need("top3-ready", "assumptions.md", 1, lambda: check_top3(rows)))
-        out.append(need("test-criterion", "assumptions.md", 1, lambda: check_test_criterion(rows)))
-    if gate >= 2:
-        out.append(need("assumptions-closed", "assumptions.md", 2, lambda: check_closed(rows)))
-        if docs["answers.md"] is None and nothing_open(docs["frame.md"], rows):
-            out.append(result(True, "answers-sourced", "no answers.md; nothing was open"))
-        else:
-            out.append(need("answers-sourced", "answers.md", 2, lambda: check_answers(docs["answers.md"])))
-        out.append(check_people_cap(docs["answers.md"]))
-        out.append(need("decider-signoff", "gates.md", 2,
-                        lambda: check_signoff(docs["gates.md"], idea.get("decider", ""))))
+        raw = read(folder, "assumptions.md")
+        cols, rows = table_rows(raw or "")
+        absent = [c for c in COLUMNS if c not in (cols or [])]
+        why = ("assumptions.md missing" if raw is None else
+               "missing columns: " + ", ".join(absent) if absent else "no questions recorded" if not rows else "")
+
+        def need(name, fn):
+            return result(False, name, why) if why else fn()
+
+        out.append(need("question-owners", lambda: check_owners(rows)))
+        out.append(need("test-criterion", lambda: check_test_criterion(rows)))
+        if gate >= 2:
+            out.append(need("assumptions-closed", lambda: check_closed(rows)))
+            out.append(check_answers(read(folder, "answers.md")))
+            out.append(check_signoff(gates, idea.get("decider", "")))
+            has_brief = "Brief.md" in {p.name for p in Path(folder).iterdir()}  # exact name, even on case-insensitive disks
+            out.append(check_brief(read(folder, "Brief.md") if has_brief else None, gates))
     return out
 
 

@@ -1,14 +1,12 @@
-"""idea_check.py against throwaway idea folders; scenario IDs name the tests."""
+"""idea_check.py (contract v2) against throwaway idea folders; scenario IDs name the tests."""
 
 import contextlib
 import hashlib
 import importlib.util
 import io
-import os
 from pathlib import Path
 import tempfile
 import unittest
-from unittest import mock
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "idea_check.py"
 
@@ -20,6 +18,17 @@ def load():
     return mod
 
 
+def sha12(text):
+    return hashlib.sha256(text.strip().encode("utf-8")).hexdigest()[:12]
+
+
+BRIEF = "# Brief\nWe sync the ledger.\n## Terms\n| term | meaning |\n|---|---|\n| Sync date | last ledger sync |\n"
+GATES = (
+    "- 2026-10-10 gate1: continue: top assumptions ready\n"
+    "- 2026-10-25 gate2: pass by CFO: all closed\n"
+    f"- 2026-10-26 cold-read: pass {sha12(BRIEF)}\n"
+)
+HOURS = "- 2026-10-01 framing 2h\n- 2026-10-10 answering 3h"
 IDEA = """---
 type: project
 status: idea
@@ -30,42 +39,22 @@ decider: CFO
 # Idea
 ## Hours
 {hours}
+## Gates
+{gates}
 """
-FRAME = """# Frame
-## Q1 Who has the problem?
-Source: me
-## Q2 What does it cost?
-Source: unknown
-Owner: Finance
-## Q3 Is there data?
-Source: lookup https://example.com/x
-## Terms
-| term | meaning | link |
-|---|---|---|
-| Sync date | when the ledger last synced | https://example.com/sync |
-"""
+COLS = ("id", "assumption", "if wrong", "owner", "source", "test", "result")
 ROWS = [
-    ("A1", "value", "Clients want it (Q2)", "high", "low", "operator/user", "interview: 3 of 5 ops leads describe it", "confirmed"),
-    ("A2", "feasibility", "API exists", "high", "med", "engineering", "spike: API returns the sync date", "accepted by decider"),
-    ("A3", "viability", "Cost fits", "high", "low", "finance", "data: cost under the fee cap", "ok"),
-    ("A4", "usability", "Easy", "low", "low", "decider", "", ""),
+    ("A1", "Clients want it", "no demand", "operator", "Q1", "interview: 3 of 5 ops leads describe it", "confirmed"),
+    ("A2", "API exists", "rebuild", "engineering", "docs", "spike: API returns the sync date", "changed: use export"),
+    ("A3", "Cost fits", "too dear", "finance", "me", "data: cost under the fee cap",
+     "accepted by CFO: small spend; revisit: Q1 review"),
+    ("A4", "Easy", "training", "decider", "me", "", "killed"),
 ]
-PREMORTEM = "# Pre-mortem\n- Nobody uses it → PRD: adoption plan\n- Cost blows up → A3\n"
-ANSWERS = "## Q2\nOwner: finance\nDate: 2026-10-20\nSummary: costs ok\nLink: https://example.com/a\n"
-def sha12(text):
-    return hashlib.sha256(text.strip().encode("utf-8")).hexdigest()[:12]
+ANSWERS = "## Q2 cost\nOwner: finance\nDate: 2026-10-20\nLink: https://example.com/a\nSummary: costs ok\n"
 
 
-GATES = (
-    "- 2026-10-10 gate1: continue: top 3 ready\n"
-    "- 2026-10-25 gate2: pass by CFO: all closed\n"
-    f"- 2026-10-26 language: pass {sha12(FRAME)}\n"
-)
-HOURS = "- 2026-10-01 framing 2h\n- 2026-10-05 gate1 1h\n- 2026-10-10 answering 3h\n- 2026-10-20 gate2 1h"
-
-
-def table(rows):
-    head = "| id | risk | assumption | importance | evidence | owner | test | result |\n|---|---|---|---|---|---|---|---|\n"
+def table(rows, cols=COLS):
+    head = "| " + " | ".join(cols) + " |\n|" + "---|" * len(cols) + "\n"
     return head + "".join("| " + " | ".join(r) + " |\n" for r in rows)
 
 
@@ -73,22 +62,19 @@ class IdeaCheckTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        self.root = Path(tmp.name)
-        self.dir = self.root / "idea"
+        self.dir = Path(tmp.name) / "idea"
         self.dir.mkdir()
         self.app = load()
-        self.idea(stage="prd")
-        self.write("frame.md", FRAME)
+        self.idea()
         self.write("assumptions.md", table(ROWS))
-        self.write("premortem.md", PREMORTEM)
         self.write("answers.md", ANSWERS)
-        self.write("gates.md", GATES)
+        self.write("Brief.md", BRIEF)
 
     def write(self, name, text):
         (self.dir / name).write_text(text)
 
-    def idea(self, stage="prd", entry="raw", hours=HOURS):
-        self.write("Robo-Doc.md", IDEA.format(stage=stage, entry=entry, hours=hours))
+    def idea(self, stage="prd", entry="raw", hours=HOURS, gates=GATES):
+        self.write("Robo-Doc.md", IDEA.format(stage=stage, entry=entry, hours=hours, gates=gates))
 
     def run_check(self, *args):
         out, err = io.StringIO(), io.StringIO()
@@ -96,6 +82,12 @@ class IdeaCheckTests(unittest.TestCase):
             code = self.app.main([str(self.dir), *args])
         return code, out.getvalue(), err.getvalue()
 
+    def rows(self, **edits):
+        """ROWS with test/result/owner replaced on row A1 (dict of column -> value)."""
+        row = dict(zip(COLS, ROWS[0]), **edits)
+        self.write("assumptions.md", table([tuple(row[c] for c in COLS), *ROWS[1:]]))
+
+    # --- index note discovery
     def test_S1_missing_index_note_is_refused(self):
         (self.dir / "Robo-Doc.md").unlink()
         code, out, err = self.run_check()
@@ -103,183 +95,17 @@ class IdeaCheckTests(unittest.TestCase):
         self.assertIn("REFUSED", out + err)
 
     def test_S1_two_index_notes_are_refused(self):
-        self.write("Other.md", IDEA.format(stage="prd", entry="raw", hours=HOURS))
-        code, out, err = self.run_check()
-        self.assertEqual(code, 2)
-        self.assertIn("REFUSED", out + err)
+        self.write("Other.md", IDEA.format(stage="prd", entry="raw", hours=HOURS, gates=GATES))
+        self.assertEqual(self.run_check()[0], 2)
 
     def test_S1_notes_without_type_project_do_not_count(self):
         self.write("Notes.md", "---\ntype: note\n---\nhi\n")
         self.assertEqual(self.run_check()[0], 0)
-        (self.dir / "Robo-Doc.md").unlink()
-        self.assertEqual(self.run_check()[0], 2)
 
-    def test_S2_bad_stage_fails(self):
-        self.idea(stage="done")
-        code, out, _ = self.run_check()
-        self.assertEqual(code, 1)
-        self.assertIn("FAIL stage-value", out)
-
-    def test_S3_question_without_source_fails_and_is_named(self):
-        self.write("frame.md", FRAME + "## Q4 Who pays?\nno source here\n")
-        code, out, _ = self.run_check("--gate", "1")
-        self.assertEqual(code, 1)
-        self.assertRegex(out, r"FAIL frame-sources.*Q4")
-
-    def test_S4_unknown_question_without_assumption_fails(self):
-        rows = [(r[0], r[1], r[2].replace("(Q2)", ""), *r[3:]) for r in ROWS]
-        self.write("assumptions.md", table(rows))
-        code, out, _ = self.run_check("--gate", "1")
-        self.assertEqual(code, 1)
-        self.assertRegex(out, r"FAIL unknown-to-assumption.*Q2")
-
-    def test_S5_fewer_than_three_ready_high_assumptions_fails(self):
-        rows = [r if r[0] != "A3" else (*r[:6], "", r[7]) for r in ROWS]
-        self.write("assumptions.md", table(rows))
-        code, out, _ = self.run_check("--gate", "1")
-        self.assertEqual(code, 1)
-        self.assertIn("FAIL top3-ready", out)
-
-    def test_S6_bad_risk_or_owner_fails(self):
-        for col, val in ((1, "money"), (5, "intern")):
-            rows = [(*ROWS[0][:col], val, *ROWS[0][col + 1:]), *ROWS[1:]]
-            self.write("assumptions.md", table(rows))
-            code, out, _ = self.run_check()
-            self.assertEqual(code, 1)
-            self.assertIn("FAIL assumption-values", out)
-
-    def test_S7_premortem_item_without_link_fails(self):
-        self.write("premortem.md", PREMORTEM + "- Regulators object\n")
-        code, out, _ = self.run_check()
-        self.assertEqual(code, 1)
-        self.assertIn("FAIL premortem-links", out)
-
-    def test_S8_kill_without_reason_fails(self):
-        self.write("gates.md", GATES + "- 2026-10-26 gate1: kill\n")
-        code, out, _ = self.run_check()
-        self.assertEqual(code, 1)
-        self.assertIn("FAIL gate-reason", out)
-
-    def test_S8_reshape_without_reason_fails(self):
-        self.write("gates.md", GATES + "- 2026-10-27 gate1: reshape:  \n")
-        code, out, _ = self.run_check()
-        self.assertEqual(code, 1)
-        self.assertIn("FAIL gate-reason", out)
-
-    def test_S9_open_high_assumption_fails(self):
-        rows = [(*ROWS[0][:7], ""), *ROWS[1:]]
-        self.write("assumptions.md", table(rows))
-        code, out, _ = self.run_check("--gate", "2")
-        self.assertEqual(code, 1)
-        self.assertRegex(out, r"FAIL assumptions-closed.*A1")
-
-    def test_S10_answer_without_link_fails(self):
-        self.write("answers.md", ANSWERS.replace("Link: https://example.com/a\n", ""))
-        code, out, _ = self.run_check("--gate", "2")
-        self.assertEqual(code, 1)
-        self.assertRegex(out, r"FAIL answers-sourced.*Link")
-
-    def test_S11_signoff_must_match_decider(self):
-        self.write("gates.md", GATES.replace("pass by CFO", "pass by CPO"))
-        code, out, _ = self.run_check("--gate", "2")
-        self.assertEqual(code, 1)
-        self.assertIn("FAIL decider-signoff", out)
-        self.write("gates.md", "- 2026-10-10 gate1: continue: ok\n")
-        self.assertIn("FAIL decider-signoff", self.run_check("--gate", "2")[1])
-
-    def test_S12_completed_stage_without_hours_fails(self):
-        self.idea(stage="prd", hours="- 2026-10-01 framing 2h")
-        code, out, _ = self.run_check()
-        self.assertEqual(code, 1)
-        self.assertRegex(out, r"FAIL hours-logged.*gate1")
-
-    def test_S13_decided_entry_skips_frame_and_premortem_checks(self):
-        self.idea(entry="decided")
-        (self.dir / "frame.md").unlink()
-        (self.dir / "premortem.md").unlink()
-        code, out, _ = self.run_check("--gate", "2")
-        self.assertEqual(code, 0, out)
-        for name in ("frame-sources", "frame-owners", "unknown-to-assumption", "top3-ready", "premortem-links",
-                     "frame-terms", "frame-language"):
-            self.assertIn(f"SKIPPED {name}", out)
-        for name in ("assumptions-closed", "answers-sourced", "decider-signoff", "hours-logged"):
-            self.assertIn(f"PASS {name}", out)
-
-    def test_S13_decided_entry_still_runs_closing_checks(self):
-        self.idea(entry="decided")
-        self.write("gates.md", "")
-        code, out, _ = self.run_check("--gate", "2")
-        self.assertEqual(code, 1)
-        self.assertIn("FAIL decider-signoff", out)
-
-    def test_S14_all_pass_prints_one_pass_per_check(self):
-        code, out, _ = self.run_check("--gate", "2")
-        self.assertEqual(code, 0, out)
-        lines = out.strip().splitlines()
-        self.assertTrue(all(l.startswith("PASS ") for l in lines), out)
-        names = [l.split()[1].rstrip(":") for l in lines]
-        self.assertEqual(len(names), len(set(names)))
-        self.assertEqual(len(names), 16)
-
-    def test_S9_escaped_pipe_does_not_shift_columns(self):
-        rows = [(ROWS[0][0], "value", r"See [[note\|alias]] (Q2)", *ROWS[0][3:7], ""), *ROWS[1:]]
-        self.write("assumptions.md", table(rows))
-        code, out, _ = self.run_check("--gate", "2")
-        self.assertEqual(code, 1)
-        self.assertRegex(out, r"FAIL assumptions-closed.*A1")
-
-    def test_S3_wikilink_with_spaces_and_any_case_are_valid_sources(self):
-        self.write("frame.md", "## Q1 a\nSource: lookup [[Idea to PRD - PRD]]\n## Q2 b\nSource: Unknown\n")
-        code, out, _ = self.run_check("--gate", "1")
-        self.assertIn("PASS frame-sources", out)
-        self.assertIn("PASS unknown-to-assumption", out)
-
-    def test_S2_quoted_frontmatter_value_is_accepted(self):
-        self.write("Robo-Doc.md", (self.dir / "Robo-Doc.md").read_text().replace("stage: prd", 'stage: "prd"'))
-        self.assertIn("PASS stage-value", self.run_check()[1])
-
-    def test_S7_trailing_punctuation_after_assumption_link(self):
-        self.write("premortem.md", "- Cost blows up → A3.\n")
-        self.assertIn("PASS premortem-links", self.run_check()[1])
-
-    def test_S7_link_to_unknown_assumption_fails(self):
-        self.write("premortem.md", "- Cost blows up → A9\n")
-        code, out, _ = self.run_check()
-        self.assertEqual(code, 1)
-        self.assertRegex(out, r"FAIL premortem-links.*A9")
-
-    def test_S10_missing_answers_passes_when_nothing_is_open(self):
-        (self.dir / "answers.md").unlink()
-        self.write("frame.md", FRAME.replace("Source: unknown", "Source: me"))
-        self.assertIn("PASS answers-sourced", self.run_check("--gate", "2")[1])
-
-    def test_S10_missing_answers_fails_with_unknown_question(self):
-        (self.dir / "answers.md").unlink()
-        code, out, _ = self.run_check("--gate", "2")
-        self.assertEqual(code, 1)
-        self.assertIn("FAIL answers-sourced", out)
-
-    def test_S10_missing_answers_fails_with_open_high_assumption(self):
-        (self.dir / "answers.md").unlink()
-        self.write("frame.md", FRAME.replace("Source: unknown", "Source: me"))
-        self.write("assumptions.md", table([(*ROWS[0][:7], ""), *ROWS[1:]]))
-        self.assertIn("FAIL answers-sourced", self.run_check("--gate", "2")[1])
-
-    def test_S7_side_file_frontmatter_is_ignored(self):
-        fm = "---\ntype: note\ntags:\n  - x\n---\n"
-        for name in ("premortem.md", "gates.md", "frame.md", "answers.md"):
-            self.write(name, fm + (self.dir / name).read_text())
-        code, out, _ = self.run_check("--gate", "2")
-        self.assertEqual(code, 0, out)
-
-    def test_S1_side_file_with_type_project_is_not_a_candidate(self):
-        self.write("frame.md", "---\ntype: project\n---\n" + FRAME)
-        self.assertEqual(self.run_check()[0], 0)
-
-    def test_S1_subfolder_note_with_type_project_is_ignored(self):
-        (self.dir / "sub").mkdir()
-        (self.dir / "sub" / "Other.md").write_text("---\ntype: project\n---\n")
-        self.assertEqual(self.run_check()[0], 0)
+    def test_S1_side_files_with_type_project_are_not_candidates(self):
+        self.write("assumptions.md", "---\ntype: project\n---\n" + table(ROWS))
+        self.write("Brief.md", "---\ntype: project\n---\n" + BRIEF)
+        self.assertEqual(self.run_check("--gate", "2")[0], 0)
 
     def test_S1_bom_directory_and_binary_md_are_tolerated(self):
         path = self.dir / "Robo-Doc.md"
@@ -288,262 +114,300 @@ class IdeaCheckTests(unittest.TestCase):
         (self.dir / "bin.md").write_bytes(b"\xff\xfe\x00bad")
         self.assertEqual(self.run_check()[0], 0)
 
-    def test_S26_unknown_question_without_owner_fails_and_is_named(self):
-        for frame in (FRAME.replace("Owner: Finance\n", ""), FRAME.replace("Owner: Finance", "Owner: intern")):
-            self.write("frame.md", frame)
-            for gate in ("1", "2"):
-                code, out, _ = self.run_check("--gate", gate)
-                self.assertEqual(code, 1)
-                self.assertRegex(out, r"FAIL frame-owners.*Q2")
+    def test_S2_bad_stage_fails_and_quoted_stage_passes(self):
+        self.idea(stage="done")
+        code, out, _ = self.run_check()
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL stage-value", out)
+        self.idea(stage='"prd"')
+        self.assertIn("PASS stage-value", self.run_check()[1])
 
-    def test_S26_owner_is_case_insensitive_and_only_unknowns_need_one(self):
-        self.write("frame.md", FRAME.replace("Owner: Finance", "owner:  Operator/User"))
-        self.assertIn("PASS frame-owners", self.run_check("--gate", "1")[1])
+    # --- S38
+    def test_S38_cut_checks_never_print_and_absent_files_do_not_fail(self):
+        for name in ("premortem.md", "gates.md", "frame.md"):
+            self.assertFalse((self.dir / name).exists())
+        for args in ((), ("--gate", "1"), ("--gate", "2")):
+            code, out, _ = self.run_check(*args)
+            self.assertEqual(code, 0, out)
+            for cut in ("assumption-values", "premortem-links", "frame-sources", "frame-terms", "frame-language",
+                        "unknown-to-assumption", "top3-ready", "people-cap", "frame-owners"):
+                self.assertNotIn(cut, out)
 
-    def test_S26_decided_entry_skips_frame_owners(self):
-        self.idea(entry="decided")
-        self.write("frame.md", FRAME.replace("Owner: Finance\n", ""))
-        self.assertIn("SKIPPED frame-owners", self.run_check("--gate", "2")[1])
+    def test_S38_check_names_per_gate(self):
+        names = lambda *a: [l.split()[1].rstrip(":") for l in self.run_check(*a)[1].splitlines()]
+        base = ["stage-value", "gate-reason", "hours-logged"]
+        g1 = base + ["question-owners", "test-criterion"]
+        self.assertEqual(names(), base)
+        self.assertEqual(names("--gate", "1"), g1)
+        self.assertEqual(names("--gate", "2"), g1 + ["assumptions-closed", "answers-sourced",
+                                                      "decider-signoff", "brief-read"])
 
-    def test_S27_more_than_twelve_people_items_fails(self):
-        def answers(n_people, n_eng):
-            e = "## Q{i}\nOwner: {o}\nDate: 2026-10-20\nSummary: s\nLink: https://example.com/a\n"
-            return "".join(e.format(i=i, o="finance") for i in range(n_people)) + \
-                "".join(e.format(i=100 + i, o="Engineering") for i in range(n_eng))
-        self.write("answers.md", answers(13, 5))
+    def test_S38_all_pass_at_gate_2(self):
         code, out, _ = self.run_check("--gate", "2")
-        self.assertEqual(code, 1)
-        self.assertIn("FAIL people-cap", out)
-        self.write("answers.md", answers(12, 5))
-        self.assertIn("PASS people-cap", self.run_check("--gate", "2")[1])
+        self.assertEqual(code, 0, out)
+        self.assertTrue(all(l.startswith("PASS ") for l in out.splitlines()), out)
 
-    def test_S26_owner_matches_on_first_token(self):
-        self.write("frame.md", FRAME.replace("Owner: Finance", "Owner: finance (role)"))
-        self.assertIn("PASS frame-owners", self.run_check("--gate", "1")[1])
+    # --- S39
+    def test_S39_kill_or_reshape_without_reason_fails_gate_reason(self):
+        for line in ("- 2026-10-26 gate1: kill", "- 2026-10-27 gate2: reshape:  "):
+            self.idea(gates=GATES + line + "\n")
+            code, out, _ = self.run_check()
+            self.assertEqual(code, 1)
+            self.assertIn("FAIL gate-reason", out)
 
-    def test_S27_owner_matches_on_first_token_and_missing_owner_counts(self):
-        e = "## Q{i}\n{o}Date: 2026-10-20\nSummary: s\nLink: https://example.com/a\n"
-        eng = "".join(e.format(i=i, o="Owner: Engineering via Gather\n") for i in range(20))
-        self.write("answers.md", eng)
-        self.assertIn("PASS people-cap", self.run_check("--gate", "2")[1])
-        self.write("answers.md", eng + "".join(e.format(i=50 + i, o="") for i in range(13)))
-        self.assertIn("FAIL people-cap", self.run_check("--gate", "2")[1])
+    def test_S39_kill_with_reason_and_no_gates_section_pass(self):
+        self.idea(gates=GATES + "- 2026-10-26 gate1: kill: no demand\n")
+        self.assertIn("PASS gate-reason", self.run_check()[1])
+        self.write("Robo-Doc.md", "---\ntype: project\nstage: framing\n---\n# Idea\n")
+        self.assertIn("PASS gate-reason", self.run_check()[1])
 
-    def test_S27_absent_answers_passes_people_cap(self):
-        (self.dir / "answers.md").unlink()
-        self.write("frame.md", FRAME.replace("Source: unknown", "Source: me"))
-        self.assertIn("PASS people-cap", self.run_check("--gate", "2")[1])
+    def test_S39_gate_lines_outside_the_gates_section_are_ignored(self):
+        text = (self.dir / "Robo-Doc.md").read_text() + "## Notes\n- 2026-10-26 gate1: kill\n"
+        self.write("Robo-Doc.md", text)
+        self.assertIn("PASS gate-reason", self.run_check()[1])
 
-    def test_S34_ethical_risk_passes_and_unknown_risk_fails(self):
-        rows = [(ROWS[0][0], "ethical", *ROWS[0][2:]), *ROWS[1:]]
-        self.write("assumptions.md", table(rows))
-        self.assertIn("PASS assumption-values", self.run_check()[1])
-        rows = [(ROWS[0][0], "legal", *ROWS[0][2:]), *ROWS[1:]]
-        self.write("assumptions.md", table(rows))
-        self.assertIn("FAIL assumption-values", self.run_check()[1])
+    def test_S39_malformed_gate_lines_fail_gate_reason(self):
+        for line in ("- 2026-10-27 gate1: Kill", "- 2026-10-27 gate1: killed: dead", "- 2026-10-27 GATE2: KILL",
+                     "- 2026-10-27 gate1: maybe"):
+            self.idea(gates=GATES + line + "\n")
+            code, out, _ = self.run_check()
+            self.assertEqual(code, 1, line)
+            self.assertIn("FAIL gate-reason", out)
 
-    def test_S36_high_importance_test_needs_type_and_criterion(self):
-        for bad in ("interview 5", "model", "interview:", "interview:  ", "poll: 5 of 10 say yes", ""):
-            rows = [(*ROWS[0][:6], bad, ROWS[0][7]), ROWS[1], (*ROWS[2][:6], bad, ROWS[2][7]), ROWS[3]]
-            self.write("assumptions.md", table(rows))
+    def test_S39_gates_heading_is_case_insensitive_and_all_sections_read(self):
+        text = (self.dir / "Robo-Doc.md").read_text().replace("## Gates", "## gates")
+        self.write("Robo-Doc.md", text + "## Gates\n- 2026-10-27 gate1: kill\n")
+        self.assertIn("FAIL gate-reason", self.run_check()[1])
+
+    def test_S45_later_kill_in_any_case_cancels_pass(self):
+        for line in ("- 2026-10-27 gate1: KILL: dead", "- 2026-10-27 Gate1: Reshape: new"):
+            self.idea(gates=GATES + line + "\n")
+            self.assertIn("FAIL decider-signoff", self.run_check("--gate", "2")[1])
+
+    def test_S43_accepted_needs_non_blank_role(self):
+        for result in ("accepted by : x; revisit: later", "accepted by  : x; revisit: later"):
+            self.rows(result=result)
+            self.assertRegex(self.run_check("--gate", "2")[1], r"FAIL assumptions-closed.*A1")
+
+    # --- S40
+    def test_S40_no_positive_hours_line_fails_past_framing(self):
+        for hours in ("", "- 2026-10-01 framing 0h", "no hours here"):
+            self.idea(hours=hours)
+            code, out, _ = self.run_check()
+            self.assertEqual(code, 1, hours)
+            self.assertIn("FAIL hours-logged", out)
+
+    def test_S40_any_label_counts_and_no_per_stage_line_is_required(self):
+        self.idea(stage="prd", hours="- 2026-10-01 whatever 1.5h")
+        self.assertIn("PASS hours-logged", self.run_check()[1])
+
+    def test_S40_framing_stage_needs_no_hours(self):
+        self.idea(stage="framing", hours="")
+        self.assertIn("PASS hours-logged", self.run_check()[1])
+
+    # --- S41
+    def test_S41_empty_result_and_empty_owner_fails_naming_row(self):
+        self.rows(owner="", result="")
+        for gate in ("1", "2"):
+            code, out, _ = self.run_check("--gate", gate)
+            self.assertEqual(code, 1)
+            self.assertRegex(out, r"FAIL question-owners.*A1")
+
+    def test_S41_owner_or_result_present_passes(self):
+        self.rows(owner="", result="confirmed")
+        self.assertIn("PASS question-owners", self.run_check("--gate", "1")[1])
+        self.rows(owner="finance", result="")
+        self.assertIn("PASS question-owners", self.run_check("--gate", "1")[1])
+
+    def test_S41_columns_match_by_name_in_any_order(self):
+        cols = tuple(reversed(COLS))
+        row = tuple(reversed(("A1", "x", "y", "", "q", "", "")))
+        self.write("assumptions.md", table([row], cols))
+        self.assertRegex(self.run_check("--gate", "1")[1], r"FAIL question-owners.*A1")
+
+    def test_S41_empty_or_tableless_assumptions_fail_at_gate_2(self):
+        for text in ("", "no table here\n", table([], COLS)):
+            self.write("assumptions.md", text)
             for gate in ("1", "2"):
                 code, out, _ = self.run_check("--gate", gate)
-                self.assertEqual(code, 1, (bad, out))
-                self.assertRegex(out, r"FAIL test-criterion.*A1, A3")
-        for good in ("Interview: 3 of 5 leads", "prototype: 4 of 5 finish unaided", "survey: 20% reply",
-                     "data: p50 under 2d", "spike: call returns in 1 try"):
-            rows = [(*ROWS[0][:6], good, ROWS[0][7]), *ROWS[1:]]
-            self.write("assumptions.md", table(rows))
-            self.assertIn("PASS test-criterion", self.run_check("--gate", "1")[1])
+                self.assertEqual(code, 1, (text, gate))
+                self.assertRegex(out, r"FAIL question-owners: (missing columns|no questions recorded)")
+            self.assertRegex(out, r"FAIL assumptions-closed")
 
-    def test_S36_low_importance_free_text_and_decided_entry(self):
-        rows = [*ROWS[:3], (*ROWS[3][:6], "just try it", ""),
-                ("A5", "value", "Nice", "med", "low", "decider", "ask around", "")]
-        self.write("assumptions.md", table(rows))
-        self.assertIn("PASS test-criterion", self.run_check("--gate", "1")[1])
-        self.idea(entry="decided")
-        rows = [(*ROWS[0][:6], "free text", ROWS[0][7]), *ROWS[1:]]
-        self.write("assumptions.md", table(rows))
-        self.assertRegex(self.run_check("--gate", "2")[1], r"FAIL test-criterion.*A1")
+    def test_S41_header_only_table_says_no_questions_recorded(self):
+        self.write("assumptions.md", table([], COLS))
+        self.assertRegex(self.run_check("--gate", "2")[1], r"FAIL question-owners: no questions recorded")
 
-    # --- frame-terms ---
-    def terms(self, *rows, head="| term | meaning | link |\n|---|---|---|\n"):
-        body = head + "".join(f"| {r} |\n" for r in rows)
-        self.write("frame.md", FRAME.split("## Terms")[0] + "## Terms\n" + body)
-
-    def terms_out(self, *rows, gate="1"):
-        self.terms(*rows)
-        return self.run_check("--gate", gate)
-
-    def vault(self, *notes):
-        (self.root / ".obsidian").mkdir(exist_ok=True)
-        for n in notes:
-            f = self.root / n
-            f.parent.mkdir(parents=True, exist_ok=True)
-            f.write_text("x\n")
-
-    def test_S1_frame_without_terms_section_fails(self):
-        self.write("frame.md", FRAME.split("## Terms")[0])
+    def test_S41_missing_header_column_fails_naming_it(self):
+        cols = tuple(c for c in COLS if c != "if wrong")
+        self.write("assumptions.md", table([tuple(r[i] for i, c in enumerate(COLS) if c != "if wrong") for r in ROWS], cols))
         for gate in ("1", "2"):
-            code, out, _ = self.run_check("--gate", gate)
-            self.assertEqual(code, 1)
-            self.assertIn("FAIL frame-terms: no ## Terms", out)
+            out = self.run_check("--gate", gate)[1]
+            self.assertRegex(out, r"FAIL question-owners.*if wrong")
+            self.assertRegex(out, r"FAIL test-criterion.*if wrong")
 
-    def test_S2_empty_meaning_fails_and_names_term(self):
-        code, out, _ = self.terms_out("Sync date |  | https://x.io", "Ok | fine | ")
-        self.assertEqual(code, 1)
-        self.assertRegex(out, r"FAIL frame-terms: Sync date")
-        self.assertNotIn("Ok", out.split("frame-terms")[1].splitlines()[0])
+    def test_S41_row_with_empty_id_is_named_by_number(self):
+        self.write("assumptions.md", table([("", "x", "y", "", "me", "", ""), ROWS[0]]))
+        self.assertRegex(self.run_check("--gate", "1")[1], r"FAIL question-owners.*row 1")
 
-    def test_S2_header_only_table_and_empty_link_pass(self):
-        self.assertIn("PASS frame-terms", self.terms_out()[1])
-        self.assertIn("PASS frame-terms", self.terms_out("Ok | fine | ")[1])
-
-    def test_S3_wikilink_forms_pass_with_one_match(self):
-        self.vault("sub/note.md")
-        rows = ["A | m | [[note]]", r"B | m | [[note\|alias]]", "C | m | [[note#h]]"]
-        self.assertIn("PASS frame-terms", self.terms_out(*rows)[1])
-        self.assertEqual(self.app.link_problem("[[note|alias]]", self.dir), "")  # a raw pipe cannot sit in a table cell
-
-    def test_S3_wikilink_zero_or_many_matches_fails(self):
-        self.vault("a/note.md", "b/note.md")
-        out = self.terms_out("Two | m | [[note]]", "None | m | [[ghost]]")[1]
-        self.assertRegex(out, r"FAIL frame-terms: Two.*2.*; None.*0")
-
-    def test_S3_wikilink_skips_trash_and_git(self):
-        self.vault("a/note.md", ".trash/note.md", ".git/note.md")
-        self.assertIn("PASS frame-terms", self.terms_out("A | m | [[note]]")[1])
-
-    def test_S4_path_links_with_line(self):
-        f = self.root / "src.py"
-        f.write_text("a\nb\nc\n")
-        ok = self.terms_out(f"A | m | {f}", f"B | m | {f}:3")[1]
-        self.assertIn("PASS frame-terms", ok)
-        out = self.terms_out(f"Far | m | {f}:4", f"Gone | m | {self.root}/nope.py")[1]
-        self.assertRegex(out, r"FAIL frame-terms: Far.*; Gone")
-
-    def test_S4_tilde_path_expands_home(self):
-        (self.root / "n.txt").write_text("a\n")
-        with mock.patch.dict(os.environ, {"HOME": str(self.root)}):
-            self.assertIn("PASS frame-terms", self.terms_out("A | m | ~/n.txt:1")[1])
-
-    def test_S4_line_zero_fails(self):
-        (self.root / "n.txt").write_text("a\n")
-        self.assertRegex(self.terms_out(f"Z | m | {self.root}/n.txt:0")[1], r"FAIL frame-terms: Z")
-
-    def test_S4_unreadable_file_fails_without_crash(self):
-        f = self.root / "n.txt"
-        f.write_text("a\n")
-        f.chmod(0)
-        self.addCleanup(f.chmod, 0o600)
-        self.assertRegex(self.terms_out(f"U | m | {f}:1")[1], r"FAIL frame-terms: U: cannot read")
-
-    def test_S3_wikilink_is_case_insensitive_and_strips_md(self):
-        self.vault("Sub/My Note.md")
-        self.assertIn("PASS frame-terms", self.terms_out("A | m | [[my note]]", "B | m | [[MY NOTE.md]]")[1])
-
-    def test_S3_wikilink_skips_every_dot_folder(self):
-        self.vault(".hidden/note.md", "sub/note.md")
-        self.assertIn("PASS frame-terms", self.terms_out("A | m | [[note]]")[1])
-
-    def test_S1_prose_or_wrong_header_fails(self):
-        for body in ("just words\n", "| name | definition | url |\n|---|---|---|\n| a | b | c |\n",
-                     "| Term | Definition | Link |\n|---|---|---|\n| a | b | |\n"):
-            self.write("frame.md", FRAME.split("## Terms")[0] + "## Terms\n" + body)
-            self.assertIn("FAIL frame-terms: no term | meaning | link table", self.run_check("--gate", "1")[1])
-
-    def test_S5_https_accepted_without_network(self):
-        self.assertIn("PASS frame-terms", self.terms_out("A | m | https://unreachable.invalid/x")[1])
-
-    def test_S6_two_links_in_one_cell_fail(self):
-        out = self.terms_out("Two | m | https://a.io https://b.io")[1]
-        self.assertRegex(out, r"FAIL frame-terms: Two: write as https URL, ~/path or \[\[note\]\]")
-
-    def test_S6_other_link_forms_fail_with_hint(self):
-        out = self.terms_out("Tick | m | H-8118", "Sha | m | f355ab6", "Rel | m | packages/x.ts")[1]
-        line = [l for l in out.splitlines() if "frame-terms" in l][0]
-        self.assertTrue(line.startswith("FAIL"), line)
-        for t in ("Tick", "Sha", "Rel"):
-            self.assertIn(t, line)
-        self.assertEqual(line.count("write as https URL, ~/path or [[note]]"), 3)
-
-    def test_S7_wikilink_without_vault_root_fails(self):
-        out = self.terms_out("Note | m | [[note]]")[1]
-        self.assertRegex(out, r"FAIL frame-terms: Note.*no vault root")
-
-    def test_S13_docstring_documents_frame_terms(self):
-        doc = self.app.__doc__
-        for s in ("frame-terms", "## Terms", "https://", "~/", "[[note]]"):
-            self.assertIn(s, doc)
-
-    # --- frame-language ---
-    def language(self, *lines):
-        self.write("gates.md", GATES.split("- 2026-10-26 language")[0] + "".join(l + "\n" for l in lines))
-
-    def test_S8_no_language_line_fails_and_prints_current_sha(self):
-        self.language()
-        for gate in ("1", "2"):
-            code, out, _ = self.run_check("--gate", gate)
-            self.assertEqual(code, 1)
-            self.assertIn(f"FAIL frame-language: no pass for frame {sha12(FRAME)}", out)
-
-    def test_S9_matching_latest_pass_passes(self):
-        self.language("- 2026-10-01 language: pass aaaaaaaaaaaa", f"* 2026-10-02 language: pass {sha12(FRAME)}")
-        self.assertIn("PASS frame-language", self.run_check("--gate", "1")[1])
-
-    def test_S9_only_the_latest_language_line_counts(self):
-        self.language(f"- 2026-10-01 language: pass {sha12(FRAME)}", "- 2026-10-02 language: pass aaaaaaaaaaaa")
-        self.assertIn("FAIL frame-language", self.run_check("--gate", "1")[1])
-
-    def test_S9_changed_frame_body_fails_with_new_sha(self):
-        new = FRAME + "## Q4 Who pays?\nSource: me\n"
-        self.write("frame.md", new)
-        out = self.run_check("--gate", "1")[1]
-        self.assertIn(f"FAIL frame-language: no pass for frame {sha12(new)}", out)
-
-    def test_S10_frontmatter_only_change_still_passes(self):
-        self.write("frame.md", "---\ntype: note\nupdated: 2026-11-02\n---\n" + FRAME)
-        self.assertIn("PASS frame-language", self.run_check("--gate", "2")[1])
-
-    def test_S11_decided_skips_both_and_raw_runs_both(self):
+    def test_S41_decided_entry_still_runs_question_owners(self):
         self.idea(entry="decided")
-        out = self.run_check("--gate", "2")[1]
-        for name in ("frame-terms", "frame-language"):
-            self.assertIn(f"SKIPPED {name}", out)
-        self.idea(entry="raw")
-        out = self.run_check("--gate", "2")[1]
-        for name in ("frame-terms", "frame-language"):
-            self.assertIn(f"PASS {name}", out)
+        self.rows(owner="", result="")
+        self.assertRegex(self.run_check("--gate", "2")[1], r"FAIL question-owners.*A1")
 
-    def test_S18_accepted_line_with_current_sha_and_role_passes(self):
-        self.language(f"- 2026-11-02 language: accepted {sha12(FRAME)} by CFO")
-        self.assertIn(f"PASS frame-language: frame {sha12(FRAME)}\n", self.run_check("--gate", "1")[1])
+    # --- S42
+    def test_S42_malformed_test_fails_naming_row(self):
+        for test in ("ask people", "chat: ask", "interview:", "interview: "):
+            self.rows(test=test)
+            code, out, _ = self.run_check("--gate", "1")
+            self.assertEqual(code, 1, test)
+            self.assertRegex(out, r"FAIL test-criterion.*A1")
 
-    def test_S18_accepted_line_with_wrong_sha_or_no_role_fails(self):
-        for line in ("accepted aaaaaaaaaaaa by CFO", f"accepted {sha12(FRAME)} by", f"accepted {sha12(FRAME)}",
-                     f"accepted {sha12(FRAME)} by   "):
-            self.language(f"- 2026-11-02 language: {line}")
-            self.assertIn("FAIL frame-language", self.run_check("--gate", "1")[1], line)
+    def test_S42_valid_types_and_empty_test_pass(self):
+        for test in ("Interview: five calls", "prototype: it clicks", "data: x", "survey: y", "spike: z", ""):
+            self.rows(test=test)
+            self.assertIn("PASS test-criterion", self.run_check("--gate", "1")[1], test)
 
-    def test_S8_missing_gates_file_fails_and_prints_sha(self):
-        (self.dir / "gates.md").unlink()
-        self.assertIn(f"FAIL frame-language: gates.md missing; frame {sha12(FRAME)}", self.run_check("--gate", "1")[1])
+    def test_S42_every_row_with_a_test_is_checked(self):
+        self.write("assumptions.md", table([("A9", "x", "y", "ops", "me", "free text", "")]))
+        self.assertRegex(self.run_check("--gate", "1")[1], r"FAIL test-criterion.*A9")
 
-    def test_S9_pass_detail_names_the_frame_sha(self):
-        self.assertIn(f"PASS frame-language: frame {sha12(FRAME)}\n", self.run_check("--gate", "1")[1])
+    # --- S43
+    def test_S43_bad_results_fail_naming_row(self):
+        for result in ("", "not tested", "ok", "accepted by CFO", "accepted by CFO: small spend",
+                       "accepted by CFO: ; revisit: later", "accepted by CFO: x; revisit:", "changed:"):
+            self.rows(result=result)
+            code, out, _ = self.run_check("--gate", "2")
+            self.assertEqual(code, 1, result)
+            self.assertRegex(out, r"FAIL assumptions-closed.*A1")
 
-    def test_S9_newer_non_pass_or_placeholder_line_overrides_a_pass(self):
-        good = f"- 2026-10-01 language: pass {sha12(FRAME)}"
-        for newer in ("- 2026-10-02 language: blocked", "- 2026-10-02 language: pass <sha12>",
-                      "- 2026-10-02 language: pass abc"):
-            self.language(good, newer)
-            self.assertIn("FAIL frame-language", self.run_check("--gate", "1")[1], newer)
+    def test_S43_good_results_pass(self):
+        for result in ("confirmed", "Killed", "changed: use the export",
+                       "accepted by CFO: small spend; revisit: Q1 review"):
+            self.rows(result=result)
+            self.assertIn("PASS assumptions-closed", self.run_check("--gate", "2")[1], result)
 
-    def test_S10_whitespace_and_empty_frontmatter_do_not_change_the_sha(self):
-        for text in (FRAME + "\n\n", "---\ntype: note\n---\n\n" + FRAME, "---\n---\n" + FRAME,
-                     "---\ntype: note\n---\n" + FRAME + "  \n"):
-            self.write("frame.md", text)
-            self.assertIn("PASS frame-language", self.run_check("--gate", "1")[1], repr(text[:30]))
+    def test_S43_not_checked_at_gate_1(self):
+        self.rows(result="")
+        self.assertNotIn("assumptions-closed", self.run_check("--gate", "1")[1])
+
+    def test_S43_escaped_pipe_does_not_shift_columns(self):
+        self.rows(assumption=r"See [[note\|alias]]", result="")
+        self.assertRegex(self.run_check("--gate", "2")[1], r"FAIL assumptions-closed.*A1")
+
+    def test_S43_missing_assumptions_file_fails_at_a_gate(self):
+        (self.dir / "assumptions.md").unlink()
+        self.assertIn("FAIL assumptions-closed", self.run_check("--gate", "2")[1])
+
+    # --- S44
+    def test_S44_entry_missing_a_field_fails_naming_entry(self):
+        for field in ("Owner", "Date", "Link", "Summary"):
+            text = "\n".join(l for l in ANSWERS.splitlines() if not l.startswith(field)) + "\n"
+            self.write("answers.md", text)
+            code, out, _ = self.run_check("--gate", "2")
+            self.assertEqual(code, 1, field)
+            self.assertRegex(out, r"FAIL answers-sourced.*Q2")
+
+    def test_S44_empty_values_fail(self):
+        self.write("answers.md", ANSWERS.replace("Summary: costs ok", "Summary:  "))
+        self.assertRegex(self.run_check("--gate", "2")[1], r"FAIL answers-sourced.*Q2")
+
+    def test_S44_date_must_be_real_and_not_future(self):
+        for date in ("2026-13-45", "2999-01-01", "20/10/2026", "soon"):
+            self.write("answers.md", ANSWERS.replace("2026-10-20", date))
+            self.assertRegex(self.run_check("--gate", "2")[1], r"FAIL answers-sourced.*Q2", date)
+
+    def test_S44_today_is_allowed(self):
+        import datetime
+        self.write("answers.md", ANSWERS.replace("2026-10-20", datetime.date.today().isoformat()))
+        self.assertIn("PASS answers-sourced", self.run_check("--gate", "2")[1])
+
+    def test_S44_absent_answers_file_has_no_entries(self):
+        (self.dir / "answers.md").unlink()
+        self.assertIn("PASS answers-sourced", self.run_check("--gate", "2")[1])
+
+    # --- S45
+    def test_S45_latest_gate2_line_must_be_pass_by_decider(self):
+        bad = (GATES.replace("pass by CFO", "pass by CPO"),
+               "- 2026-10-10 gate1: continue: ok\n",
+               GATES + "- 2026-10-27 gate2: continue\n",
+               GATES + "- 2026-10-27 gate2: kill: dead\n")
+        for gates in bad:
+            self.idea(gates=gates)
+            code, out, _ = self.run_check("--gate", "2")
+            self.assertEqual(code, 1, gates)
+            self.assertIn("FAIL decider-signoff", out)
+
+    def test_S45_later_kill_or_reshape_cancels_pass(self):
+        for line in ("- 2026-10-27 gate1: reshape: new angle", "- 2026-10-27 gate1: kill: dead"):
+            self.idea(gates=GATES + line + "\n")
+            self.assertIn("FAIL decider-signoff", self.run_check("--gate", "2")[1])
+
+    def test_S45_earlier_kill_does_not_cancel_a_later_pass(self):
+        self.idea(gates="- 2026-10-01 gate1: kill: r\n" + GATES)
+        self.assertIn("PASS decider-signoff", self.run_check("--gate", "2")[1])
+
+    def test_S45_role_matches_case_insensitively_and_empty_decider_fails(self):
+        self.idea(gates=GATES.replace("pass by CFO", "pass by cfo"))
+        self.assertIn("PASS decider-signoff", self.run_check("--gate", "2")[1])
+        text = (self.dir / "Robo-Doc.md").read_text().replace("decider: CFO\n", "")
+        self.write("Robo-Doc.md", text)
+        self.assertIn("FAIL decider-signoff", self.run_check("--gate", "2")[1])
+
+    def test_S45_decided_entry_still_runs_signoff(self):
+        self.idea(entry="decided", gates="")
+        self.assertIn("FAIL decider-signoff", self.run_check("--gate", "2")[1])
+
+    # --- S46
+    def cold(self, line):
+        self.idea(gates=GATES.split("- 2026-10-26")[0] + line + "\n")
+
+    def test_S46_pass_and_accepted_with_current_sha_pass(self):
+        sha = sha12(BRIEF)
+        for line in (f"- 2026-10-26 cold-read: pass {sha}", f"- 2026-10-26 cold-read: accepted {sha} by user"):
+            self.cold(line)
+            code, out, _ = self.run_check("--gate", "2")
+            self.assertEqual(code, 0, out)
+            self.assertIn("PASS brief-read", out)
+
+    def test_S46_missing_wrong_or_unattributed_line_fails_with_current_sha(self):
+        sha = sha12(BRIEF)
+        for line in ("", "- 2026-10-26 cold-read: pass aaaaaaaaaaaa", f"- 2026-10-26 cold-read: accepted {sha}",
+                     f"- 2026-10-26 cold-read: accepted {sha} by", f"- 2026-10-26 cold-read: blocked {sha}"):
+            self.cold(line)
+            code, out, _ = self.run_check("--gate", "2")
+            self.assertEqual(code, 1, line)
+            self.assertRegex(out, rf"FAIL brief-read.*{sha}")
+
+    def test_S46_only_the_latest_cold_read_line_counts(self):
+        sha = sha12(BRIEF)
+        self.cold(f"- 2026-10-26 cold-read: pass {sha}\n- 2026-10-27 cold-read: blocked {sha}")
+        self.assertIn("FAIL brief-read", self.run_check("--gate", "2")[1])
+        self.cold(f"- 2026-10-26 cold-read: blocked {sha}\n- 2026-10-27 cold-read: pass {sha}")
+        self.assertIn("PASS brief-read", self.run_check("--gate", "2")[1])
+
+    def test_S46_brief_missing_or_without_terms_fails(self):
+        (self.dir / "Brief.md").unlink()
+        self.assertRegex(self.run_check("--gate", "2")[1], r"FAIL brief-read.*Brief.md missing")
+        brief = "# Brief\nno terms\n"
+        self.write("Brief.md", brief)
+        self.cold(f"- 2026-10-26 cold-read: pass {sha12(brief)}")
+        self.assertRegex(self.run_check("--gate", "2")[1], r"FAIL brief-read.*## Terms")
+
+    def test_S46_brief_is_found_by_exact_filename(self):
+        (self.dir / "Brief.md").unlink()
+        self.write("brief.md", BRIEF)
+        self.assertRegex(self.run_check("--gate", "2")[1], r"FAIL brief-read.*Brief.md missing")
+        self.write("brief.md", "---\ntype: project\n---\n" + BRIEF)
+        self.assertNotEqual(self.run_check("--gate", "2")[0], 2)
+
+    def test_S46_sha_ignores_frontmatter_and_outer_whitespace(self):
+        self.write("Brief.md", "---\ntags: [x]\n---\n" + BRIEF + "\n\n")
+        self.assertIn("PASS brief-read", self.run_check("--gate", "2")[1])
+
+    def test_S46_edited_brief_fails(self):
+        self.write("Brief.md", BRIEF + "More.\n")
+        self.assertIn("FAIL brief-read", self.run_check("--gate", "2")[1])
 
 
 if __name__ == "__main__":
