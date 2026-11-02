@@ -515,6 +515,16 @@ class IdeaCheckTests(unittest.TestCase):
         for name in ("frame-terms", "frame-language"):
             self.assertIn(f"PASS {name}", out)
 
+    def test_S18_accepted_line_with_current_sha_and_role_passes(self):
+        self.language(f"- 2026-11-02 language: accepted {sha12(FRAME)} by CFO")
+        self.assertIn(f"PASS frame-language: frame {sha12(FRAME)}\n", self.run_check("--gate", "1")[1])
+
+    def test_S18_accepted_line_with_wrong_sha_or_no_role_fails(self):
+        for line in ("accepted aaaaaaaaaaaa by CFO", f"accepted {sha12(FRAME)} by", f"accepted {sha12(FRAME)}",
+                     f"accepted {sha12(FRAME)} by   "):
+            self.language(f"- 2026-11-02 language: {line}")
+            self.assertIn("FAIL frame-language", self.run_check("--gate", "1")[1], line)
+
     def test_S8_missing_gates_file_fails_and_prints_sha(self):
         (self.dir / "gates.md").unlink()
         self.assertIn(f"FAIL frame-language: gates.md missing; frame {sha12(FRAME)}", self.run_check("--gate", "1")[1])

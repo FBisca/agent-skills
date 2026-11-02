@@ -55,10 +55,10 @@ Contract decisions (files as in the plan's idea-folder table):
   Anything else (`H-8118`, `f355ab6`, `packages/x.ts`) FAILs with `write as https URL, ~/path or [[note]]`.
   One FAIL lists every bad row, `; `-joined, each starting with its term.
 - frame-language (gates 1 and 2): gates.md's LATEST `language:` line (`- YYYY-MM-DD language: ...`, bullet `-`
-  or `*`) must be `pass <sha12>` equal to sha12 of frame.md: the first 12 hex of the sha256 of its UTF-8 text
+  or `*`) must be `pass <sha12>` or `accepted <sha12> by <role>` (non-empty role), sha12 equal to sha12 of frame.md: the first 12 hex of the sha256 of its UTF-8 text
   without frontmatter, stripped of surrounding whitespace (a frontmatter or trailing-whitespace edit keeps the
-  pass; a newer `blocked` or malformed line cancels it). The pass is appended after the idea-frame `reader.md` subagent
-  returns `pass`. Else FAIL `no pass for frame <sha12>` (current sha12); a missing gates.md FAILs `gates.md missing; frame <sha12>`.
+  pass; a newer `blocked` or malformed line cancels it). `pass` is appended after the idea-frame `reader.md` subagent
+  returns `pass`; `accepted` is the user's override, appended only after the 3rd blocked reader round. Else FAIL `no pass for frame <sha12>` (current sha12); a missing gates.md FAILs `gates.md missing; frame <sha12>`.
 - An assumption cites frame question Q<n> when the token `Q<n>` appears in its assumption cell.
 - test-criterion (gates 1 and 2, also `entry: decided`): each high-importance assumption's test cell is
   `<type>: <success criterion>`, type (case-insensitive) one of interview, prototype, data, survey,
@@ -317,7 +317,7 @@ def check_language(frame, gates):
     if gates is None:
         return result(False, "frame-language", f"gates.md missing; frame {sha}")
     lines = [m.group(1).strip() for m in map(LANGUAGE_LINE.match, gates.splitlines()) if m]
-    ok = bool(lines) and re.fullmatch(r"pass\s+" + sha, lines[-1], re.I) is not None
+    ok = bool(lines) and re.fullmatch(rf"pass\s+{sha}|accepted\s+{sha}\s+by\s+\S.*", lines[-1], re.I) is not None
     return result(ok, "frame-language", f"frame {sha}" if ok else f"no pass for frame {sha}")
 
 

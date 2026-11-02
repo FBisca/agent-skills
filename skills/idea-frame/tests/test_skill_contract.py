@@ -120,6 +120,24 @@ class IdeaFrameContract(unittest.TestCase):
             self.assertIn(p, skill)
         self.assertLessEqual(len(skill.splitlines()), 120)
 
+    def test_S17_reader_loop_stops_by_turning_items_into_open_questions(self):
+        skill = read("SKILL.md")
+        for p in ("after the 2nd blocked round",
+                  "answers each one or turns it into a new `## Q<n>` with `Source: unknown`, an `Owner:` line and an assumption row citing it",
+                  "the assumption row follows step 3",
+                  "a pointer `(… open, Q<n>)`",
+                  "a `term` item also gets a Terms row `<term> | unknown, see Q<n> |`",
+                  "then rerun the reader",
+                  "the 3rd blocked round is the last",
+                  "turn all its items into such open questions",
+                  "show the added rows to the user",
+                  "`- YYYY-MM-DD language: accepted <sha12> by <role>`"):
+            self.assertIn(p, skill)
+        self.assertNotIn("after 2 blocked rounds", skill)
+        self.assertNotRegex(skill, r"3rd blocked round[^;]*then rerun the reader")
+        self.assertIn("is not an ambiguity; it is open by design", read("reader.md"))
+        self.assertLessEqual(len(skill.splitlines()), 120)
+
 
 if __name__ == "__main__":
     unittest.main()
