@@ -45,7 +45,7 @@ class ColdReadContract(unittest.TestCase):
         self.assertRegex(read("SKILL.md"), r"(?m)^name: cold-read$")
         self.assertIn("`/cold-read <doc>`", read("SKILL.md"))
         self.assertFalse((skills / "goldfish").exists())
-        self.assertIn("`/cold-read <folder>/PRD.md`", (skills / "idea-answer" / "SKILL.md").read_text())
+        self.assertIn("`/cold-read <folder>/Brief.md`", (skills / "idea-answer" / "SKILL.md").read_text())
         for s in ("elephant-goldfish-model", "Apache-2.0"):
             self.assertIn(s, read("NOTICE.md"))
 

@@ -1,53 +1,43 @@
 ---
 name: idea-answer
-description: Route an idea's open questions to the people who can answer them, record the answers, and run gate 2. The user runs `/idea-answer <idea folder>` after `/idea-frame` passed gate 1, or with a decided feature and its sources.
+description: Route every open question of an idea to the people who can answer it, record the answers, keep the Brief current and commit. The user runs `/idea-answer <idea folder>` after `/idea-frame` passed gate 1, or with a decided feature and its sources.
 disable-model-invocation: true
 ---
 
 # Idea answer
 
-**Input:** an idea folder (`V/01-projects/<slug>/`, stage `gate1` or `answering`), or a decided feature with sources and no folder yet.
-**Output:** `answers.md` entries, updated assumption results, a `gate2` line in `gates.md`, hours logged, and an `idea_check --gate 2` report shown to the user.
-**Hand-off:** gate 2 passed means `/to-spec` (writes `PRD.md` in the folder through the vault tracker setup), then `/cold-read <folder>/PRD.md`. Kill or reshape ends here with the reason in `gates.md`.
+**Input:** an idea folder (`~/developer/vault/01-projects/<slug>/`, stage `gate1` or `answering`), or a decided feature with sources and no folder yet.
+**Output:** `answers.md` entries, closed rows in `assumptions.md`, `Brief.md`, the cold-read and `gate2` lines in the index note's `## Gates`, hours logged, and an `idea_check --gate 2` report shown to the user.
+**Hand-off:** gate 2 passed means `/to-spec`, writing the PRD from the final Brief and the answers. Kill or reshape ends here with the reason in `## Gates`.
 
-Agents asked the late questions in the backtest and nobody answered: operators, finance, compliance and leadership did. This skill gets the user to those people with the right questions. It never sends anything.
+The folder contract is the docstring of `~/.claude/skills/idea-frame/scripts/idea_check.py`; read it before writing any file. This skill never sends anything.
 
-**Owner guidance** (route by what the question is about):
-- finance: business and finance rules, e.g. "what fee must this clear?"; ask the ops owner of that rule; record owner finance
-- compliance: legal, security, data access, e.g. "may we store these documents outside the EU?"
-- engineering: how the system behaves, e.g. "does the API return the sync date?"; never operators; goes to `/start-planning` Gather
-- operator/user: how people react to or use it, e.g. "how do ops handle a failed transfer today?"
-- decider: scope and priority, e.g. "is mobile in scope for v1?"
-- ethical risk (could it harm someone, would users object if they knew): compliance, or the decider when it is a product call
-- product-behaviour rules (what the product does in a case): the person who owns that behaviour (operator/user if ops runs it, decider if it is a product call); don't default to decider
+**Owner guidance** (who can answer, by what the row is about): finance and compliance for money, legal, security and data rules (ask the owner of that rule); operator/user for how people work or react; decider for scope and priority, and for product-behaviour rules that are a product call; engineering for how the system behaves (read-only lookup in code, no one is asked).
 
 ## Steps
 
-1. **Open the folder.** Read the index note (`<Title>.md`, the one root-level note with `type: project`), `frame.md`, `assumptions.md`, `premortem.md`, `answers.md`, `gates.md` (the contract is the module docstring of `idea-frame/scripts/idea_check.py`). Set `stage: answering`.
-   - **Decided feature, no folder:** create `V/01-projects/<slug>/` with the index note built from `~/developer/vault/90-templates/project.md` (`<Title>.md`, titled like the idea; frontmatter `type: project`, `status: idea`, `stage: answering`, `entry: decided`, `decider: <role>`) listing `[[assumptions]] [[answers]] [[gates]]` under `## Notes`, and `assumptions.md` from the sources (each unconfirmed claim: risk, importance, evidence, owner type, test as `<type>: <success criterion>`, level definitions in the `idea_check.py` docstring). Open questions without an answer are rows too. Side notes carry frontmatter `type: note`, `area`, `project: "[[<Title>]]"`, `created`, `updated`, `tags: []`. Skip frame and pre-mortem; gate 2 skips their checks for `entry: decided`.
-2. **List open items:** every `Source: unknown` frame question, every high-importance assumption with an empty result, every open product question. Rank in `assumptions.md` row order (agreed at gate 1); unknown frame questions by importance.
-3. **Pick, then route.** Show the open items in that order and ask the user which 3–5 to take to people. Route and prepare only those: one owner type each (operator/user, finance, compliance, decider, engineering), set on the assumption row using the owner guidance above. The rest stay in `assumptions.md` untouched until gate 2.
-   - If gate 2 is run, each unpicked high-importance item gets the result `accepted by <decider role>: low priority, not asked`, confirmed by the decider at gate 2 like engineering items.
-   - `idea_check --gate 2` fails `people-cap` above 12 people items; the pick stays well below it.
-   - Engineering items are not for people: record them as handed to `/start-planning` Gather. Result: `accepted by <decider role>: engineering, to /start-planning Gather`; the decider confirms it at gate 2. They leave this loop.
-4. **Prepare each conversation** for the user, one item at a time, from [`prep.md`](prep.md): who (role), 2-4 Mom Test questions, and the answer that kills or changes the idea; for an `A<n>` row the bar is its test criterion: missing it kills or changes the idea. Usability items: suggest a `/prototype` session instead of asking.
-   - Outreach (mail, Slack, Teams) is drafted only after the user's yes for that item, in their voice, and they send it. This skill never sends and holds no outbound tool.
-5. **Record each answer** when the user reports it: an `## ` entry in `answers.md` with the user's summary and the lines `Owner: <type> (<role>)` (the type first, so the cap counts it), `Date: YYYY-MM-DD`, `Link: <link>`, `Summary:` (one each). Write no message bodies, no client or investor names (vault rules); the link points to where the source lives. When this creates `answers.md` in an existing folder, add `[[answers]]` to the index note's `## Notes`. Then set the assumption's result: `confirmed`, `killed`, or `accepted by <role>`. idea-check only needs a non-empty result.
-   - An answer that kills or reshapes the idea stops the loop: take it to step 6.
-6. **Gate 2 with the decider** (D9): every high-importance assumption tested or accepted by the decider, every open question answered or moved to PRD Further Notes with an owner, except items not picked (no entry; the decider confirms their result). A question moved to PRD Further Notes gets its own `answers.md` entry (`Owner: <type> (<role>)`, `Date:`, `Link:`, `Summary: open → PRD Further Notes`) so `/to-spec` picks it up. Ask the decider's call; write one line in `gates.md`: `- <date> gate2: pass by <role>: <reason>` (or `kill: <reason>` / `reshape: <reason>`). Log the hours under `## Hours` in the index note as `- <date> answering <n>h`; set `stage: gate2` on pass, `killed` or `reshaped` otherwise.
-7. **Run the gate** and show the output verbatim:
+1. **Open the folder.** Read the index note (`<Title>.md`, the one root-level note with `type: project`), `frame.md`, `assumptions.md`, `answers.md` and `Brief.md` if present. Set `stage: answering`.
+   - **Decided feature, no folder:** create `~/developer/vault/01-projects/<slug>/` with the index note built from `~/developer/vault/90-templates/project.md` (`<Title>.md`; frontmatter `type: project`, `status: idea`, `stage: answering`, `entry: decided`, `decider: <role>`; sections `## Hours` and `## Gates`) and `assumptions.md` from the sources, at least one row, one per claim or open question (header per the docstring); claims the sources already confirm get result `confirmed`. There is no `frame.md`: generate the Brief from the sources. Side notes carry frontmatter `type: note`, `area`, `project: "[[<Title>]]"`, `created`, `updated`, `tags: []`; list them under `## Notes`.
+2. **List the open rows:** every row with an empty result. Route every open row: no pick, no cap. Ask the user who owns each if the owner cell is vague.
+3. **Prepare each conversation** from [`prep.md`](prep.md), one row at a time: Mom Test only for how users behave; a policy or rule owner is asked for the current rule. The user holds the conversation, or teammates may ask the owner; the user collects what they report. Usability rows: suggest `/prototype` instead of asking. Engineering rows: look up in code, read-only.
+   - Outreach (mail, Slack, Teams) is drafted only after the user's yes for that row, in their voice, and the user sends it. This skill never sends and holds no outbound tool.
+4. **Record each answer** when the user reports it: an `## ` entry in `answers.md` with the lines `Owner:`, `Date: YYYY-MM-DD`, `Link:`, `Summary:` (plain lines, no bullet or bold, one each, no message bodies, no client or investor names; the link points to where the source lives). Then close the row's result: `confirmed`, `killed`, `changed: <what>` or `accepted by <role>: <reason>; revisit: <trigger>` (the decider accepts a risk, with a reason and when to look again). An answer that kills or reshapes the idea stops the loop: take it to step 7.
+5. **Keep `Brief.md` current.** 1-2 pages generated from the frame and the map: problem and who has it, observable success, appetite, solution sketch, no-gos, open questions with owners and answers, and a `## Terms` list (words an owner may name differently). It is the only document stakeholders read, published by the user to their shared doc tool (the vault stays private) and revised as answers land.
+6. **Before commitment** every row is closed. Name `/cold-read <folder>/Brief.md` once, on the final Brief; do not run it. Run `idea_check --gate 2` and read the sha12 from its `brief-read` line; the user appends to `## Gates` `- YYYY-MM-DD cold-read: pass <sha12>` or `accepted <sha12> by <role>`. A later Brief edit needs a new line.
+7. **Commit.** The decider's commitment rides on their approval of the final Brief (no separate meeting): append `- YYYY-MM-DD gate2: pass by <decider role>` (or `gate2: kill: <reason>` / `gate2: reshape: <reason>`) to `## Gates`. Log hours under `## Hours` as `- YYYY-MM-DD answering <n>h`; set `stage: gate2` on pass, `killed` or `reshaped` otherwise.
+8. **Run the gate** (on kill or reshape, stop after recording the line with its reason and setting `stage: killed` or `reshaped`) and show the output verbatim:
 
    ```
    python3 ~/.claude/skills/idea-frame/scripts/idea_check.py <folder> --gate 2
    ```
 
-   Fix every FAIL (usually a missing Link, empty result, or decider mismatch), rerun until none. Never edit the check or the decider to pass.
-8. **Hand off** by naming `/to-spec`; after `/to-spec` writes `PRD.md`, set `stage: prd`; then name `/cold-read <folder>/PRD.md`. Do not run either.
+   Fix every FAIL (usually an open row, a missing Link, or a stale cold-read sha12), rerun until none (on pass). Never edit the check or the decider to pass.
+9. **Hand off** by naming `/to-spec`; after it writes the PRD, set `stage: prd`. Do not run it.
 
-Done when `idea_check --gate 2` prints no FAIL and the next command is named, or the idea is killed or reshaped with the reason recorded.
+Done when `idea_check --gate 2` prints no FAIL and `/to-spec` is named from the final Brief, or the idea is killed or reshaped with the reason recorded.
 
 ## Rules
 
-- Questions in Mom Test form: past behaviour and specifics; never pitch the idea; never hypotheticals.
 - Decisions come from the decider or a source. Never fill `answers.md` or a result from your own inference.
 - Only the user's yes unlocks a draft; only the user sends.
+- A material answer change after commitment reopens it: new Brief revision, new cold-read line, new `gate2` line.

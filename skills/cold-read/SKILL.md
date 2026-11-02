@@ -1,6 +1,6 @@
 ---
 name: cold-read
-description: Zero-context comprehension check of one document. The user runs `/cold-read <doc>` after `/to-spec`, or on any plan or doc, to see whether a cold reader can follow it.
+description: Zero-context comprehension check of one document. The user runs `/cold-read <doc>` on the final Brief before commitment, or on any doc, to see whether a cold reader can follow it.
 disable-model-invocation: true
 ---
 
