@@ -7,11 +7,12 @@ Output: one `PASS|FAIL|SKIPPED <check>: detail` line per check. Exit 0 if nothin
 
 Checks (no --gate = structural only):
   structural: stage-value, assumption-values, premortem-links, gate-reason, hours-logged
-  --gate 1:   structural + frame-sources, frame-owners, unknown-to-assumption, top3-ready, test-criterion
+  --gate 1:   structural + frame-sources, frame-owners, frame-terms, unknown-to-assumption, top3-ready,
+              test-criterion
   --gate 2:   gate 1 + assumptions-closed, answers-sourced, people-cap, decider-signoff
 A structural check whose file is absent prints SKIPPED. A gate check whose file is absent FAILs
 (gate 1 needs frame.md, assumptions.md, premortem.md; gate 2 also needs answers.md, gates.md).
-`entry: decided` + --gate 2 (test-criterion still runs): frame-sources, frame-owners, unknown-to-assumption, top3-ready, premortem-links print
+`entry: decided` + --gate 2 (test-criterion still runs): frame-sources, frame-owners, frame-terms, unknown-to-assumption, top3-ready, premortem-links print
 SKIPPED; the other checks run.
 
 Contract decisions (files as in the plan's idea-folder table):
@@ -43,6 +44,16 @@ Contract decisions (files as in the plan's idea-folder table):
   another Source need none.
 - people-cap (gate 2): at most 12 answers.md entries (PEOPLE_CAP) may have an Owner other than
   engineering. An entry with no Owner counts against the cap; an absent answers.md counts 0 (PASS). It runs for `entry: decided` too.
+- frame-terms (gates 1 and 2): frame.md has a `## Terms` section holding a markdown table with header
+  `term | meaning | link` (columns matched by name; header-only passes). Every row needs a non-empty
+  term and meaning; the link cell may be empty, else ONE link of the form:
+    https://...        accepted as is, never fetched;
+    ~/path or /path    an existing file, optional `:line` suffix with line <= the file's line count;
+    [[note]]           also `[[note|alias]]`, `[[note\|alias]]`, `[[note#h]]`: exactly one `note.md` under
+                       the vault root (nearest ancestor of the idea folder holding `.obsidian`;
+                       dot-folders skipped; case-insensitive, `.md` optional); a `/` in the link matches the path suffix.
+  Anything else (`H-8118`, `f355ab6`, `packages/x.ts`) FAILs with `write as https URL, ~/path or [[note]]`.
+  One FAIL lists every bad row, `; `-joined, each starting with its term.
 - An assumption cites frame question Q<n> when the token `Q<n>` appears in its assumption cell.
 - test-criterion (gates 1 and 2, also `entry: decided`): each high-importance assumption's test cell is
   `<type>: <success criterion>`, type (case-insensitive) one of interview, prototype, data, survey,
@@ -62,6 +73,7 @@ Contract decisions (files as in the plan's idea-folder table):
   equals the index note's `decider` (case-insensitive).
 """
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
@@ -127,6 +139,69 @@ def assumptions(text):
         elif not all(re.fullmatch(r":?-+:?", c) for c in cells if c):
             rows.append(dict(zip(cols, cells + [""] * (len(cols) - len(cells)))))
     return rows
+
+
+def vault_root(folder):
+    """Nearest ancestor of the folder (itself included) holding a `.obsidian` directory, else None."""
+    here = Path(folder).resolve()
+    return next((p for p in (here, *here.parents) if (p / ".obsidian").is_dir()), None)
+
+
+def notes_named(root, target):
+    """Paths under root of `<target>.md` (a `/` in target matches the path suffix); case-insensitive, dot-folders skipped."""
+    want = re.sub(r"(?i)\.md$", "", target.strip("/")).lower() + ".md"
+    hits = []
+    for base, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        for f in files:
+            rel = (Path(base) / f).relative_to(root).as_posix().lower()
+            if rel == want or rel.endswith("/" + want):
+                hits.append(rel)
+    return hits
+
+
+def link_problem(link, folder):
+    """Why a Terms link is unacceptable, or "" when it is fine."""
+    if not link or re.fullmatch(r"https://\S+", link):
+        return ""
+    if m := re.fullmatch(r"\[\[([^\]]+)\]\]", link):
+        root = vault_root(folder)
+        if root is None:
+            return "no vault root"
+        target = re.split(r"[|#]", m.group(1))[0].strip()
+        n = len(notes_named(root, target))
+        return "" if n == 1 else f"{n} notes match [[{target}]]"
+    if m := re.fullmatch(r"((?:~/|/).*?)(?::(\d+))?", link):
+        path = Path(m.group(1)).expanduser()
+        if not path.is_file():
+            return f"no file {m.group(1)}"
+        if not m.group(2):
+            return ""
+        try:
+            lines = len(path.read_text(encoding="utf-8", errors="replace").splitlines())
+        except OSError:
+            return f"cannot read {m.group(1)}"
+        return "" if 1 <= int(m.group(2)) <= lines else f"line {m.group(2)} outside 1..{lines}"
+    return "write as https URL, ~/path or [[note]]"
+
+
+def check_terms(text, folder):
+    body = next((b for h, b in sections(text) if h == "Terms"), None)
+    if body is None:
+        return result(False, "frame-terms", "no ## Terms")
+    head = next((l for l in body.splitlines() if l.strip().startswith("|")), "")
+    cols = [c.strip().lower() for c in re.split(r"(?<!\\)\|", head.strip().strip("|"))]
+    if not head or "term" not in cols or "meaning" not in cols:
+        return result(False, "frame-terms", "no term | meaning | link table")
+    bad = []
+    for r in assumptions(body):
+        term = r.get("term", "")
+        why = "no meaning" if not r.get("meaning") else link_problem(r.get("link", ""), folder)
+        if not term:
+            bad.append("(no term): " + (why or "no term"))
+        elif why:
+            bad.append(f"{term}: {why}")
+    return result(not bad, "frame-terms", "; ".join(bad))
 
 
 def completed(stage, entry):
@@ -301,8 +376,8 @@ def run(folder, gate):
     out = [check_stage(idea)]
 
     def need(name, file, gate_needs, fn):
-        if skip_gate1 and name in ("frame-sources", "frame-owners", "unknown-to-assumption", "top3-ready",
-                    "premortem-links"):
+        if skip_gate1 and name in ("frame-sources", "frame-owners", "frame-terms", "unknown-to-assumption",
+                    "top3-ready", "premortem-links"):
             return ("SKIPPED", name, "entry: decided")
         if docs[file] is None:
             return missing(name, file) if gate >= gate_needs else ("SKIPPED", name, f"{file} absent")
@@ -315,6 +390,7 @@ def run(folder, gate):
     if gate >= 1:
         out.append(need("frame-sources", "frame.md", 1, lambda: check_frame_sources(docs["frame.md"])))
         out.append(need("frame-owners", "frame.md", 1, lambda: check_frame_owners(docs["frame.md"])))
+        out.append(need("frame-terms", "frame.md", 1, lambda: check_terms(docs["frame.md"], folder)))
         out.append(need("unknown-to-assumption", "frame.md", 1,
                         lambda: check_unknown(docs["frame.md"], rows)))
         out.append(need("top3-ready", "assumptions.md", 1, lambda: check_top3(rows)))

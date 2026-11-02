@@ -3,9 +3,11 @@
 import contextlib
 import importlib.util
 import io
+import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "idea_check.py"
 
@@ -36,6 +38,10 @@ Source: unknown
 Owner: Finance
 ## Q3 Is there data?
 Source: lookup https://example.com/x
+## Terms
+| term | meaning | link |
+|---|---|---|
+| Sync date | when the ledger last synced | https://example.com/sync |
 """
 ROWS = [
     ("A1", "value", "Clients want it (Q2)", "high", "low", "operator/user", "interview: 3 of 5 ops leads describe it", "confirmed"),
@@ -61,7 +67,9 @@ class IdeaCheckTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        self.dir = Path(tmp.name)
+        self.root = Path(tmp.name)
+        self.dir = self.root / "idea"
+        self.dir.mkdir()
         self.app = load()
         self.idea(stage="prd")
         self.write("frame.md", FRAME)
@@ -185,7 +193,8 @@ class IdeaCheckTests(unittest.TestCase):
         (self.dir / "premortem.md").unlink()
         code, out, _ = self.run_check("--gate", "2")
         self.assertEqual(code, 0, out)
-        for name in ("frame-sources", "frame-owners", "unknown-to-assumption", "top3-ready", "premortem-links"):
+        for name in ("frame-sources", "frame-owners", "unknown-to-assumption", "top3-ready", "premortem-links",
+                     "frame-terms"):
             self.assertIn(f"SKIPPED {name}", out)
         for name in ("assumptions-closed", "answers-sourced", "decider-signoff", "hours-logged"):
             self.assertIn(f"PASS {name}", out)
@@ -204,7 +213,7 @@ class IdeaCheckTests(unittest.TestCase):
         self.assertTrue(all(l.startswith("PASS ") for l in lines), out)
         names = [l.split()[1].rstrip(":") for l in lines]
         self.assertEqual(len(names), len(set(names)))
-        self.assertEqual(len(names), 14)
+        self.assertEqual(len(names), 15)
 
     def test_S9_escaped_pipe_does_not_shift_columns(self):
         rows = [(ROWS[0][0], "value", r"See [[note\|alias]] (Q2)", *ROWS[0][3:7], ""), *ROWS[1:]]
@@ -350,6 +359,116 @@ class IdeaCheckTests(unittest.TestCase):
         rows = [(*ROWS[0][:6], "free text", ROWS[0][7]), *ROWS[1:]]
         self.write("assumptions.md", table(rows))
         self.assertRegex(self.run_check("--gate", "2")[1], r"FAIL test-criterion.*A1")
+
+    # --- frame-terms ---
+    def terms(self, *rows, head="| term | meaning | link |\n|---|---|---|\n"):
+        body = head + "".join(f"| {r} |\n" for r in rows)
+        self.write("frame.md", FRAME.split("## Terms")[0] + "## Terms\n" + body)
+
+    def terms_out(self, *rows, gate="1"):
+        self.terms(*rows)
+        return self.run_check("--gate", gate)
+
+    def vault(self, *notes):
+        (self.root / ".obsidian").mkdir(exist_ok=True)
+        for n in notes:
+            f = self.root / n
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text("x\n")
+
+    def test_S1_frame_without_terms_section_fails(self):
+        self.write("frame.md", FRAME.split("## Terms")[0])
+        for gate in ("1", "2"):
+            code, out, _ = self.run_check("--gate", gate)
+            self.assertEqual(code, 1)
+            self.assertIn("FAIL frame-terms: no ## Terms", out)
+
+    def test_S2_empty_meaning_fails_and_names_term(self):
+        code, out, _ = self.terms_out("Sync date |  | https://x.io", "Ok | fine | ")
+        self.assertEqual(code, 1)
+        self.assertRegex(out, r"FAIL frame-terms: Sync date")
+        self.assertNotIn("Ok", out.split("frame-terms")[1].splitlines()[0])
+
+    def test_S2_header_only_table_and_empty_link_pass(self):
+        self.assertIn("PASS frame-terms", self.terms_out()[1])
+        self.assertIn("PASS frame-terms", self.terms_out("Ok | fine | ")[1])
+
+    def test_S3_wikilink_forms_pass_with_one_match(self):
+        self.vault("sub/note.md")
+        rows = ["A | m | [[note]]", r"B | m | [[note\|alias]]", "C | m | [[note#h]]"]
+        self.assertIn("PASS frame-terms", self.terms_out(*rows)[1])
+        self.assertEqual(self.app.link_problem("[[note|alias]]", self.dir), "")  # a raw pipe cannot sit in a table cell
+
+    def test_S3_wikilink_zero_or_many_matches_fails(self):
+        self.vault("a/note.md", "b/note.md")
+        out = self.terms_out("Two | m | [[note]]", "None | m | [[ghost]]")[1]
+        self.assertRegex(out, r"FAIL frame-terms: Two.*2.*; None.*0")
+
+    def test_S3_wikilink_skips_trash_and_git(self):
+        self.vault("a/note.md", ".trash/note.md", ".git/note.md")
+        self.assertIn("PASS frame-terms", self.terms_out("A | m | [[note]]")[1])
+
+    def test_S4_path_links_with_line(self):
+        f = self.root / "src.py"
+        f.write_text("a\nb\nc\n")
+        ok = self.terms_out(f"A | m | {f}", f"B | m | {f}:3")[1]
+        self.assertIn("PASS frame-terms", ok)
+        out = self.terms_out(f"Far | m | {f}:4", f"Gone | m | {self.root}/nope.py")[1]
+        self.assertRegex(out, r"FAIL frame-terms: Far.*; Gone")
+
+    def test_S4_tilde_path_expands_home(self):
+        (self.root / "n.txt").write_text("a\n")
+        with mock.patch.dict(os.environ, {"HOME": str(self.root)}):
+            self.assertIn("PASS frame-terms", self.terms_out("A | m | ~/n.txt:1")[1])
+
+    def test_S4_line_zero_fails(self):
+        (self.root / "n.txt").write_text("a\n")
+        self.assertRegex(self.terms_out(f"Z | m | {self.root}/n.txt:0")[1], r"FAIL frame-terms: Z")
+
+    def test_S4_unreadable_file_fails_without_crash(self):
+        f = self.root / "n.txt"
+        f.write_text("a\n")
+        f.chmod(0)
+        self.addCleanup(f.chmod, 0o600)
+        self.assertRegex(self.terms_out(f"U | m | {f}:1")[1], r"FAIL frame-terms: U: cannot read")
+
+    def test_S3_wikilink_is_case_insensitive_and_strips_md(self):
+        self.vault("Sub/My Note.md")
+        self.assertIn("PASS frame-terms", self.terms_out("A | m | [[my note]]", "B | m | [[MY NOTE.md]]")[1])
+
+    def test_S3_wikilink_skips_every_dot_folder(self):
+        self.vault(".hidden/note.md", "sub/note.md")
+        self.assertIn("PASS frame-terms", self.terms_out("A | m | [[note]]")[1])
+
+    def test_S1_prose_or_wrong_header_fails(self):
+        for body in ("just words\n", "| name | definition | url |\n|---|---|---|\n| a | b | c |\n",
+                     "| Term | Definition | Link |\n|---|---|---|\n| a | b | |\n"):
+            self.write("frame.md", FRAME.split("## Terms")[0] + "## Terms\n" + body)
+            self.assertIn("FAIL frame-terms: no term | meaning | link table", self.run_check("--gate", "1")[1])
+
+    def test_S5_https_accepted_without_network(self):
+        self.assertIn("PASS frame-terms", self.terms_out("A | m | https://unreachable.invalid/x")[1])
+
+    def test_S6_two_links_in_one_cell_fail(self):
+        out = self.terms_out("Two | m | https://a.io https://b.io")[1]
+        self.assertRegex(out, r"FAIL frame-terms: Two: write as https URL, ~/path or \[\[note\]\]")
+
+    def test_S6_other_link_forms_fail_with_hint(self):
+        out = self.terms_out("Tick | m | H-8118", "Sha | m | f355ab6", "Rel | m | packages/x.ts")[1]
+        line = [l for l in out.splitlines() if "frame-terms" in l][0]
+        self.assertTrue(line.startswith("FAIL"), line)
+        for t in ("Tick", "Sha", "Rel"):
+            self.assertIn(t, line)
+        self.assertEqual(line.count("write as https URL, ~/path or [[note]]"), 3)
+
+    def test_S7_wikilink_without_vault_root_fails(self):
+        out = self.terms_out("Note | m | [[note]]")[1]
+        self.assertRegex(out, r"FAIL frame-terms: Note.*no vault root")
+
+    def test_S13_docstring_documents_frame_terms(self):
+        doc = self.app.__doc__
+        for s in ("frame-terms", "## Terms", "https://", "~/", "[[note]]"):
+            self.assertIn(s, doc)
 
 
 if __name__ == "__main__":
