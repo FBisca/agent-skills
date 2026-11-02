@@ -13,7 +13,7 @@ def skill_text():
     return read("SKILL.md") + "\n" + read("reader.md")
 
 
-class GoldfishContract(unittest.TestCase):
+class ColdReadContract(unittest.TestCase):
     def test_S15c_manual_only_invocation(self):
         self.assertRegex(read("SKILL.md"), r"(?m)^disable-model-invocation: true$")
         self.assertRegex(read("agents/openai.yaml"), r"(?m)^\s+allow_implicit_invocation: false$")
@@ -39,6 +39,15 @@ class GoldfishContract(unittest.TestCase):
         self.assertNotIn("Felippe Bisca's setup", t)
         self.assertTrue((ROOT / "LICENSE").exists())
         self.assertIn("Apache License", read("LICENSE"))
+
+    def test_S37_renamed_cold_read(self):
+        skills = ROOT.parent
+        self.assertRegex(read("SKILL.md"), r"(?m)^name: cold-read$")
+        self.assertIn("`/cold-read <doc>`", read("SKILL.md"))
+        self.assertFalse((skills / "goldfish").exists())
+        self.assertIn("`/cold-read <folder>/PRD.md`", (skills / "idea-answer" / "SKILL.md").read_text())
+        for s in ("elephant-goldfish-model", "Apache-2.0"):
+            self.assertIn(s, read("NOTICE.md"))
 
     def test_S32_names_no_person(self):
         hits = [p.name for p in ROOT.rglob("*.md") if "felippe" in p.read_text().lower()]

@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 **Input:** an idea folder (`V/01-projects/<slug>/`, stage `gate1` or `answering`), or a decided feature with sources and no folder yet.
 **Output:** `answers.md` entries, updated assumption results, a `gate2` line in `gates.md`, hours logged, and an `idea_check --gate 2` report shown to the user.
-**Hand-off:** gate 2 passed means `/to-spec` (writes `PRD.md` in the folder through the vault tracker setup), then `/goldfish <folder>/PRD.md`. Kill or reshape ends here with the reason in `gates.md`.
+**Hand-off:** gate 2 passed means `/to-spec` (writes `PRD.md` in the folder through the vault tracker setup), then `/cold-read <folder>/PRD.md`. Kill or reshape ends here with the reason in `gates.md`.
 
 Agents asked the late questions in the backtest and nobody answered: operators, finance, compliance and leadership did. This skill gets the user to those people with the right questions. It never sends anything.
 
@@ -42,7 +42,7 @@ Agents asked the late questions in the backtest and nobody answered: operators, 
    ```
 
    Fix every FAIL (usually a missing Link, empty result, or decider mismatch), rerun until none. Never edit the check or the decider to pass.
-8. **Hand off** by naming `/to-spec`; after `/to-spec` writes `PRD.md`, set `stage: prd`; then name `/goldfish <folder>/PRD.md`. Do not run either.
+8. **Hand off** by naming `/to-spec`; after `/to-spec` writes `PRD.md`, set `stage: prd`; then name `/cold-read <folder>/PRD.md`. Do not run either.
 
 Done when `idea_check --gate 2` prints no FAIL and the next command is named, or the idea is killed or reshaped with the reason recorded.
 

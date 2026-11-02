@@ -1,16 +1,16 @@
 ---
-name: goldfish
-description: Zero-context comprehension check of one document. The user runs `/goldfish <doc>` after `/to-spec`, or on any plan or doc, to see whether a cold reader can follow it.
+name: cold-read
+description: Zero-context comprehension check of one document. The user runs `/cold-read <doc>` after `/to-spec`, or on any plan or doc, to see whether a cold reader can follow it.
 disable-model-invocation: true
 ---
 
-# Goldfish
+# Cold read
 
 **Input:** a path to one document (`<doc>`).
 **Output:** a comprehension report shown to the user: per-section paraphrases, undefined terms, ambiguous statements, Blockers.
-**Hand-off:** the user fixes the doc, then reruns `/goldfish <doc>` until no Blocker remains. This skill never edits the doc.
+**Hand-off:** the user fixes the doc, then reruns `/cold-read <doc>` until no Blocker remains. This skill never edits the doc.
 
-A review in your own context is not a Goldfish review: you know too much. The reader must be a fresh subagent.
+A review in your own context is not a cold read: you know too much. The reader must be a fresh subagent.
 
 ## Steps
 

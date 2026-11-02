@@ -46,8 +46,8 @@ class IdeaAnswerContract(unittest.TestCase):
             "gate2: pass by <role>: <reason>",
         ):
             self.assertIn(p, t)
-        self.assertLess(t.rindex("`/to-spec`"), t.rindex("`/goldfish <folder>/PRD.md`"))
-        self.assertRegex(read("SKILL.md"), r"(?s)Hand-off:\*\*.*`/to-spec`.*`/goldfish")
+        self.assertLess(t.rindex("`/to-spec`"), t.rindex("`/cold-read <folder>/PRD.md`"))
+        self.assertRegex(read("SKILL.md"), r"(?s)Hand-off:\*\*.*`/to-spec`.*`/cold-read")
         self.assertNotIn("idea.md", t)
         self.assertLessEqual(len(read("SKILL.md").splitlines()), 120)
 
