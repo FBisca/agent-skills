@@ -1,6 +1,7 @@
 """idea_check.py against throwaway idea folders; scenario IDs name the tests."""
 
 import contextlib
+import hashlib
 import importlib.util
 import io
 import os
@@ -51,9 +52,14 @@ ROWS = [
 ]
 PREMORTEM = "# Pre-mortem\n- Nobody uses it → PRD: adoption plan\n- Cost blows up → A3\n"
 ANSWERS = "## Q2\nOwner: finance\nDate: 2026-10-20\nSummary: costs ok\nLink: https://example.com/a\n"
+def sha12(text):
+    return hashlib.sha256(text.strip().encode("utf-8")).hexdigest()[:12]
+
+
 GATES = (
     "- 2026-10-10 gate1: continue: top 3 ready\n"
     "- 2026-10-25 gate2: pass by CFO: all closed\n"
+    f"- 2026-10-26 language: pass {sha12(FRAME)}\n"
 )
 HOURS = "- 2026-10-01 framing 2h\n- 2026-10-05 gate1 1h\n- 2026-10-10 answering 3h\n- 2026-10-20 gate2 1h"
 
@@ -194,7 +200,7 @@ class IdeaCheckTests(unittest.TestCase):
         code, out, _ = self.run_check("--gate", "2")
         self.assertEqual(code, 0, out)
         for name in ("frame-sources", "frame-owners", "unknown-to-assumption", "top3-ready", "premortem-links",
-                     "frame-terms"):
+                     "frame-terms", "frame-language"):
             self.assertIn(f"SKIPPED {name}", out)
         for name in ("assumptions-closed", "answers-sourced", "decider-signoff", "hours-logged"):
             self.assertIn(f"PASS {name}", out)
@@ -213,7 +219,7 @@ class IdeaCheckTests(unittest.TestCase):
         self.assertTrue(all(l.startswith("PASS ") for l in lines), out)
         names = [l.split()[1].rstrip(":") for l in lines]
         self.assertEqual(len(names), len(set(names)))
-        self.assertEqual(len(names), 15)
+        self.assertEqual(len(names), 16)
 
     def test_S9_escaped_pipe_does_not_shift_columns(self):
         rows = [(ROWS[0][0], "value", r"See [[note\|alias]] (Q2)", *ROWS[0][3:7], ""), *ROWS[1:]]
@@ -469,6 +475,65 @@ class IdeaCheckTests(unittest.TestCase):
         doc = self.app.__doc__
         for s in ("frame-terms", "## Terms", "https://", "~/", "[[note]]"):
             self.assertIn(s, doc)
+
+    # --- frame-language ---
+    def language(self, *lines):
+        self.write("gates.md", GATES.split("- 2026-10-26 language")[0] + "".join(l + "\n" for l in lines))
+
+    def test_S8_no_language_line_fails_and_prints_current_sha(self):
+        self.language()
+        for gate in ("1", "2"):
+            code, out, _ = self.run_check("--gate", gate)
+            self.assertEqual(code, 1)
+            self.assertIn(f"FAIL frame-language: no pass for frame {sha12(FRAME)}", out)
+
+    def test_S9_matching_latest_pass_passes(self):
+        self.language("- 2026-10-01 language: pass aaaaaaaaaaaa", f"* 2026-10-02 language: pass {sha12(FRAME)}")
+        self.assertIn("PASS frame-language", self.run_check("--gate", "1")[1])
+
+    def test_S9_only_the_latest_language_line_counts(self):
+        self.language(f"- 2026-10-01 language: pass {sha12(FRAME)}", "- 2026-10-02 language: pass aaaaaaaaaaaa")
+        self.assertIn("FAIL frame-language", self.run_check("--gate", "1")[1])
+
+    def test_S9_changed_frame_body_fails_with_new_sha(self):
+        new = FRAME + "## Q4 Who pays?\nSource: me\n"
+        self.write("frame.md", new)
+        out = self.run_check("--gate", "1")[1]
+        self.assertIn(f"FAIL frame-language: no pass for frame {sha12(new)}", out)
+
+    def test_S10_frontmatter_only_change_still_passes(self):
+        self.write("frame.md", "---\ntype: note\nupdated: 2026-11-02\n---\n" + FRAME)
+        self.assertIn("PASS frame-language", self.run_check("--gate", "2")[1])
+
+    def test_S11_decided_skips_both_and_raw_runs_both(self):
+        self.idea(entry="decided")
+        out = self.run_check("--gate", "2")[1]
+        for name in ("frame-terms", "frame-language"):
+            self.assertIn(f"SKIPPED {name}", out)
+        self.idea(entry="raw")
+        out = self.run_check("--gate", "2")[1]
+        for name in ("frame-terms", "frame-language"):
+            self.assertIn(f"PASS {name}", out)
+
+    def test_S8_missing_gates_file_fails_and_prints_sha(self):
+        (self.dir / "gates.md").unlink()
+        self.assertIn(f"FAIL frame-language: gates.md missing; frame {sha12(FRAME)}", self.run_check("--gate", "1")[1])
+
+    def test_S9_pass_detail_names_the_frame_sha(self):
+        self.assertIn(f"PASS frame-language: frame {sha12(FRAME)}\n", self.run_check("--gate", "1")[1])
+
+    def test_S9_newer_non_pass_or_placeholder_line_overrides_a_pass(self):
+        good = f"- 2026-10-01 language: pass {sha12(FRAME)}"
+        for newer in ("- 2026-10-02 language: blocked", "- 2026-10-02 language: pass <sha12>",
+                      "- 2026-10-02 language: pass abc"):
+            self.language(good, newer)
+            self.assertIn("FAIL frame-language", self.run_check("--gate", "1")[1], newer)
+
+    def test_S10_whitespace_and_empty_frontmatter_do_not_change_the_sha(self):
+        for text in (FRAME + "\n\n", "---\ntype: note\n---\n\n" + FRAME, "---\n---\n" + FRAME,
+                     "---\ntype: note\n---\n" + FRAME + "  \n"):
+            self.write("frame.md", text)
+            self.assertIn("PASS frame-language", self.run_check("--gate", "1")[1], repr(text[:30]))
 
 
 if __name__ == "__main__":

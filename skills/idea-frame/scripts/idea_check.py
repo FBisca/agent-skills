@@ -7,12 +7,12 @@ Output: one `PASS|FAIL|SKIPPED <check>: detail` line per check. Exit 0 if nothin
 
 Checks (no --gate = structural only):
   structural: stage-value, assumption-values, premortem-links, gate-reason, hours-logged
-  --gate 1:   structural + frame-sources, frame-owners, frame-terms, unknown-to-assumption, top3-ready,
-              test-criterion
+  --gate 1:   structural + frame-sources, frame-owners, frame-terms, frame-language,
+              unknown-to-assumption, top3-ready, test-criterion
   --gate 2:   gate 1 + assumptions-closed, answers-sourced, people-cap, decider-signoff
 A structural check whose file is absent prints SKIPPED. A gate check whose file is absent FAILs
-(gate 1 needs frame.md, assumptions.md, premortem.md; gate 2 also needs answers.md, gates.md).
-`entry: decided` + --gate 2 (test-criterion still runs): frame-sources, frame-owners, frame-terms, unknown-to-assumption, top3-ready, premortem-links print
+(gate 1 needs frame.md, assumptions.md, premortem.md, gates.md for frame-language; gate 2 also needs answers.md).
+`entry: decided` + --gate 2 (test-criterion still runs): frame-sources, frame-owners, frame-terms, frame-language, unknown-to-assumption, top3-ready, premortem-links print
 SKIPPED; the other checks run.
 
 Contract decisions (files as in the plan's idea-folder table):
@@ -54,6 +54,11 @@ Contract decisions (files as in the plan's idea-folder table):
                        dot-folders skipped; case-insensitive, `.md` optional); a `/` in the link matches the path suffix.
   Anything else (`H-8118`, `f355ab6`, `packages/x.ts`) FAILs with `write as https URL, ~/path or [[note]]`.
   One FAIL lists every bad row, `; `-joined, each starting with its term.
+- frame-language (gates 1 and 2): gates.md's LATEST `language:` line (`- YYYY-MM-DD language: ...`, bullet `-`
+  or `*`) must be `pass <sha12>` equal to sha12 of frame.md: the first 12 hex of the sha256 of its UTF-8 text
+  without frontmatter, stripped of surrounding whitespace (a frontmatter or trailing-whitespace edit keeps the
+  pass; a newer `blocked` or malformed line cancels it). The pass is appended after the idea-frame `reader.md` subagent
+  returns `pass`. Else FAIL `no pass for frame <sha12>` (current sha12); a missing gates.md FAILs `gates.md missing; frame <sha12>`.
 - An assumption cites frame question Q<n> when the token `Q<n>` appears in its assumption cell.
 - test-criterion (gates 1 and 2, also `entry: decided`): each high-importance assumption's test cell is
   `<type>: <success criterion>`, type (case-insensitive) one of interview, prototype, data, survey,
@@ -73,6 +78,7 @@ Contract decisions (files as in the plan's idea-folder table):
   equals the index note's `decider` (case-insensitive).
 """
 import argparse
+import hashlib
 import os
 import re
 import sys
@@ -103,7 +109,7 @@ def load(path):
 def read(folder, name):
     """A side file's body: its own frontmatter is never read by any check."""
     text = load(Path(folder) / name)
-    return text if text is None else re.sub(r"\A---\s*\n.*?\n---[ \t]*\n?", "", text, count=1, flags=re.S)
+    return text if text is None else re.sub(r"\A---\s*\n(?:.*?\n)?---[ \t]*\n?", "", text, count=1, flags=re.S)
 
 
 def frontmatter(text):
@@ -298,6 +304,23 @@ def check_frame_owners(text):
     return result(not bad, "frame-owners", "no D10 Owner: " + ", ".join(bad) if bad else "")
 
 
+LANGUAGE_LINE = re.compile(r"^\s*[-*]\s+\d{4}-\d\d-\d\d\s+language:(.*)$")
+
+
+def frame_sha(frame):
+    """sha12 of the frame body (frontmatter already stripped by read()), outer whitespace ignored."""
+    return hashlib.sha256(frame.strip().encode("utf-8")).hexdigest()[:12]
+
+
+def check_language(frame, gates):
+    sha = frame_sha(frame)
+    if gates is None:
+        return result(False, "frame-language", f"gates.md missing; frame {sha}")
+    lines = [m.group(1).strip() for m in map(LANGUAGE_LINE.match, gates.splitlines()) if m]
+    ok = bool(lines) and re.fullmatch(r"pass\s+" + sha, lines[-1], re.I) is not None
+    return result(ok, "frame-language", f"frame {sha}" if ok else f"no pass for frame {sha}")
+
+
 def check_people_cap(text):
     n = sum(1 for _, body in sections(text or "") if owner_of(body) != "engineering")
     return result(n <= PEOPLE_CAP, "people-cap", f"{n} items sent to people (max {PEOPLE_CAP})")
@@ -376,8 +399,8 @@ def run(folder, gate):
     out = [check_stage(idea)]
 
     def need(name, file, gate_needs, fn):
-        if skip_gate1 and name in ("frame-sources", "frame-owners", "frame-terms", "unknown-to-assumption",
-                    "top3-ready", "premortem-links"):
+        if skip_gate1 and name in ("frame-sources", "frame-owners", "frame-terms", "frame-language",
+                    "unknown-to-assumption", "top3-ready", "premortem-links"):
             return ("SKIPPED", name, "entry: decided")
         if docs[file] is None:
             return missing(name, file) if gate >= gate_needs else ("SKIPPED", name, f"{file} absent")
@@ -391,6 +414,8 @@ def run(folder, gate):
         out.append(need("frame-sources", "frame.md", 1, lambda: check_frame_sources(docs["frame.md"])))
         out.append(need("frame-owners", "frame.md", 1, lambda: check_frame_owners(docs["frame.md"])))
         out.append(need("frame-terms", "frame.md", 1, lambda: check_terms(docs["frame.md"], folder)))
+        out.append(need("frame-language", "frame.md", 1,
+                        lambda: check_language(docs["frame.md"], docs["gates.md"])))
         out.append(need("unknown-to-assumption", "frame.md", 1,
                         lambda: check_unknown(docs["frame.md"], rows)))
         out.append(need("top3-ready", "assumptions.md", 1, lambda: check_top3(rows)))

@@ -102,6 +102,24 @@ class IdeaFrameContract(unittest.TestCase):
                   "`<type>: <success criterion>`", "interview, prototype, data, survey, spike"):
             self.assertIn(p, skill)
 
+    def test_S14_reader_md_contract(self):
+        reader = read("reader.md")
+        for p in ("only the `frame.md` path", "never follow links", "`## Terms`", "counts as defined",
+                  "`Q<n>` and `A<n>`", "never flag them", "When in doubt, do not flag",
+                  '"verdict"', '"pass"|"blocked"', '"items"', '"kind"', '"term"|"ambiguity"',
+                  '"quote"', '"fix"', "Output ONLY JSON"):
+            self.assertIn(p, reader)
+        self.assertNotIn("felippe", reader.lower())
+        for w in ("severity", "severities", "blocker", "major", "nit"):
+            self.assertNotRegex(reader.lower(), rf"\b{w}\b")
+
+    def test_S14_skill_names_reader_terms_and_language_line(self):
+        skill = read("SKILL.md")
+        for p in ("[`reader.md`](reader.md)", "`## Terms`", "term | meaning | link",
+                  "language: pass <sha12>"):
+            self.assertIn(p, skill)
+        self.assertLessEqual(len(skill.splitlines()), 120)
+
 
 if __name__ == "__main__":
     unittest.main()
