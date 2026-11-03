@@ -4,7 +4,7 @@ Agent skills for [Claude Code](https://claude.com/claude-code) and [Codex](https
 
 - **Deterministic gates.** `idea_check.py` and `converge.py` read files and exit non-zero; an agent cannot talk its way past them.
 - **Agents that disagree on purpose.** `cold-read` asks a fresh reader to paraphrase a document; `orchestrate` builds with separate implementer agents and accepts a ticket only when its scenarios pass.
-- **Tested.** Every script has a `unittest` suite that runs in CI on Python 3.11 to 3.13, and a repo-level test lints every `SKILL.md`.
+- **Tested.** The gate and orchestration scripts (`idea-frame`, `idea-answer`, `converge`, `cold-read`, `orchestrate`) have `unittest` suites that run in CI on Python 3.11 to 3.13, and a repo-level test lints every `SKILL.md`. `excalidraw` and `explain-video` are checked by their own render loops, not by unit tests.
 
 ## The pipeline
 
@@ -19,7 +19,7 @@ flowchart LR
     F -->|yes| G["archive plan into<br/>the living spec"]
 ```
 
-The full walkthrough, with the method behind each step and the backtest evidence, is in **[docs/workflow.md](docs/workflow.md)**.
+The full walkthrough, with the method behind each step and the findings from two backtests, is in **[docs/workflow.md](docs/workflow.md)**.
 
 `to-spec` is an upstream skill (see [Upstream skills](#upstream-skills)). `orchestrate` delegates to workers through the [agent-runtime](https://github.com/FBisca/agent-runtime) tools.
 
@@ -84,7 +84,7 @@ done
 
 | Variable | Used by | Meaning |
 |---|---|---|
-| `VAULT_DIR` | `idea-frame`, `idea-answer`, `excalidraw`, `explain-video` | Root of your notes vault. Ideas live in `$VAULT_DIR/01-projects/<slug>/`. When unset, the scripts exit non-zero and name the variable. |
+| `VAULT_DIR` | `idea-frame`, `idea-answer`, `excalidraw`, `explain-video` | Root of your notes vault. Ideas live in `$VAULT_DIR/01-projects/<slug>/`. When unset, `idea_check.py` and the `excalidraw` helpers (`vault_dir()`, `style.py vault:`) exit 3 naming the variable; the other skills stop and tell you to set it. A bundled `idea-frame/templates/project.md` is used when the vault has no `90-templates/project.md`. |
 | `AGENT_RUNTIME_HOME` | `orchestrate` | Checkout of [agent-runtime](https://github.com/FBisca/agent-runtime). Falls back to `agent-runtime` on `PATH`. |
 | `HYPERFRAMES_SKILLS_DIR` | `explain-video` | `skills/` folder of HyperFrames v0.8.184; `skills/explain-video/scripts/fetch-hyperframes.sh` prints the export line. |
 
