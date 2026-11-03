@@ -1,0 +1,151 @@
+{
+  "$comment": "Upstream skills this repo does not carry. Install them all with scripts/install-upstream.sh, or one at a time with the `install` command.",
+  "version": 1,
+  "skills": [
+    {
+      "name": "codebase-design",
+      "source": "mattpocock/skills",
+      "license": "MIT",
+      "relation": "verbatim",
+      "install": "npx skills add mattpocock/skills --skill codebase-design --agent claude-code --agent codex --global --yes"
+    },
+    {
+      "name": "diagnosing-bugs",
+      "source": "mattpocock/skills",
+      "license": "MIT",
+      "relation": "verbatim",
+      "install": "npx skills add mattpocock/skills --skill diagnosing-bugs --agent claude-code --agent codex --global --yes"
+    },
+    {
+      "name": "domain-modeling",
+      "source": "mattpocock/skills",
+      "license": "MIT",
+      "relation": "verbatim",
+      "install": "npx skills add mattpocock/skills --skill domain-modeling --agent claude-code --agent codex --global --yes"
+    },
+    {
+      "name": "grilling",
+      "source": "mattpocock/skills",
+      "license": "MIT",
+      "relation": "verbatim",
+      "install": "npx skills add mattpocock/skills --skill grilling --agent claude-code --agent codex --global --yes"
+    },
+    {
+      "name": "improve-codebase-architecture",
+      "source": "mattpocock/skills",
+      "license": "MIT",
+      "relation": "verbatim",
+      "install": "npx skills add mattpocock/skills --skill improve-codebase-architecture --agent claude-code --agent codex --global --yes"
+    },
+    {
+      "name": "prototype",
+      "source": "mattpocock/skills",
+      "license": "MIT",
+      "relation": "verbatim",
+      "install": "npx skills add mattpocock/skills --skill prototype --agent claude-code --agent codex --global --yes"
+    },
+    {
+      "name": "retro",
+      "source": "mattpocock/skills",
+      "license": "MIT",
+      "relation": "verbatim",
+      "install": "npx skills add mattpocock/skills --skill retro --agent claude-code --agent codex --global --yes"
+    },
+    {
+      "name": "setup-matt-pocock-skills",
+      "source": "mattpocock/skills",
+      "license": "MIT",
+      "relation": "verbatim",
+      "install": "npx skills add mattpocock/skills --skill setup-matt-pocock-skills --agent claude-code --agent codex --global --yes"
+    },
+    {
+      "name": "tdd",
+      "source": "mattpocock/skills",
+      "license": "MIT",
+      "relation": "verbatim",
+      "install": "npx skills add mattpocock/skills --skill tdd --agent claude-code --agent codex --global --yes"
+    },
+    {
+      "name": "to-spec",
+      "source": "mattpocock/skills",
+      "license": "MIT",
+      "relation": "verbatim",
+      "install": "npx skills add mattpocock/skills --skill to-spec --agent claude-code --agent codex --global --yes"
+    },
+    {
+      "name": "to-tickets",
+      "source": "mattpocock/skills",
+      "license": "MIT",
+      "relation": "verbatim",
+      "install": "npx skills add mattpocock/skills --skill to-tickets --agent claude-code --agent codex --global --yes"
+    },
+    {
+      "name": "triage",
+      "source": "mattpocock/skills",
+      "license": "MIT",
+      "relation": "verbatim",
+      "install": "npx skills add mattpocock/skills --skill triage --agent claude-code --agent codex --global --yes"
+    },
+    {
+      "name": "writing-for-agents",
+      "source": "mattpocock/skills",
+      "license": "MIT",
+      "relation": "verbatim",
+      "install": "npx skills add mattpocock/skills --skill writing-for-agents --agent claude-code --agent codex --global --yes"
+    },
+    {
+      "name": "hyperframes",
+      "source": "heygen-com/hyperframes",
+      "license": "Apache-2.0",
+      "relation": "verbatim",
+      "install": "npx skills add heygen-com/hyperframes --skill hyperframes --agent claude-code --agent codex --global --yes"
+    },
+    {
+      "name": "hyperframes-cli",
+      "source": "heygen-com/hyperframes",
+      "license": "Apache-2.0",
+      "relation": "verbatim",
+      "install": "npx skills add heygen-com/hyperframes --skill hyperframes-cli --agent claude-code --agent codex --global --yes"
+    },
+    {
+      "name": "hyperframes-registry",
+      "source": "heygen-com/hyperframes",
+      "license": "Apache-2.0",
+      "relation": "verbatim",
+      "install": "npx skills add heygen-com/hyperframes --skill hyperframes-registry --agent claude-code --agent codex --global --yes"
+    },
+    {
+      "name": "media-use",
+      "source": "heygen-com/hyperframes",
+      "license": "Apache-2.0",
+      "relation": "verbatim",
+      "install": "npx skills add heygen-com/hyperframes --skill media-use --agent claude-code --agent codex --global --yes"
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "hyperframes-workflow-0.8.184",
+      "used_by": "explain-video",
+      "source": "heygen-com/hyperframes",
+      "ref": "v0.8.184",
+      "license": "Apache-2.0",
+      "install": "skills/explain-video/scripts/fetch-hyperframes.sh"
+    }
+  ],
+  "vendored_unmodified": [
+    {
+      "name": "caveman",
+      "source": "mattpocock/skills",
+      "ref": "694fa30311e02c2639942308513555e61ee84a6f",
+      "license": "MIT",
+      "reason": "removed from the upstream default branch, so `npx skills add` can no longer fetch it; kept as an unmodified copy"
+    },
+    {
+      "name": "zoom-out",
+      "source": "mattpocock/skills",
+      "ref": "694fa30311e02c2639942308513555e61ee84a6f",
+      "license": "MIT",
+      "reason": "removed from the upstream default branch, so `npx skills add` can no longer fetch it; kept as an unmodified copy"
+    }
+  ]
+}
