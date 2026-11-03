@@ -120,6 +120,15 @@
       "license": "Apache-2.0",
       "relation": "verbatim",
       "install": "npx skills add heygen-com/hyperframes --skill media-use --agent claude-code --agent codex --global --yes"
+    },
+    {
+      "name": "impeccable",
+      "source": "pbakaus/impeccable",
+      "license": "Apache-2.0",
+      "relation": "verbatim",
+      "renamed_from": "frontend-design",
+      "note": "Impeccable renamed its frontend-design skill; this is the current upstream equivalent",
+      "install": "npx skills add pbakaus/impeccable --skill impeccable --agent claude-code --agent codex --global --yes"
     }
   ],
   "dependencies": [

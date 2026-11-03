@@ -17,7 +17,7 @@ STRIPPED = {
     "codebase-design", "diagnosing-bugs", "domain-modeling", "grilling",
     "improve-codebase-architecture", "prototype", "retro", "setup-matt-pocock-skills",
     "tdd", "to-spec", "to-tickets", "triage", "writing-for-agents",
-    "hyperframes", "hyperframes-cli", "hyperframes-registry", "media-use",
+    "impeccable", "hyperframes", "hyperframes-cli", "hyperframes-registry", "media-use",
 }
 
 
@@ -49,9 +49,9 @@ class SkillMetadata(unittest.TestCase):
             self.assertNotIn("~/.claude/skills/", path.read_text(encoding="utf-8"), str(path))
 
     def test_derived_and_copied_skills_carry_a_notice(self):
-        for name in ("handoff", "teach", "caveman", "zoom-out", "frontend-design", "cold-read"):
+        for name in ("handoff", "teach", "caveman", "zoom-out", "cold-read"):
             self.assertTrue((SKILLS / name / "NOTICE.md").is_file(), name)
-        self.assertFalse((SKILLS / "frontend-design" / "reference").exists())
+        self.assertFalse((SKILLS / "frontend-design").exists())
 
     def test_idea_frame_bundles_the_project_template(self):
         self.assertTrue((SKILLS / "idea-frame" / "templates" / "project.md").is_file())

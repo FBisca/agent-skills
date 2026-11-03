@@ -39,9 +39,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## frontend-design: Anthropic (Apache-2.0)
+## Installed from upstream, not copied
 
-Derived from the `frontend-design` skill in https://github.com/anthropics/skills. Apache License 2.0; full text in `skills/frontend-design/LICENSE`, attribution and change note in `skills/frontend-design/NOTICE.md`. Not endorsed by Anthropic.
+`impeccable` (formerly `frontend-design`) comes from https://github.com/pbakaus/impeccable, Copyright 2025 Paul Bakaus, Apache-2.0; install it with `scripts/install-upstream.sh` (see `skills.lock.json`).
 
 ## cold-read: Google (Apache-2.0)
 
