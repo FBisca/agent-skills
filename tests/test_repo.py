@@ -76,6 +76,17 @@ class UpstreamLock(unittest.TestCase):
         self.assertIn("install-upstream.sh", readme)
 
 
+class WorkflowDoc(unittest.TestCase):
+    def test_S7a_workflow_doc_exists_and_readme_links_to_it(self):
+        """S7a: the repo carries the workflow doc and the README links to it."""
+        doc = ROOT / "docs" / "workflow.md"
+        self.assertTrue(doc.is_file())
+        text = doc.read_text(encoding="utf-8")
+        self.assertNotIn("agents/.agents", text)
+        self.assertNotIn("workflow-evals", text)
+        self.assertIn("(docs/workflow.md)", (ROOT / "README.md").read_text(encoding="utf-8"))
+
+
 class VaultDir(unittest.TestCase):
     def run_check(self, env_extra, *args):
         env = {k: v for k, v in os.environ.items() if k != "VAULT_DIR"}

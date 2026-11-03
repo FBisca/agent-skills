@@ -19,6 +19,8 @@ flowchart LR
     F -->|yes| G["archive plan into<br/>the living spec"]
 ```
 
+The full walkthrough, with the method behind each step and the backtest evidence, is in **[docs/workflow.md](docs/workflow.md)**.
+
 `to-spec` is an upstream skill (see [Upstream skills](#upstream-skills)). `orchestrate` delegates to workers through the [agent-runtime](https://github.com/FBisca/agent-runtime) tools.
 
 ## Skills
