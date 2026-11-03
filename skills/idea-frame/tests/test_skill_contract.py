@@ -38,7 +38,7 @@ class IdeaFrameContract(unittest.TestCase):
 
     def test_S16_uses_vault_template_and_notes(self):
         skill = read("SKILL.md")
-        for p in ("~/developer/vault/90-templates/project.md", "`## Now`", "`## Notes`",
+        for p in ("$VAULT_DIR/90-templates/project.md", "`## Now`", "`## Notes`",
                   "[[frame]] [[assumptions]]", "`type: note`", 'project: "[[<Title>]]"',
                   "`stage: gate1`", "`stage: answering`"):
             self.assertIn(p, skill)

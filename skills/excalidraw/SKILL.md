@@ -9,7 +9,7 @@ description: Hand-drawn Excalidraw diagrams (system design, flows, states, risks
 **Output:** `<slug>.excalidraw` and its spec `<slug>.sketch.py`, side by side; the check passing; every frame rendered and read; the style numbers next to the reference's.
 **Hand-off:** the path, the style numbers, and anything not checked.
 
-`<sk>` is this skill's directory. Scripts run with `python3 -I`. Drawings live in the Obsidian vault at `~/developer/vault`, next to the project's index note (`01-projects/<project>/`), or in `00-inbox/excalidraws/` when there is no project. Link the drawing from the index note.
+`<sk>` is this skill's directory. Scripts run with `python3 -I`. The vault root is the `VAULT_DIR` environment variable; if it is unset, stop and tell the user to set it (`excali.vault_dir()` fails naming it). Drawings live in the vault at `$VAULT_DIR`, next to the project's index note (`01-projects/<project>/`), or in `00-inbox/excalidraws/` when there is no project. Link the drawing from the index note.
 
 ## The style
 

@@ -8,11 +8,11 @@ description: Narrated tutorial videos (YouTube-style MP4) that teach code, a PR,
 A tutorial film in four layers: the script teaches, the narrator records it, the storyboard gives each scene one invented visual timed to the voice, and frame workers build those scenes in HyperFrames. Scripts handle the rest: setup, assembly, checks, render and mastering.
 
 - `<ev>` is this skill's directory. `hf` means `HYPERFRAMES_SKIP_SKILLS=1 npx --yes hyperframes@0.8.184`, run in the project folder. The skip flag stops each CLI call from re-linking the global agent skills.
-- The HyperFrames pieces this pipeline needs are frozen in `<ev>/hyperframes-0.8.184/`. Release 0.8.185 dropped the frame presets, blueprints, frame packets and assembly scripts. The installed `/hyperframes` skills may be a different version, so read HyperFrames docs from the frozen folder.
+- `<hf>` is the HyperFrames v0.8.184 `skills/` folder, named by the `HYPERFRAMES_SKILLS_DIR` environment variable. It is not vendored: run `<ev>/scripts/fetch-hyperframes.sh` once and export the variable it prints. Release 0.8.185 dropped the frame presets, blueprints, frame packets and assembly scripts this pipeline needs. The installed `/hyperframes` skills may be a different version, so read HyperFrames docs from `<hf>`.
 
-**Where videos live:** in the Obsidian vault at `~/developer/vault`, never in a code repo.
-- **A video for a project:** `~/developer/vault/01-projects/<project>/videos/`. Read the vault's `AGENTS.md` and the project's index note first.
-- **No project yet:** `~/developer/vault/00-inbox/videos/`, and say so in the hand-over.
+**Where videos live:** in the notes vault at `$VAULT_DIR` (an environment variable; if it is unset, stop and tell the user to set it), never in a code repo.
+- **A video for a project:** `$VAULT_DIR/01-projects/<project>/videos/`. Read the vault's `AGENTS.md` and the project's index note first.
+- **No project yet:** `$VAULT_DIR/00-inbox/videos/`, and say so in the hand-over.
 - **Each video is three items:**
   - `<slug>.json`: the script.
   - `<slug>/`: the HyperFrames project.
@@ -37,7 +37,7 @@ A tutorial film in four layers: the script teaches, the narrator records it, the
 4. **Storyboard.** Write `<slug>/STORYBOARD.md` following [references/visuals.md](references/visuals.md):
    - The Video direction and the Shared props.
    - One Frame block per scene, with every reveal timed from `cues.md`.
-   - Motion cited from `<ev>/hyperframes-0.8.184/hyperframes-animation/{blueprints,rules}-index.md`.
+   - Motion cited from `<hf>/hyperframes-animation/{blueprints,rules}-index.md`.
 
    Search the registry for any named look, and install the picks now, before dispatch. Stage the marks of real products named on screen with `node <ev>/scripts/logos.mjs <project> <slug…>`. Done when:
    - Every scene has a block with a distinct visual idea, a citation, `focal`, `coral`, `transition_in` and timed Scene lines.
