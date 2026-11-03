@@ -44,6 +44,18 @@ class SkillMetadata(unittest.TestCase):
             self.assertEqual(meta.get("name"), d.name, f"{d.name}: name matches dir")
             self.assertTrue(meta.get("description"), f"{d.name}: description")
 
+    def test_no_skill_text_hardcodes_a_claude_skills_path(self):
+        for path in SKILLS.rglob("SKILL.md"):
+            self.assertNotIn("~/.claude/skills/", path.read_text(encoding="utf-8"), str(path))
+
+    def test_derived_and_copied_skills_carry_a_notice(self):
+        for name in ("handoff", "teach", "caveman", "zoom-out", "frontend-design", "cold-read"):
+            self.assertTrue((SKILLS / name / "NOTICE.md").is_file(), name)
+        self.assertFalse((SKILLS / "frontend-design" / "reference").exists())
+
+    def test_idea_frame_bundles_the_project_template(self):
+        self.assertTrue((SKILLS / "idea-frame" / "templates" / "project.md").is_file())
+
     def test_no_symlinks_or_absolute_user_paths(self):
         for path in ROOT.rglob("*"):
             if ".git" in path.parts or "__pycache__" in path.parts:
