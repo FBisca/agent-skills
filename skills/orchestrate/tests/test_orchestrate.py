@@ -177,39 +177,49 @@ class ContextAndTransportTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             app.metrics([dict(sample, kind="cumulative")])
 
-    def test_inspect_includes_resolver_and_herdr_subcommand_is_gone(self):
+    def test_inspect_resolves_runtime_from_agent_runtime_home_then_path(self):
         """agent-runtime/R23"""
-        def cli(*argv):
+        def cli(env, *argv):
             return subprocess.run([sys.executable, "-B", str(SCRIPT), *argv],
-                                  capture_output=True, text=True,
-                                  env={"PATH": os.environ["PATH"]})
-        result = cli("inspect", "--checkout", str(SCRIPT.parents[5]))
-        self.assertEqual(result.returncode, 0, result.stderr)
-        info = json.loads(result.stdout)
-        self.assertEqual(info["agent_runtime"]["runtime"], "native")
-        self.assertNotIn("herdr", info["executables"])
-        self.assertNotEqual(cli("herdr", "--session", "x").returncode, 0)
-        self.assertFalse(hasattr(app, "herdr_snapshot"))
+                                  capture_output=True, text=True, env=env)
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            (home / "server").mkdir(parents=True)
+            (home / "server" / "agent_runtime.py").write_text(
+                "import json\nprint(json.dumps({'runtime': 'from-home'}))\n", encoding="utf-8")
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
+            exe = bin_dir / "agent-runtime"
+            exe.write_text("#!/bin/sh\necho '{\"runtime\": \"from-path\"}'\n", encoding="utf-8")
+            exe.chmod(0o755)
+            base = {"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+            result = cli(dict(base, AGENT_RUNTIME_HOME=str(home)), "inspect", "--checkout", str(SCRIPT.parents[3]))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            info = json.loads(result.stdout)
+            self.assertEqual(info["agent_runtime"]["runtime"], "from-home")
+            self.assertNotIn("herdr", info["executables"])
+            on_path = json.loads(cli(base, "inspect", "--checkout", str(SCRIPT.parents[3])).stdout)
+            self.assertEqual(on_path["agent_runtime"]["runtime"], "from-path")
+            self.assertNotEqual(cli(base, "herdr", "--session", "x").returncode, 0)
+            self.assertFalse(hasattr(app, "herdr_snapshot"))
+
+    def test_inspect_without_any_runtime_reports_unknown(self):
+        """agent-runtime/R23"""
+        with patch.dict(os.environ, {"PATH": "/nonexistent"}):
+            os.environ.pop("AGENT_RUNTIME_HOME", None)
+            self.assertEqual(app.resolve_runtime(), {"runtime": "unknown"})
 
     def test_inspect_survives_resolver_failure(self):
         """agent-runtime/R23"""
         with patch.object(app, "run", side_effect=ValueError("boom")):
             self.assertEqual(app.resolve_runtime(), {"runtime": "unknown"})
 
-    def test_bodies_point_to_tools_and_skill_is_gone(self):
+    def test_skill_body_points_to_tools(self):
         """agent-runtime-tools/S21"""
-        agents = Path(__file__).resolve().parents[4]
-        files = [Path(__file__).resolve().parents[1] / "SKILL.md",
-                 agents / ".claude" / "agents" / "implementer.md",
-                 agents / ".codex" / "agents" / "implementer.toml"]
-        for path in files:
-            text = path.read_text(encoding="utf-8")
-            self.assertIn("agent-runtime", text, path.name)
-            self.assertNotIn("agent-runtime contract", text, path.name)
-            self.assertIsNone(re.search(r"\bhc (run|send)\b", text), path.name)
-        self.assertIn("mcp__plugin_agent-runtime_agent-runtime__report", files[1].read_text(encoding="utf-8"))
-        self.assertIn("report tool", files[2].read_text(encoding="utf-8"))
-        self.assertFalse((agents / ".agents" / "skills" / "agent-runtime").exists())
+        text = (Path(__file__).resolve().parents[1] / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("agent-runtime", text)
+        self.assertNotIn("agent-runtime contract", text)
+        self.assertIsNone(re.search(r"\bhc (run|send)\b", text))
 
 
 if __name__ == "__main__":

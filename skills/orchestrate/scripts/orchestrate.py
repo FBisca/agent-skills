@@ -238,9 +238,16 @@ def metrics(samples):
 
 
 def resolve_runtime():
-    """Ask the agent-runtime CLI which runtime this session runs in; never fail inspect."""
-    sibling = Path(__file__).resolve().parents[4] / "plugins" / "agent-runtime" / "server" / "agent_runtime.py"
-    argv = [sys.executable, str(sibling)] if sibling.is_file() else ["agent-runtime"]
+    """Ask the agent-runtime CLI which runtime this session runs in; never fail inspect.
+
+    Resolution order: `$AGENT_RUNTIME_HOME/server/agent_runtime.py`, then `agent-runtime` on PATH.
+    """
+    home = os.environ.get("AGENT_RUNTIME_HOME")
+    script = Path(home).expanduser() / "server" / "agent_runtime.py" if home else None
+    if home and not (script and script.is_file()):
+        print(f"warning: AGENT_RUNTIME_HOME={home} has no server/agent_runtime.py; falling back to agent-runtime on PATH",
+              file=sys.stderr)
+    argv = [sys.executable, str(script)] if script and script.is_file() else ["agent-runtime"]
     try:
         return json.loads(run(argv + ["resolve", "--json"]))
     except (ValueError, OSError, subprocess.TimeoutExpired):

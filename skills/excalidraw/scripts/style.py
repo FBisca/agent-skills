@@ -2,8 +2,10 @@
 
 Usage: python3 -I style.py <file.excalidraw> [<reference.excalidraw>]
 Prints one line per file; with a reference, also the gap on each measure.
+A path written `vault:<relpath>` resolves under $VAULT_DIR (exit 3 naming it when unset).
 """
 import json
+import os
 import statistics as st
 import sys
 
@@ -42,9 +44,19 @@ def line(name, m):
     return name + " | " + " · ".join(f"{k} {v}" for k, v in m.items())
 
 
+def resolve(arg):
+    if not arg.startswith("vault:"):
+        return arg
+    root = os.environ.get("VAULT_DIR", "")
+    if not root or not os.path.isdir(os.path.expanduser(root)):
+        print("ERROR: VAULT_DIR is not set or not a directory. Set VAULT_DIR to the root of your notes vault.", file=sys.stderr)
+        sys.exit(3)
+    return os.path.join(os.path.expanduser(root), arg[len("vault:"):])
+
+
 if __name__ == "__main__":
-    mine = measure(sys.argv[1])
+    mine = measure(resolve(sys.argv[1]))
     print(line("drawing  ", mine))
     if len(sys.argv) > 2:
-        ref = measure(sys.argv[2])
+        ref = measure(resolve(sys.argv[2]))
         print(line("reference", ref))

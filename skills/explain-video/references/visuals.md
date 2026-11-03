@@ -1,6 +1,6 @@
 # Visuals: direction and storyboard
 
-Each scene is one invented visual idea that develops with the voice. That, more than the engine, is what separates these films from a slideshow. STORYBOARD.md holds the whole visual plan, and each Frame block is a dispatch unit: a worker builds its frame from that block, the Video direction, the Shared props and frame.md, nothing else. `<hf>` below is `<ev>/hyperframes-0.8.184`.
+Each scene is one invented visual idea that develops with the voice. That, more than the engine, is what separates these films from a slideshow. STORYBOARD.md holds the whole visual plan, and each Frame block is a dispatch unit: a worker builds its frame from that block, the Video direction, the Shared props and frame.md, nothing else. `<hf>` below is the HyperFrames v0.8.184 `skills/` folder (`HYPERFRAMES_SKILLS_DIR`).
 
 ## Scene ideas
 
@@ -106,4 +106,4 @@ Scene 3 (5.7–9.9s): On "Then you look", a decelerating pull-back opens the evi
 - Scene lines split the frame into 2–6 beats, each with its time range and the cue it lands on.
 - `status: outline` until the frame is built, then `animated`.
 
-The full W1.1 storyboard is the worked example: `~/developer/vault/01-projects/mega-dev/videos/w1-1-rename-that-cost-twelve-dollars/STORYBOARD.md`.
+

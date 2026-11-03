@@ -1,6 +1,6 @@
 // Shared helpers for the explain-video scripts.
 import { execFileSync, spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36,11 +36,18 @@ export const parseArgs = (valued = []) => {
 };
 
 // The HyperFrames toolchain v3 was built with, frozen: the CLI version every project pins, and the workflow
-// pieces 0.8.185 dropped (presets, blueprints, frame packets, assembly) vendored beside this file's folder.
-// Upgrading means re-vendoring from a newer release and re-running a project end to end.
+// pieces 0.8.185 dropped (presets, blueprints, frame packets, assembly). They are not vendored here: point
+// HYPERFRAMES_SKILLS_DIR at the `skills/` folder of a checkout of the `v0.8.184` tag of heygen-com/hyperframes
+// (see scripts/fetch-hyperframes.sh). Upgrading means a newer tag and a project re-run end to end.
 export const HF_VERSION = "0.8.184";
-export const HF_DIR = join(SKILL_DIR, `hyperframes-${HF_VERSION}`);
-export const hfSkill = name => join(HF_DIR, name);
+export const HF_DIR = process.env.HYPERFRAMES_SKILLS_DIR ?? join(SKILL_DIR, `hyperframes-${HF_VERSION}`);
+export const hfSkill = name => {
+  if (!existsSync(HF_DIR)) {
+    console.error(`HyperFrames ${HF_VERSION} skills not found at ${HF_DIR}. Run scripts/fetch-hyperframes.sh and export the HYPERFRAMES_SKILLS_DIR it prints.`);
+    process.exit(2);
+  }
+  return join(HF_DIR, name);
+};
 
 /** The project's pinned `hyperframes@x.y.z` (from its package.json scripts), so every command matches its renders. */
 export const hfCli = projectDir => {

@@ -17,7 +17,9 @@ Every element carries customData {"frame": n, "role": ...}; check.py and split.p
 """
 import json
 import math
+import os
 import random
+import sys
 from contextlib import contextmanager
 
 INK, GREY, MUTED = "#1e1e1e", "#868e96", "#495057"
@@ -32,6 +34,16 @@ _FIXED = {"r": [1.03, .5], "l": [-.03, .5], "t": [.5, -.06], "b": [.5, 1.06]}
 def tsize(s, fs):
     lines = s.split("\n")
     return max(len(l) for l in lines) * fs * CW, len(lines) * fs * 1.25
+
+
+def vault_dir():
+    """Vault root from VAULT_DIR; exits 3 with a message naming it when unset or not a directory."""
+    raw = os.environ.get("VAULT_DIR", "")
+    if not raw or not os.path.isdir(os.path.expanduser(raw)):
+        problem = "is not set" if not raw else "is not a directory: " + raw
+        print("ERROR: VAULT_DIR " + problem + ". Set VAULT_DIR to the root of your notes vault.", file=sys.stderr)
+        sys.exit(3)
+    return os.path.expanduser(raw)
 
 
 class Sketch:
@@ -213,6 +225,12 @@ class Sketch:
                       for i in range(31)], color)
 
     # ------------------------------------------------------------ output
+    def save_to_vault(self, relpath):
+        """Save under the vault root from VAULT_DIR (exits naming it when unset); creates folders."""
+        path = os.path.join(vault_dir(), relpath)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        self.save(path)
+
     def save(self, path):
         doc = {"type": "excalidraw", "version": 2, "source": "https://excalidraw.com", "elements": self.els,
                "appState": {"gridSize": 20, "gridStep": 5, "gridModeEnabled": False,

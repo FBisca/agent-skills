@@ -2,6 +2,8 @@
 r"""Deterministic idea-folder gate (converge-style). This docstring is the idea-folder contract (v2).
 
 Usage: idea_check.py <folder> [--gate 1|2]
+VAULT_DIR must name the vault root (a directory). `<folder>` is a path, or a slug under `$VAULT_DIR/01-projects/`.
+With VAULT_DIR unset or not a directory the script prints an error naming it and exits 3.
 Output: one `PASS|FAIL|SKIPPED <check>: detail` line per check. Exit 0 if nothing FAILs, 1 on any FAIL,
 2 on `REFUSED <path>: <what>` (not exactly one index note; printed to stdout and stderr, no checks run).
 
@@ -50,6 +52,7 @@ Folder contract:
 import argparse
 import datetime
 import hashlib
+import os
 import re
 import sys
 from pathlib import Path
@@ -253,11 +256,25 @@ def run(folder, gate):
     return out
 
 
+def vault_dir():
+    """The vault root from VAULT_DIR; exits 3 with a message naming it when unset or not a directory."""
+    raw = os.environ.get("VAULT_DIR", "")
+    if not raw or not Path(raw).expanduser().is_dir():
+        problem = "is not set" if not raw else f"is not a directory: {raw}"
+        print(f"ERROR: VAULT_DIR {problem}. Set VAULT_DIR to the root of your notes vault (export VAULT_DIR=/path/to/vault).",
+              file=sys.stderr)
+        sys.exit(3)
+    return Path(raw).expanduser()
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Gate an idea folder.")
-    ap.add_argument("folder")
+    ap.add_argument("folder", help="idea folder path, or a slug under $VAULT_DIR/01-projects/")
     ap.add_argument("--gate", type=int, choices=[1, 2], default=0)
     a = ap.parse_args(argv)
+    vault = vault_dir()
+    if not Path(a.folder).is_dir() and not Path(a.folder).is_absolute():
+        a.folder = str(vault / "01-projects" / a.folder)
     results = run(a.folder, a.gate)
     if isinstance(results, str):
         msg = f"REFUSED {a.folder}: {results} (need exactly one root-level .md with `type: project`)"

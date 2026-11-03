@@ -4,9 +4,11 @@ import contextlib
 import hashlib
 import importlib.util
 import io
+import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "idea_check.py"
 
@@ -64,6 +66,9 @@ class IdeaCheckTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.dir = Path(tmp.name) / "idea"
         self.dir.mkdir()
+        patcher = patch.dict(os.environ, {"VAULT_DIR": tmp.name})
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.app = load()
         self.idea()
         self.write("assumptions.md", table(ROWS))

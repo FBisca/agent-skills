@@ -1,0 +1,23 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "fbisca-skills",
+  "owner": { "name": "Felippe Bisca" },
+  "metadata": {
+    "description": "Agent skills for Claude Code and Codex: idea to spec to plan to orchestrated build, gated by deterministic checks."
+  },
+  "plugins": [
+    {
+      "name": "agent-skills",
+      "source": "./",
+      "description": "Planning, orchestration and review skills: idea-frame, idea-answer, start-planning, orchestrate, converge, cold-read, excalidraw, explain-video and more.",
+      "version": "0.1.0",
+      "license": "MIT",
+      "author": { "name": "Felippe Bisca" },
+      "homepage": "https://github.com/FBisca/agent-skills",
+      "repository": "https://github.com/FBisca/agent-skills",
+      "keywords": ["skills", "planning", "orchestration", "tdd"],
+      "strict": false,
+      "skills": "./skills"
+    }
+  ]
+}

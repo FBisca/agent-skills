@@ -28,7 +28,7 @@ class IdeaFrameContract(unittest.TestCase):
 
     def test_S16_writes_files_runs_gate_and_hands_off(self):
         skill = read("SKILL.md")
-        for p in ("frame.md", "assumptions.md", "~/.claude/skills/idea-frame/scripts/idea_check.py",
+        for p in ("frame.md", "assumptions.md", "`scripts/idea_check.py` in this skill's folder",
                   "idea_check.py <folder> --gate 1", "`## Gates`", "`## Hours`", "docstring"):
             self.assertIn(p, skill)
         last = skill.rstrip().splitlines()[-1]
@@ -38,7 +38,7 @@ class IdeaFrameContract(unittest.TestCase):
 
     def test_S16_uses_vault_template_and_notes(self):
         skill = read("SKILL.md")
-        for p in ("~/developer/vault/90-templates/project.md", "`## Now`", "`## Notes`",
+        for p in ("90-templates/project.md", "`## Now`", "`## Notes`",
                   "[[frame]] [[assumptions]]", "`type: note`", 'project: "[[<Title>]]"',
                   "`stage: gate1`", "`stage: answering`"):
             self.assertIn(p, skill)
