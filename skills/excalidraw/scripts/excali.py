@@ -225,6 +225,12 @@ class Sketch:
                       for i in range(31)], color)
 
     # ------------------------------------------------------------ output
+    def save_to_vault(self, relpath):
+        """Save under the vault root from VAULT_DIR (exits naming it when unset); creates folders."""
+        path = os.path.join(vault_dir(), relpath)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        self.save(path)
+
     def save(self, path):
         doc = {"type": "excalidraw", "version": 2, "source": "https://excalidraw.com", "elements": self.els,
                "appState": {"gridSize": 20, "gridStep": 5, "gridModeEnabled": False,
