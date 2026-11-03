@@ -23,7 +23,7 @@ class IdeaAnswerContract(unittest.TestCase):
                   "`entry: decided`", "/prototype", "90-templates/project.md",
                   "`type: project`, `status: idea`, `stage: answering`, `entry: decided`, `decider: <role>`",
                   "`type: note`", "`Owner:`, `Date: YYYY-MM-DD`, `Link:`, `Summary:`",
-                  "python3 ~/.claude/skills/idea-frame/scripts/idea_check.py <folder> --gate 2"):
+                  "python3 <idea-frame>/scripts/idea_check.py <folder> --gate 2"):
             self.assertIn(p, t)
         self.assertLessEqual(len(read("SKILL.md").splitlines()), 120)
 

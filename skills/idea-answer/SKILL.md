@@ -10,14 +10,14 @@ disable-model-invocation: true
 **Output:** `answers.md` entries, closed rows in `assumptions.md`, `Brief.md`, the cold-read and `gate2` lines in the index note's `## Gates`, hours logged, and an `idea_check --gate 2` report shown to the user.
 **Hand-off:** gate 2 passed means `/to-spec`, writing the PRD from the final Brief and the answers. Kill or reshape ends here with the reason in `## Gates`.
 
-The vault root is the `VAULT_DIR` environment variable; if it is unset, stop and tell the user to set it. The folder contract is the docstring of `~/.claude/skills/idea-frame/scripts/idea_check.py`; read it before writing any file. This skill never sends anything.
+The vault root is the `VAULT_DIR` environment variable; if it is unset, stop and tell the user to set it. The folder contract is the docstring of `scripts/idea_check.py` of the sibling `idea-frame` skill (`../idea-frame/` relative to this skill's folder; call it `<idea-frame>`); read it before writing any file. This skill never sends anything.
 
 **Owner guidance** (who can answer, by what the row is about): finance and compliance for money, legal, security and data rules (ask the owner of that rule); operator/user for how people work or react; decider for scope and priority, and for product-behaviour rules that are a product call; engineering for how the system behaves (read-only lookup in code, no one is asked).
 
 ## Steps
 
 1. **Open the folder.** Read the index note (`<Title>.md`, the one root-level note with `type: project`), `frame.md`, `assumptions.md`, `answers.md` and `Brief.md` if present. Set `stage: answering`.
-   - **Decided feature, no folder:** create `$VAULT_DIR/01-projects/<slug>/` with the index note built from `$VAULT_DIR/90-templates/project.md` (`<Title>.md`; frontmatter `type: project`, `status: idea`, `stage: answering`, `entry: decided`, `decider: <role>`; sections `## Hours` and `## Gates`) and `assumptions.md` from the sources, at least one row, one per claim or open question (header per the docstring); claims the sources already confirm get result `confirmed`. There is no `frame.md`: generate the Brief from the sources. Side notes carry frontmatter `type: note`, `area`, `project: "[[<Title>]]"`, `created`, `updated`, `tags: []`; list them under `## Notes`.
+   - **Decided feature, no folder:** create `$VAULT_DIR/01-projects/<slug>/` with the index note built from the vault's `90-templates/project.md` if it has one, else the bundled `<idea-frame>/templates/project.md` (`<Title>.md`; frontmatter `type: project`, `status: idea`, `stage: answering`, `entry: decided`, `decider: <role>`; sections `## Hours` and `## Gates`) and `assumptions.md` from the sources, at least one row, one per claim or open question (header per the docstring); claims the sources already confirm get result `confirmed`. There is no `frame.md`: generate the Brief from the sources. Side notes carry frontmatter `type: note`, `area`, `project: "[[<Title>]]"`, `created`, `updated`, `tags: []`; list them under `## Notes`.
 2. **List the open rows:** every row with an empty result. Route every open row: no pick, no cap. Ask the user who owns each if the owner cell is vague.
 3. **Prepare each conversation** from [`prep.md`](prep.md), one row at a time: Mom Test only for how users behave; a policy or rule owner is asked for the current rule. The user holds the conversation, or teammates may ask the owner; the user collects what they report. Usability rows: suggest `/prototype` instead of asking. Engineering rows: look up in code, read-only.
    - Outreach (mail, Slack, Teams) is drafted only after the user's yes for that row, in their voice, and the user sends it. This skill never sends and holds no outbound tool.
@@ -28,7 +28,7 @@ The vault root is the `VAULT_DIR` environment variable; if it is unset, stop and
 8. **Run the gate** (on kill or reshape, stop after recording the line with its reason and setting `stage: killed` or `reshaped`) and show the output verbatim:
 
    ```
-   python3 ~/.claude/skills/idea-frame/scripts/idea_check.py <folder> --gate 2
+   python3 <idea-frame>/scripts/idea_check.py <folder> --gate 2
    ```
 
    Fix every FAIL (usually an open row, a missing Link, or a stale cold-read sha12), rerun until none (on pass). Never edit the check or the decider to pass.
