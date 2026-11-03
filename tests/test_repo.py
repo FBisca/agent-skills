@@ -147,5 +147,23 @@ class VaultDir(unittest.TestCase):
             self.assertEqual(ok.returncode, 0, ok.stderr)
 
 
+class RemovedSkillsTest(unittest.TestCase):
+    def test_S15_gh_implement_from_issue_is_absent_from_skills_catalog_marketplace_and_tests(self):
+        name = "gh-implement-" + "from-issue"  # built, so this file does not mention it either
+        self.assertFalse((SKILLS / name).exists())
+        files = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.split()
+        for path in files:
+            if not (ROOT / path).is_file():
+                continue
+            self.assertNotIn(name, path)
+            try:
+                text = (ROOT / path).read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+            self.assertNotIn(name, text, path)
+        for entry in json.loads((ROOT / ".claude-plugin/marketplace.json").read_text())["plugins"]:
+            self.assertNotIn(name, json.dumps(entry))
+
+
 if __name__ == "__main__":
     unittest.main()

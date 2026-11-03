@@ -39,7 +39,6 @@ Own = written for this repo. Derivative = modified from an upstream, with attrib
 | [`explain-video`](skills/explain-video) | Narrated tutorial videos built as HyperFrames films with a local voice | Own |
 | [`assemble-crew`](skills/assemble-crew) | Proposes a crew for a task, including an adversary who tries to break the result | Own |
 | [`deep-prompt`](skills/deep-prompt) | Deepens a task prompt with what a top professional would add before rewriting it | Own |
-| [`gh-implement-from-issue`](skills/gh-implement-from-issue) | Implements a feature from a GitHub issue end to end | Own |
 | [`gh-pr-create`](skills/gh-pr-create) | Opens pull requests safely with `gh` | Own |
 | [`git-commit`](skills/git-commit) | Conventional Commits with project conventions | Own |
 | [`handoff`](skills/handoff) | Compacts a conversation into a handoff document for another agent | Derivative (Matt Pocock, MIT) |
