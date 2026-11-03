@@ -36,6 +36,6 @@ while IFS= read -r cmd; do
   [ -n "$cmd" ] || continue
   echo "+ $cmd"
   if [ "$dry_run" -eq 0 ]; then
-    bash -c "$cmd"
+    bash -c "$cmd" </dev/null
   fi
 done <<< "$commands"
