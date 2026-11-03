@@ -244,6 +244,9 @@ def resolve_runtime():
     """
     home = os.environ.get("AGENT_RUNTIME_HOME")
     script = Path(home).expanduser() / "server" / "agent_runtime.py" if home else None
+    if home and not (script and script.is_file()):
+        print(f"warning: AGENT_RUNTIME_HOME={home} has no server/agent_runtime.py; falling back to agent-runtime on PATH",
+              file=sys.stderr)
     argv = [sys.executable, str(script)] if script and script.is_file() else ["agent-runtime"]
     try:
         return json.loads(run(argv + ["resolve", "--json"]))
