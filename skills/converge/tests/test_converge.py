@@ -95,7 +95,64 @@ class ConvergeTests(unittest.TestCase):
         _, out = self.run_converge()
         self.assertTrue(self.line(out, "coverage").startswith("PASS"))
 
+    def test_rust_names_require_test_attributes(self):
+        names = app.names_in([
+            "fn helper() {}", "#[test_case(1)]", "fn parameterized() {}",
+            "#[test]", "fn S1_plain() {}",
+            "#[ignore]", "#[tokio::test]", "#[should_panic]", "pub fn S12_public() {}",
+            "#[some::runtime::test(flavor = \"current_thread\")]", "async fn S2a_async() {}",
+        ])
+        self.assertEqual(names, ["S1_plain", "S12_public", "S2a_async"])
+
     # S17b
+    def test_rust_tagged_check_sees_added_fn_or_test_attribute(self):
+        self.write("docs/specs/evidence.md", "Paths: src/\n- R4 search shows citations\n")
+        self.commit("spec")
+        for path, before, after, expected in (
+                ("tests/new.rs", None, "#[test]\nfn untagged() {}\n", "FAIL"),
+                ("src/lib.rs", None, "#[cfg(test)]\nmod tests {\n#[test]\nfn untagged() {}\n}\n", "FAIL"),
+                ("crates/x/tests/cli.rs", "#[test]\nfn S1_old() {}\n",
+                 "#[test]\nfn untagged() {}\n", "FAIL"),
+                ("tests/attribute.rs", "fn untagged() {}\n",
+                 "#[tokio::test]\nfn untagged() {}\n", "FAIL"),
+                ("tests/stable.rs", "/// evidence/R4: search shows citations\n#[test]\nfn old() {}\n",
+                 "/// evidence/R4: search shows citations\n#[test]\nfn search_citations() {}\n", "PASS"),
+                ("tests/body.rs", "#[test]\nfn untagged() {\n    old();\n}\n",
+                 "#[test]\nfn untagged() {\n    new();\n}\n", "PASS"),
+                ("tests/unchanged.rs", "#[test]\nfn untagged() {}\n",
+                 "#[test]\nfn untagged() {}\n#[test]\nfn S1_new() {}\n", "PASS")):
+            with self.subTest(path=path):
+                if before is not None:
+                    self.write(path, before)
+                    self.commit("before Rust test change")
+                self.git("branch", "-f", "main", "HEAD")
+                self.write(path, after)
+                _, out = self.run_converge("--ticket", "T1")
+                self.assertTrue(self.line(out, "tagged").startswith(expected), out)
+                if expected == "FAIL":
+                    self.assertIn("untagged", self.line(out, "tagged"))
+                self.commit("Rust test change")
+                _, out = self.run_converge("--ticket", "T1")
+                self.assertTrue(self.line(out, "tagged").startswith(expected), out)
+
+    def test_rust_doc_comment_first_line_carries_stable_id(self):
+        self.assertEqual(app.names_in([
+            "/// evidence/R4: search shows citations", "/// S12 later does not count",
+            "#[ignore]", "#[test]", "#[should_panic]", "fn search_citations() {}",
+            "/// detached/R5", "", "#[test]", "fn S1_detached() {}",
+            "/// helper/R6", "fn helper() {}", "#[test]", "fn S2a_next() {}",
+        ]), ["search_citations evidence/R4: search shows citations", "S1_detached", "S2a_next"])
+
+    def test_rust_test_file_discovery(self):
+        for path, source, expected in (
+                ("tests/cli.rs", "", True),
+                ("crates/x/tests/cli.rs", "", True),
+                ("src/lib.rs", "#[cfg(test)]\nmod tests {}", True),
+                ("src/main.rs", "fn main() {}", False)):
+            with self.subTest(path=path):
+                self.write(path, source)
+                self.assertEqual(app.is_test_file(self.repo / path), expected)
+
     def test_S17b_reports_changed_test_without_id(self):
         self.write("tests/test_a.py", GOOD_TEST + "\ndef test_untagged_thing():\n    pass\n")
         _, out = self.run_converge()
