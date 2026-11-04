@@ -63,6 +63,8 @@ Give each new worker a compact packet containing:
 3. Relevant files and symbols, the plan's Decisions, and dependency evidence.
 4. The repo's full CI gate (types, lint, tests as CI runs them), assigned peers, and integration owner.
 
+Name each worker by its ticket, lowercase ID first: `t6-codex-hooks`; a reviewer or fixer on that ticket keeps the prefix (`t6-review`). Plan dashboards, such as Herdr's Plans panel, attach a worker to its ticket by this name.
+
 Give a resumed worker only the new task, changed constraints, relevant peer updates, and changed checkout state. Do not repeat the full plan or broad discovery. The orchestrator maps scope; the worker reads implementation details.
 
 Use [the state helper](references/state.md) to reserve assignments before dispatch and bind returned runtime IDs afterward. Keep one worker ledger per active plan, outside tracked product files; share its absolute path across repositories. The worker ledger tracks agents; the plan tracks scope, decisions and ticket status. The helper validates records, not code behavior, and never spawns agents.
