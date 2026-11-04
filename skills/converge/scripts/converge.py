@@ -20,6 +20,11 @@ declared IDs in document order.
 
 ID convention: plan scenarios are `- **S<n>[a-z]** WHEN ...`; a stable spec ID is `<area>/R<n>`, where
 <area> is the spec file's name; write it in the test name or, in Python, the docstring's first line.
+Rust test files live under `tests/` (at any depth) or contain `#[cfg(test)]`. Tests are functions
+with `#[test]` or a namespaced test attribute such as `#[tokio::test]`; other attributes may be
+stacked around it. The name is the function name plus the first `///` doc-comment line directly
+above its attribute stack. For example, `fn S1_source_add()` carries S1; `/// evidence/R4: citations`
+above `#[test]` and `fn search_citations()` carries evidence/R4. `pub fn` and `async fn` count too.
 A bare `R<n>` does not count.
 Provenance (--final): a scenario `S<n>` is also covered by a test tagged `<area>/R<m>` when `<area>`'s spec
 has a line for `R<m>` containing `(from <slug>/S<n>)`; <slug> is the plan's ``Slug: `<slug>` ``. In --final a
@@ -31,7 +36,8 @@ check fails and names it. An ID matches as a whole token (neighbours are not let
 "Changed" = `git diff <base>...HEAD` + working tree vs HEAD + untracked files. A changed test
 is an added line opening a test: JS/TS `it(`/`test(`/`describe(` with a quoted name, or Python
 `def test_*` (name = function name plus the docstring's first text line: on the opening-quote line, or
-the next non-empty line). A modified test
+the next non-empty line). Rust counts an added function line or test attribute line, using the
+full declaration for its name and doc comment. A modified test
 body whose opening line is untouched is not seen.
 """
 import argparse
@@ -45,6 +51,8 @@ TEST_FILE = ("*.test.*", "*.spec.*", "test_*.py", "*_test.py")
 JS_NAME = re.compile(r"""\b(?:it|test|describe)(?:\.\w+)?\(\s*(["'`])(.*?)\1""")
 PY_DEF = re.compile(r"^\s*(?:async\s+)?def (test_\w+)")
 DOC = re.compile(r'''^\s*(?:"""|\'\'\')\s*(.*?)(?:"""|\'\'\')?\s*$''')
+RS_ATTR = re.compile(r"^\s*#\[\s*([\w:]+)\b.*\]\s*$")
+RS_FN = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)\s*\(")
 STABLE = re.compile(r"(?<![A-Za-z0-9])(?:[\w-]+/)?(R\d+)(?![A-Za-z0-9])")
 
 
@@ -60,7 +68,12 @@ def has_id(text, ident):
 
 
 def is_test_file(path):
-    return any(fnmatch.fnmatch(Path(path).name, g) for g in TEST_FILE)
+    path = Path(path)
+    if path.suffix == ".rs":
+        return ("tests" in path.parts[:-1]
+                or (path.is_file() and re.search(r"#\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]",
+                                                 path.read_text(errors="ignore")) is not None))
+    return any(fnmatch.fnmatch(path.name, g) for g in TEST_FILE)
 
 
 def matches(path, globs):
@@ -100,10 +113,25 @@ def plan_data(text):
     return ids, tickets
 
 
-def names_in(lines):
-    """Test names opened by `lines` (see module docstring)."""
+def names_in(lines, added=None):
+    """Test names opened by `lines`; optional added line numbers select Rust declarations."""
     names, pending, want = [], None, None  # want: None | "doc" (expect docstring) | "text" (after bare quotes)
-    for line in lines:
+    rust_test, rust_doc, rust_added = False, None, False
+    for number, line in enumerate(lines, 1):
+        if line.lstrip().startswith("///") and not line.lstrip().startswith("////"):
+            if rust_doc is None:
+                rust_doc = line.lstrip()[3:].strip()
+            continue
+        attr = RS_ATTR.match(line)
+        if attr:
+            test_attr = attr.group(1).split("::")[-1] == "test"
+            rust_test = rust_test or test_attr
+            rust_added = rust_added or (test_attr and added is not None and number in added)
+        else:
+            fn = RS_FN.match(line)
+            if rust_test and fn and (added is None or rust_added or number in added):
+                names.append(fn.group(1) + (" " + rust_doc if rust_doc is not None else ""))
+            rust_test, rust_doc, rust_added = False, None, False
         if pending is not None and line.strip():
             m = DOC.match(line) if want == "doc" else None
             if want == "text":
@@ -128,22 +156,40 @@ def names_in(lines):
 
 
 def changed(repo, base):
-    """(files, {test file: added lines}) since base, including the working tree."""
-    files, added = set(), {}
+    """(files, {test file: added lines}, Rust names) since base, including the working tree."""
+    files, added, rust_names = set(), {}, set()
     untracked = git(repo, "ls-files", "-o", "--exclude-standard").split("\n")
     for ref in (f"{base}...HEAD", "HEAD"):
         files.update(git(repo, "diff", "--name-only", ref).split("\n"))
-        cur = None
+        cur, number, rust_lines = None, 0, {}
         for line in git(repo, "diff", "-U0", ref).splitlines():
             if line.startswith("+++ "):
                 cur = line[6:] if line.startswith("+++ b/") else None
+            elif line.startswith("@@ "):
+                number = int(re.search(r"\+(\d+)", line).group(1))
             elif cur and line.startswith("+"):
-                added.setdefault(cur, []).append(line[1:])
+                if Path(cur).suffix == ".rs":
+                    rust_lines.setdefault(cur, set()).add(number)
+                else:
+                    added.setdefault(cur, []).append(line[1:])
+                number += 1
+            elif line.startswith(" "):
+                number += 1
+        for f, numbers in rust_lines.items():
+            path = Path(repo) / f
+            if is_test_file(path):
+                source = git(repo, "show", f"HEAD:{f}") if ref != "HEAD" else path.read_text(errors="ignore")
+                rust_names.update(names_in(source.splitlines(), numbers))
     for f in filter(None, untracked):
         files.add(f)
-        if is_test_file(f):
-            added.setdefault(f, []).extend((Path(repo) / f).read_text(errors="ignore").splitlines())
-    return sorted(filter(None, files)), {f: l for f, l in added.items() if is_test_file(f)}
+        if is_test_file(Path(repo) / f):
+            lines = (Path(repo) / f).read_text(errors="ignore").splitlines()
+            if Path(f).suffix == ".rs":
+                rust_names.update(names_in(lines))
+            else:
+                added.setdefault(f, []).extend(lines)
+    return (sorted(filter(None, files)),
+            {f: l for f, l in added.items() if is_test_file(Path(repo) / f)}, rust_names)
 
 
 def specs_in(repo, specs):
@@ -221,7 +267,7 @@ def main(argv=None):
         scope_ids, ticket_paths = tickets[a.ticket]
     else:
         sys.exit(f"no ticket {a.ticket} in the plan's Tickets table")
-    files, added = changed(repo, a.base or default_base(repo))
+    files, added, rust_names = changed(repo, a.base or default_base(repo))
     specs = specs_in(repo, a.specs)
     spec_ids = {f"{Path(s).stem}/{m.group(1)}" for s, (text, _) in specs.items()
                 for m in STABLE.finditer(text)}
@@ -230,10 +276,10 @@ def main(argv=None):
     except ValueError:
         plan_rel = None
 
-    new_names = {n for ls in added.values() for n in names_in(ls)}
+    new_names = {n for ls in added.values() for n in names_in(ls)} | rust_names
     all_names = []  # (name, counts as bare S-ID evidence)
     for f in git(repo, "ls-files", "-co", "--exclude-standard").split("\n"):
-        if f and is_test_file(f) and (repo / f).is_file():
+        if f and is_test_file(repo / f) and (repo / f).is_file():
             for n in names_in((repo / f).read_text(errors="ignore").splitlines()):
                 all_names.append((n, not a.final or f in files or n in new_names))
     prov = provenance(specs, slug) if a.final and slug else {}
@@ -243,7 +289,7 @@ def main(argv=None):
                 or any(has_id(n, r) for r in prov.get(i, ()) for n, _ in all_names))
     missing = [i for i in scope_ids if not covered(i)]
 
-    untagged = [n for ls in added.values() for n in names_in(ls)
+    untagged = [n for n in sorted(new_names)
                 if not any(has_id(n, i) for i in ids)
                 and not any(has_id(n, s) for s in spec_ids)]
     spec_files = set(specs)
