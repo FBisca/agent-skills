@@ -42,8 +42,6 @@ Own = written for this repo. Derivative = modified from an upstream, with attrib
 | [`gh-pr-create`](skills/gh-pr-create) | Opens pull requests safely with `gh` | Own |
 | [`git-commit`](skills/git-commit) | Conventional Commits with project conventions | Own |
 | [`handoff`](skills/handoff) | Compacts a conversation into a handoff document for another agent | Derivative (Matt Pocock, MIT) |
-| [`teach`](skills/teach) | Teaches a concept inside the workspace with lessons and a learning record | Derivative (Matt Pocock, MIT) |
-| [`caveman`](skills/caveman) | Ultra-compressed communication mode | Upstream copy (Matt Pocock, MIT) |
 | [`zoom-out`](skills/zoom-out) | Asks for broader context on unfamiliar code | Upstream copy (Matt Pocock, MIT) |
 
 ## Install
@@ -91,13 +89,12 @@ done
 Some skills this workflow uses are maintained by others and are not copied here. [`skills.lock.json`](skills.lock.json) lists each with its source and exact install command; install them all with:
 
 ```bash
-scripts/install-upstream.sh            # or: scripts/install-upstream.sh --dry-run tdd to-spec
+scripts/install-upstream.sh            # or: scripts/install-upstream.sh --dry-run grilling to-spec
 ```
 
 | Source | Skills |
 |---|---|
-| [mattpocock/skills](https://github.com/mattpocock/skills) (MIT) | `codebase-design`, `diagnosing-bugs`, `domain-modeling`, `grilling`, `improve-codebase-architecture`, `prototype`, `retro`, `setup-matt-pocock-skills`, `tdd`, `to-spec`, `to-tickets`, `triage`, `writing-for-agents` |
-| [pbakaus/impeccable](https://github.com/pbakaus/impeccable) (Apache-2.0) | `impeccable` (the former `frontend-design`, renamed upstream) |
+| [mattpocock/skills](https://github.com/mattpocock/skills) (MIT) | `diagnosing-bugs`, `domain-modeling`, `grilling`, `prototype`, `retro`, `setup-matt-pocock-skills`, `to-spec`, `writing-for-agents` |
 | [heygen-com/hyperframes](https://github.com/heygen-com/hyperframes) (Apache-2.0) | `hyperframes`, `hyperframes-cli`, `hyperframes-registry`, `media-use` |
 
 ## Tests

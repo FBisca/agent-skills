@@ -14,10 +14,15 @@ SKILLS = ROOT / "skills"
 
 # Upstream skills this repo no longer carries; each must reinstall from the lock.
 STRIPPED = {
-    "codebase-design", "diagnosing-bugs", "domain-modeling", "grilling",
-    "improve-codebase-architecture", "prototype", "retro", "setup-matt-pocock-skills",
-    "tdd", "to-spec", "to-tickets", "triage", "writing-for-agents",
-    "impeccable", "hyperframes", "hyperframes-cli", "hyperframes-registry", "media-use",
+    "diagnosing-bugs", "domain-modeling", "grilling", "prototype", "retro",
+    "setup-matt-pocock-skills", "to-spec", "writing-for-agents",
+    "hyperframes", "hyperframes-cli", "hyperframes-registry", "media-use",
+}
+
+# Skills dropped as unused: neither carried here nor installed from the lock.
+REMOVED = {
+    "caveman", "teach", "codebase-design", "improve-codebase-architecture",
+    "tdd", "to-tickets", "triage", "impeccable",
 }
 
 
@@ -49,7 +54,7 @@ class SkillMetadata(unittest.TestCase):
             self.assertNotIn("~/.claude/skills/", path.read_text(encoding="utf-8"), str(path))
 
     def test_derived_and_copied_skills_carry_a_notice(self):
-        for name in ("handoff", "teach", "caveman", "zoom-out", "cold-read"):
+        for name in ("handoff", "zoom-out", "cold-read"):
             self.assertTrue((SKILLS / name / "NOTICE.md").is_file(), name)
         self.assertFalse((SKILLS / "frontend-design").exists())
 
@@ -148,6 +153,13 @@ class VaultDir(unittest.TestCase):
 
 
 class RemovedSkillsTest(unittest.TestCase):
+    def test_unused_skills_are_neither_carried_nor_locked(self):
+        lock = json.loads((ROOT / "skills.lock.json").read_text(encoding="utf-8"))
+        locked = {e["name"] for e in lock["skills"] + lock["vendored_unmodified"]}
+        for name in sorted(REMOVED):
+            self.assertFalse((SKILLS / name).exists(), name)
+            self.assertNotIn(name, locked, name)
+
     def test_S15_gh_implement_from_issue_is_absent_from_skills_catalog_marketplace_and_tests(self):
         name = "gh-implement-" + "from-issue"  # built, so this file does not mention it either
         self.assertFalse((SKILLS / name).exists())

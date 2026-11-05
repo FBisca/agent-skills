@@ -9,8 +9,6 @@ Source: https://github.com/mattpocock/skills, Copyright (c) 2026 Matt Pocock.
 | Skill here | Relation |
 |---|---|
 | `handoff` | Derived: rewritten to ask for a path and to suggest next skills |
-| `teach` | Derived: modified from an earlier upstream version |
-| `caveman` | Unmodified copy; removed upstream, so `npx skills add` can no longer fetch it |
 | `zoom-out` | Unmodified copy; removed upstream, so `npx skills add` can no longer fetch it |
 
 Upstream license text:
@@ -38,10 +36,6 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
-
-## Installed from upstream, not copied
-
-`impeccable` (formerly `frontend-design`) comes from https://github.com/pbakaus/impeccable, Copyright 2025 Paul Bakaus, Apache-2.0; install it with `scripts/install-upstream.sh` (see `skills.lock.json`).
 
 ## cold-read: Google (Apache-2.0)
 
