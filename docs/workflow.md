@@ -11,7 +11,7 @@ Evidence levels: none of the source methods has an RCT; "adoption" means widely 
 | A raw idea, nothing written | 1. `/idea-frame` |
 | A decided feature with sources (a request, an RFC, a kickoff) | 2. `/idea-answer` (it creates the folder with `entry: decided`) |
 | A PRD already | 6. `/start-planning` |
-| A small fix with no product question | `/tdd` or `/diagnosing-bugs` (upstream skills, see [`skills.lock.json`](../skills.lock.json)) directly |
+| A small fix with no product question | `/diagnosing-bugs` (an upstream skill, see [`skills.lock.json`](../skills.lock.json)) directly |
 
 ## The steps
 
@@ -23,7 +23,7 @@ Evidence levels: none of the source methods has an RCT; "adoption" means widely 
 | 4 | Commit | `/cold-read` (user-invoked), then inside `/idea-answer` | decider | Once, on the final Brief: `/cold-read <folder>/Brief.md` has a zero-context reader paraphrase it; the user records `cold-read: pass <sha12>` (or `accepted`) in the index `## Gates`. The decider's `gate2: pass by <role>` rides on their approval of the final Brief, no separate meeting. `idea_check.py --gate 2` must pass. | Stage-Gate (Cooper); Elephant-Goldfish Model's comprehension check (Google 2026, Apache-2.0) |
 | 5 | PRD | `/to-spec` (user-invoked) | agent, user fixes | Writes `PRD.md` in the project folder from the final Brief and the answers; open risks listed with owners. The index note moves to `stage: prd`. | Pocock's spec template |
 | 6 | Plan | `/start-planning` (calls `grilling`) | user + agent | Gathers sources and settled decisions, grills only what's open, writes WHEN/THEN scenarios, decisions with the rejected option and source, vertical tickets with Paths. One approval. | Spec-driven development (OpenSpec, GitHub Spec Kit, Pocock); EARS-style scenarios; ADRs (Nygard); tracer bullets / vertical slices; ISO/IEC/IEEE 29148 requirement qualities |
-| 7 | Build | `/orchestrate` (user-invoked) | agents | One implementer per ticket in its own worktree; each scenario becomes a test that fails first. | TDD red-green-refactor (`/tdd`); ATDD |
+| 7 | Build | `/orchestrate` (user-invoked) | agents | One implementer per ticket in its own worktree; each scenario becomes a test that fails first. | TDD red-green-refactor; ATDD |
 | 8 | Gate each ticket | `/converge`, fresh-context review | code + agent | `converge` checks every scenario has a test, every changed test carries an ID, the diff stays in Paths. An Opus reviewer that never saw the build checks correctness and conventions. Then PR and merge. | Spec Kit `converge`, OpenSpec `verify`; independent review |
 | 9 | Archive | `/orchestrate` + `converge --final` | agent | Scenarios become numbered requirements in the living spec `docs/specs/<area>.md`; tests are renamed to them. | OpenSpec living spec and delta specs |
 | 10 | Measure | backtest D extraction | agent + user | After a feature ships, count the product decisions that arrived after its PRD. Baseline 27–32 per feature. | Discovery backtest |

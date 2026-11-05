@@ -3,13 +3,6 @@
   "version": 1,
   "skills": [
     {
-      "name": "codebase-design",
-      "source": "mattpocock/skills",
-      "license": "MIT",
-      "relation": "verbatim",
-      "install": "npx skills add mattpocock/skills --skill codebase-design --agent claude-code --agent codex --global --yes"
-    },
-    {
       "name": "diagnosing-bugs",
       "source": "mattpocock/skills",
       "license": "MIT",
@@ -29,13 +22,6 @@
       "license": "MIT",
       "relation": "verbatim",
       "install": "npx skills add mattpocock/skills --skill grilling --agent claude-code --agent codex --global --yes"
-    },
-    {
-      "name": "improve-codebase-architecture",
-      "source": "mattpocock/skills",
-      "license": "MIT",
-      "relation": "verbatim",
-      "install": "npx skills add mattpocock/skills --skill improve-codebase-architecture --agent claude-code --agent codex --global --yes"
     },
     {
       "name": "prototype",
@@ -59,32 +45,11 @@
       "install": "npx skills add mattpocock/skills --skill setup-matt-pocock-skills --agent claude-code --agent codex --global --yes"
     },
     {
-      "name": "tdd",
-      "source": "mattpocock/skills",
-      "license": "MIT",
-      "relation": "verbatim",
-      "install": "npx skills add mattpocock/skills --skill tdd --agent claude-code --agent codex --global --yes"
-    },
-    {
       "name": "to-spec",
       "source": "mattpocock/skills",
       "license": "MIT",
       "relation": "verbatim",
       "install": "npx skills add mattpocock/skills --skill to-spec --agent claude-code --agent codex --global --yes"
-    },
-    {
-      "name": "to-tickets",
-      "source": "mattpocock/skills",
-      "license": "MIT",
-      "relation": "verbatim",
-      "install": "npx skills add mattpocock/skills --skill to-tickets --agent claude-code --agent codex --global --yes"
-    },
-    {
-      "name": "triage",
-      "source": "mattpocock/skills",
-      "license": "MIT",
-      "relation": "verbatim",
-      "install": "npx skills add mattpocock/skills --skill triage --agent claude-code --agent codex --global --yes"
     },
     {
       "name": "writing-for-agents",
@@ -120,15 +85,6 @@
       "license": "Apache-2.0",
       "relation": "verbatim",
       "install": "npx skills add heygen-com/hyperframes --skill media-use --agent claude-code --agent codex --global --yes"
-    },
-    {
-      "name": "impeccable",
-      "source": "pbakaus/impeccable",
-      "license": "Apache-2.0",
-      "relation": "verbatim",
-      "renamed_from": "frontend-design",
-      "note": "Impeccable renamed its frontend-design skill; this is the current upstream equivalent",
-      "install": "npx skills add pbakaus/impeccable --skill impeccable --agent claude-code --agent codex --global --yes"
     }
   ],
   "dependencies": [
@@ -142,13 +98,6 @@
     }
   ],
   "vendored_unmodified": [
-    {
-      "name": "caveman",
-      "source": "mattpocock/skills",
-      "ref": "694fa30311e02c2639942308513555e61ee84a6f",
-      "license": "MIT",
-      "reason": "removed from the upstream default branch, so `npx skills add` can no longer fetch it; kept as an unmodified copy"
-    },
     {
       "name": "zoom-out",
       "source": "mattpocock/skills",
