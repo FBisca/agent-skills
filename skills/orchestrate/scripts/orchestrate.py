@@ -221,7 +221,8 @@ def unit_summary(data, unit):
     """Failed reviews and cutoffs summed over every attempt at one logical unit."""
     attempts = [t for t in data["tasks"].values() if t["packet"].get("unit") == unit]
     require(attempts, "no attempts for unit " + unit)
-    failed = sum((t.get("report") or {}).get("review_rounds", 0) for t in attempts)
+    counted = (data.get("rounds") or {}).get(unit)  # the driver's own count; a run of the old driver has only the reports'
+    failed = counted if counted is not None else sum((t.get("report") or {}).get("review_rounds", 0) for t in attempts)
     cutoffs = sum(1 for t in attempts if t.get("cutoff"))
     return {"unit": unit, "attempts": [task_summary(t) for t in attempts], "failed_reviews": failed,
             "cutoffs": cutoffs, "escalate": failed >= 2 or cutoffs >= 2}
@@ -367,8 +368,20 @@ def parse_plan(text):
             continue
         if len(cells) == len(columns) or len(cells) > max(columns.values()):
             tickets.append({"line": index, **{name: cells[at] for name, at in columns.items()}})
+    caps, cap_problems = {}, []
+    for line in lines:
+        found = re.match(r"Max fix rounds:\s*(.*?)\s*$", line)
+        if not found:
+            continue
+        for entry in [e for e in found.group(1).split(",") if e.strip()] or [""]:
+            pair = re.fullmatch(r"\s*(T\d+)\s*=\s*(\d+)\s*", entry)
+            if pair:
+                caps[pair.group(1)] = int(pair.group(2))
+            else:
+                cap_problems.append("`Max fix rounds:` entry %r is not T<n>=<whole number>" % entry.strip())
     return {"slug": slug.group(1) if slug else None, "status": status.group(1).upper() if status else None,
-            "scenarios": scenarios, "tickets": tickets, "has_table": bool(tickets) or columns is not None}
+            "scenarios": scenarios, "tickets": tickets, "has_table": bool(tickets) or columns is not None,
+            "caps": caps, "cap_problems": cap_problems}
 
 
 def is_done(ticket):
@@ -441,6 +454,8 @@ def check_plan(plan):
         for blocker in re.split(r"[,\s]+", ticket["Blocked by"].strip()):
             if blocker and blocker.lower() != "none" and blocker not in {t["#"] for t in plan["tickets"]}:
                 problems.append("%s: Blocked by %s is not a ticket" % (name, blocker))
+    problems += plan.get("cap_problems", [])
+    problems += ["`Max fix rounds:` names %s, which is not a ticket" % name for name in plan.get("caps", {}) if name not in seen]
     problems += cycles(plan["tickets"])
     if problems:
         raise PlanError("; ".join(problems))
@@ -537,11 +552,9 @@ def event(message):
 GATES = ("reported", "converged", "reviewed", "fix-pending", "requested", "decided", "redo-pending",
          "ready-for-ci", "awaiting-merge", "cleanup")  # ledger `gate` stages the loop acts on
 PARKED = ("attention", "blocked", "skipped")  # nothing runs for the unit until the user acts (`attention`: runs of the old driver)
-MAX_FIX_ROUNDS = 2  # a unit's 3rd failed gate goes to Driver.escalate
 TURN_ENDED = ("idle", "done", "unreported", "error")  # runtime_state of a `working` assignment that needs a person
 ATTENTION = {"blocked": "reported blocked", "decision": "asked for a decision",
              "exited": "ended without a report"}
-FIX_ROUND = re.compile(r"r\d+$")
 ARCHIVE = "archive"  # the unit (and task id) of the archive worker
 CONVERGE = Path(__file__).resolve().parents[2] / "converge" / "scripts" / "converge.py"
 
@@ -753,9 +766,10 @@ class Driver:
         self.log("idle", interval=self.args.idle_interval)
         self.sleep(self.args.idle_interval)
 
-    # ---- gates: a worker's report -> converge -> one review -> fix rounds -----------------------------------
+    # ---- gates: a worker's report -> converge -> review -> fix rounds ---------------------------------------
     # The ledger task's `gate` field is the whole state: reported -> converged -> reviewing -> reviewed ->
-    # ready-for-ci, or fix-pending -> superseded. An event only the Lead can settle (a 3rd failed gate, a worker
+    # ready-for-ci, or fix-pending -> superseded. A fix round of any source goes back through converge to the unit's
+    # one reviewer, resumed with `<last_reviewed>..HEAD`; the unit reaches CI only when that re-review passes. An event only the Lead can settle (a 3rd failed gate, a worker
     # that is blocked or asks, a handoff file that breaks its contract) goes requested -> decided -> fix-pending
     # or redo-pending (retry, answer, fresh worker), blocked, or skipped. `requested` is the pause: request.json,
     # a wake, nothing else moves for the unit. `ready-for-ci` is the seam for the CI gate.
@@ -1089,8 +1103,12 @@ class Driver:
             self.record_report(task_id, report)
         except ValueError as error:
             return self.request(task_id, "report", "the ledger rejected the report: %s" % error)
-        # A fix round is gated by converge alone, and so is the archive (converge --final); a first build gets one review.
-        self.mark(task_id, gate="ready-for-ci" if FIX_ROUND.search(task_id) or task["packet"]["unit"] == ARCHIVE else "converged")
+        # The archive is gated by converge --final alone. Every other report, a fix round of any source included, goes to
+        # the unit's reviewer: a delta re-review once the unit has been reviewed, else the first review.
+        if task["packet"]["unit"] == ARCHIVE:
+            return self.mark(task_id, gate="ready-for-ci")
+        reviewed, findings, _ = self.unit_trail(task["packet"]["unit"])
+        self.mark(task_id, gate="converged", delta={"from": reviewed, "findings": findings} if reviewed else None)
 
     def chase_responses(self, task_id, path, missing):
         """A fix-round report lacks a response the reviewer asked for. The first time, resume the worker with the
@@ -1131,18 +1149,26 @@ class Driver:
     def fail_gate(self, task_id, report, source, items, checks_run=(), answer_ids=()):
         """A gate failed: raise review_rounds, then a fix round, or the escalation hook on the 3rd failure."""
         remaining = [short(item) for item in items]
-        self.record_report(task_id, report, review_rounds=1, remaining=remaining)
-        with self.book() as data:
+        with self.book() as data:  # the driver's count: the report's review_rounds is never read
             unit = data["tasks"][task_id]["packet"]["unit"]
-            failures = unit_summary(data, unit)["failed_reviews"]
+            rounds = data.setdefault("rounds", {})
+            if unit not in rounds:  # a ledger of the old driver: start from the rounds its reports recorded
+                rounds[unit] = unit_summary(data, unit)["failed_reviews"]
+            rounds[unit] += 1
+            failures = rounds[unit]
+        self.record_report(task_id, report, review_rounds=1, remaining=remaining)
         fix = {"source": source, "items": items, "attempt": failures, "checks_run": list(checks_run),
                "answer_ids": list(answer_ids)}
         self.log("round", unit=unit, task=task_id, source=source, attempt=failures)
         for item in items:
             self.log_finding(unit, task_id, source, item.get("kind", "blocking") if isinstance(item, dict) else "blocking", item)
-        if failures > MAX_FIX_ROUNDS:
+        if failures > self.fix_cap(unit):
             return self.escalate(task_id, "%s failed its gates %d times; last: %s" % (unit, failures, "; ".join(remaining)), fix)
         self.mark(task_id, gate="fix-pending", fix=fix)
+
+    def fix_cap(self, unit):
+        """The fix rounds a unit may use: its `Max fix rounds:` plan line, else --max-fix-rounds."""
+        return ((self.last_plan or {}).get("caps") or {}).get(unit.upper(), self.args.max_fix_rounds)
 
     def log_finding(self, unit, task_id, source, kind, item):
         """One `finding` event: a blocking item that goes to a fix round, or a deferred one that goes to deferred.md."""
@@ -1184,7 +1210,9 @@ class Driver:
                 "- This is a re-review. Only `git -C %s diff %s..HEAD` is new; the whole change is `%s...HEAD`." % (
                     checkout, delta["from"], self.args.base),
                 "- The earlier findings and the implementer's answers: %s. Check each one (resolved or not, with evidence) "
-                "and raise new blocking items only inside the delta." % delta["findings"]]),
+                "and raise new blocking items only inside the delta. A blocking item outside the files the delta changes "
+                "is deferred, not gated, unless it is about an earlier finding: reuse that finding's `id`, or set "
+                "`finding` to it." % (delta.get("findings") or "none; the first review's file is in %s" % (self.run_dir / packet["unit"]))]),
             "- Repo rules: %s" % (", ".join(rules) or "none found; follow the code's own conventions"),
             "",
             "Block only on MAJOR defects: wrong behaviour, data loss, or a scenario that is not really tested. "
@@ -1218,8 +1246,9 @@ class Driver:
                                 encoding="utf-8")
         with deferred.open("a", encoding="utf-8") as stream:
             for item in items:
-                stream.write("- %s %s%s: %s (%s)\n" % (unit.upper(), item["id"], " [%s]" % item["kind"] if item.get("kind") else "",
-                                                       item_text(item), source_path))
+                stream.write("- %s %s%s: %s%s (%s)\n" % (unit.upper(), item["id"], " [%s]" % item["kind"] if item.get("kind") else "",
+                                                         item_text(item), " (blocking, but outside the re-review's delta)" if item.get("scope") else "",
+                                                         source_path))
 
     def step_reviewed(self, task_id):
         task = self.task(task_id)
@@ -1232,17 +1261,87 @@ class Driver:
         except contracts.ContractError as error:
             return self.contract_error(task_id, "review", error)
         self.log_clarifications(task_id, "review", review, task["review"]["path"])
+        self.mark(task_id, reviewed_commit=head)  # what a later re-review's delta starts from, whatever the verdict
         blocking, rest = contracts.review_items(review)
+        if task.get("delta"):
+            blocking, outside = self.scope_filter(task_id, packet, task["delta"], blocking)
+            rest = rest + outside
         asks = [i for i in blocking + rest if i.get("answer_required") is True]
         self.defer(task_id, [i for i in rest if i not in asks], task["review"]["path"])
-        if review["verdict"] == "block":
+        if blocking:
             # a fix round holds only blocking and answer_required items, and the reviewer's checks
             return self.fail_gate(task_id, report, "review", blocking + [i for i in rest if i in asks],
                                   checks_run=review.get("checks_run") or [], answer_ids=[i["id"] for i in asks])
-        self.mark(task_id, reviewed_commit=head)
         if asks:  # a question costs no round: CI goes on while the implementer answers
             self.start_answers(task_id, asks, review)
         self.mark(task_id, gate="ready-for-ci")
+
+    def unit_trail(self, unit):
+        """(last reviewed commit, newest findings.json, newest report.json) over the unit's attempts; "" when none yet."""
+        reviewed = findings = report = ""
+        with self.book() as data:
+            tasks = [t for t in data["tasks"].values() if t["packet"].get("unit") == unit]
+        for task in tasks:
+            reviewed = task.get("reviewed_commit") or reviewed
+            report = task.get("report_path") or report
+            candidate = self.run_dir / task["packet"]["task_id"] / "findings.json"
+            findings = str(candidate) if candidate.exists() else findings
+        return reviewed, findings, report
+
+    def earlier_ids(self, unit, current_review):
+        """The ids of every finding the unit has had before this review: fix-round findings and earlier review items."""
+        found = set()
+        with self.book() as data:
+            tasks = [t for t in data["tasks"].values() if t["packet"].get("unit") == unit]
+        paths = [self.run_dir / t["packet"]["task_id"] / "findings.json" for t in tasks]
+        paths += [Path(t["review"]["path"]) for t in tasks if t.get("review") and t["review"]["path"] != current_review]
+        for path in paths:
+            try:
+                document = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(document, dict):
+                continue
+            for item in (document.get("items") or []) + (document.get("major") or []) + (document.get("deferred") or []):
+                if isinstance(item, dict) and isinstance(item.get("id"), str):
+                    found.add(item["id"])
+        return found
+
+    @staticmethod
+    def references(item):
+        """The finding ids an item says it is about: its `finding`, `findings`, `ref`, `refs` or `references` field."""
+        found = set()
+        for key in ("finding", "findings", "ref", "refs", "references"):
+            value = item.get(key)
+            values = [value] if isinstance(value, str) else value if isinstance(value, list) else []
+            found.update(v for v in values if isinstance(v, str))
+        return found
+
+    def scope_filter(self, task_id, packet, delta, blocking):
+        """(blocking items to gate on, deferred copies of the rest). In a re-review a blocking item whose file the delta
+        did not change and which is not about an earlier finding is outside the scope: it is deferred and logged as a
+        `scope` event, never gated. When the delta cannot be read nothing is filtered."""
+        checkout = Path(packet["checkout"])
+        diff = subprocess.run(["git", "-C", str(checkout), "diff", "--name-only", delta["from"] + "..HEAD"],
+                              capture_output=True, text=True, timeout=60)
+        if diff.returncode != 0:
+            return blocking, []
+        changed = set(diff.stdout.split())
+        unit = packet["unit"]
+        earlier = self.earlier_ids(unit, self.task(task_id)["review"]["path"])
+        kept, outside = [], []
+        for item in blocking:
+            file = str(item.get("file") or "")
+            if file.startswith(str(checkout) + "/"):
+                file = file[len(str(checkout)) + 1:]
+            file = file[2:] if file.startswith("./") else file
+            if file in changed or item["id"] in earlier or self.references(item) & earlier:
+                kept.append(item)
+                continue
+            outside.append(dict(item, kind="deferred", answer_required=False, scope="outside-delta"))
+            self.log("scope", unit=unit, task=task_id, id=item["id"], file=file, delta_from=delta["from"],
+                     why="blocking item outside the delta, about no earlier finding")
+        return kept, outside
 
     # ---- answers: a passing review's answer_required items, answered while CI runs ---------------------------
     # The task keeps one `answers` record: {id, dir, assignment_id, ids, state working|reported|done|failed, tries}.
@@ -1410,9 +1509,11 @@ class Driver:
         event("%s merged: %s" % (task_id, url))
 
     def step_cleanup(self, task_id):
-        """Stop a finished worker and remove its worktree, only when nothing would be lost; else leave it and say why."""
+        """A merge is final: stop the unit's implementer and reviewer panes, then remove the worktree only when nothing
+        would be lost; else leave it and say why."""
         task = self.task(task_id)
         packet = task["packet"]
+        self.stop_unit_agents(packet["unit"], "merged")  # a merge is final: both panes stop whatever the worktree holds
         with self.book() as data:
             busy = [t["packet"]["task_id"] for t in data["tasks"].values()
                     if t["packet"]["worker"] == packet["worker"] and t["status"] not in ("COMPLETE", "RELEASED")]
@@ -1427,11 +1528,10 @@ class Driver:
                                 text=True, timeout=30).stdout.split()
         if not pushed:
             return self.keep(task_id, "branch %s has commits that are neither pushed nor merged" % branch)
-        self.stop_agent(packet["worker"], packet["unit"], "merged")
         run(["git", "-C", str(self.repo), "worktree", "remove", str(path)], timeout=60)
         run(["git", "-C", str(self.repo), "worktree", "prune"], timeout=60)
-        self.mark(task_id, gate="done", cleanup="worker stopped, worktree removed")
-        event("%s worker stopped and worktree removed" % task_id)
+        self.mark(task_id, gate="done", cleanup="panes stopped, worktree removed")
+        event("%s panes stopped and worktree removed" % task_id)
 
     def keep(self, task_id, reason):
         self.mark(task_id, gate="done", cleanup="kept: " + reason)
@@ -1467,6 +1567,9 @@ class Driver:
                 agents[name] = {"role": role, "unit": unit, "intent_at": now(), "assignment_id": None}
         self.log("intent", name=name, role=role, unit=unit, recovering=True if recovering else None)
         live = self.agent_live(name) if known and (recovering or not fresh) else False
+        if live and not recovering and self.swap_due(name, role, unit, known.get("assignment_id")):
+            self.stop_agent(name, unit, "swap")
+            live, spawn = False, dict(spawn, task=spawn["task"] + self.handoff(name, unit))
         try:
             if live:
                 result, how = runtime_call(self.lead, "resume", {"name": name, "task": spawn["task"]}), "attach"
@@ -1489,9 +1592,55 @@ class Driver:
         self.log("agent", name=name, role=role, unit=unit, how=how, assignment_id=assignment_id)
         return address, assignment_id
 
+    def swap_due(self, name, role, unit, assignment_id):
+        """True when the agent is below the context reserve, judged from the usage the runtime last reported for its
+        assignment (D5b). With no usable measurement it is resumed (D5c) and the log says `context: unknown`."""
+        with self.book() as data:
+            usage = (data.get("usage") or {}).get(assignment_id)
+        sample = usage.get("context") if isinstance(usage, dict) and isinstance(usage.get("context"), dict) else usage
+        verdict = context_verdict(sample, self.args.context_reserve) if isinstance(sample, dict) else {"status": "unknown"}
+        if verdict["status"] == "unknown":
+            self.log("context", name=name, role=role, unit=unit, context="unknown")
+            return False
+        if verdict["status"] != "checkpoint":
+            return False
+        self.log("swap", name=name, role=role, unit=unit, remaining_tokens=verdict["remaining_tokens"],
+                 reserve=self.args.context_reserve, model=verdict["model"])
+        event("%s is below the context reserve (%d tokens left): swapping in a fresh %s" % (name, verdict["remaining_tokens"], role))
+        return True
+
+    def handoff(self, name, unit):
+        """What a fresh agent that replaces `name` reads in place of the transcript: the unit's task, its last report and
+        findings, and the commit range (the whole change, and what is new since the last review)."""
+        reviewed, findings, report = self.unit_trail(unit)
+        with self.book() as data:
+            checkout = next((t["packet"]["checkout"] for t in data["tasks"].values() if t["packet"].get("unit") == unit), "")
+        return "\n".join([
+            "",
+            "You are a fresh agent replacing %s, which ran short of context. You have no earlier transcript; read:" % name,
+            "- The unit's task: %s" % (self.run_dir / unit / "task.md"),
+            "- Its last report: %s" % (report or "none yet"),
+            "- Its last findings: %s" % (findings or "none yet"),
+            "- Commit range: `git -C %s diff %s...HEAD`%s" % (checkout, self.args.base,
+                                                           "; new since the last review: `%s..HEAD`" % reviewed if reviewed else ""),
+            ""])
+
     def stop_agent(self, name, unit, why):
         runtime_call(self.lead, "stop", {"name": name})
         self.log("stop", name=name, unit=unit, why=why)
+
+    def stop_unit_agents(self, unit, why):
+        """Stop the unit's implementer and reviewer panes (the ones still alive). A pane that will not stop is logged, not fatal."""
+        with self.book() as data:
+            names = [n for n, a in (data.get("agents") or {}).items() if a.get("unit") == unit and a.get("role") in ("worker", "reviewer")]
+        for name in names:
+            if not self.pane_alive(name):
+                continue
+            try:
+                self.stop_agent(name, unit, why)
+            except (ValueError, OSError, subprocess.TimeoutExpired) as error:
+                event("could not stop %s (%s): %s" % (name, why, error))
+                self.log("error", unit=unit, name=name, gate="stop", error=str(error)[:500])
 
     def pane_alive(self, name):
         try:
@@ -1556,8 +1705,16 @@ class Driver:
             return self.ensure_agent(name, "worker", unit, spawn, fresh=True)
         alive = self.pane_alive(name)
         if alive and not fresh:
+            with self.book() as data:
+                last = ((data.get("agents") or {}).get(name) or {}).get("assignment_id")
+            if self.swap_due(name, "worker", unit, last):
+                fresh, spawn["task"] = True, spawn["task"] + self.handoff(name, unit)
+        if alive and not fresh:
             resumed = runtime_call(self.lead, "resume", {"name": name, "task": "Read %s and follow it.%s" % (task_md, said)})
             assignment_id = assignment_of(resumed)
+            with self.book() as data:
+                if name in (data.get("agents") or {}):
+                    data["agents"][name]["assignment_id"] = assignment_id
             self.log("agent", name=name, role="worker", unit=unit, how="resume", assignment_id=assignment_id)
             return resumed.get("address") or task["runtime_id"], assignment_id
         if alive:
@@ -1599,6 +1756,7 @@ class Driver:
                 data["tasks"][task_id].update(gate="blocked" if blocked else "skipped", updated_at=now(), held=[])
             for message in held:
                 self.log("held-dropped", unit=unit, task=task_id, held=message["kind"], why=action)
+            self.stop_unit_agents(unit, "paused")
             return self.write_status(unit.upper(), ("BLOCKED" if blocked else "SKIPPED") + " · " + cell(reason))
         self.write_status(unit.upper(), "IN PROGRESS")
         finished = next((m for m in held if m["kind"] == "complete"), None)
@@ -2135,6 +2293,8 @@ def await_wake(args):
 
 def drive(args):
     require(args.max_workers >= 1, "--max-workers must be at least 1")
+    require(args.max_fix_rounds >= 0, "--max-fix-rounds must not be negative")
+    require(args.context_reserve >= 0, "--context-reserve must not be negative")
     driver = Driver(args)
     driver.start()
     try:
@@ -2179,6 +2339,11 @@ def main():
     sub = commands.add_parser("run", help="Dispatch an approved plan's ready agent tickets and wait for them")
     sub.add_argument("plan")
     sub.add_argument("--max-workers", type=int, default=3)
+    sub.add_argument("--max-fix-rounds", type=int, default=2,
+                     help="Fix rounds a unit may use before the next failed gate raises a request; a plan line "
+                          "`Max fix rounds: T3=3` sets it for one ticket")
+    sub.add_argument("--context-reserve", type=int, default=40000,
+                     help="Tokens an implementer or reviewer must have left before a resume; below it the driver swaps in a fresh agent")
     sub.add_argument("--cli", choices=("claude", "codex"), default="claude")
     sub.add_argument("--base", default="origin/main", help="Remote branch each worktree starts from")
     sub.add_argument("--repo", help="Repository root; default the plan file's repository")

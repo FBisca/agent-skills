@@ -11,7 +11,10 @@ ledger status changed), `intent` and `agent` (an agent is about to be started / 
 `held`, `held-acted` and `held-dropped` (a worker message that arrived while its unit had an open request), `finish`
 (the run ended; `orchestrate.py await` reads it), `contract-error` (a handoff file broke its contract: `where`, `error`),
 `clarification` (an agent listed a question in `clarifications[]`: `finding`, `asked_by`, `note`, `source`), `answers`
-(the implementer was resumed for the answer_required items of a passing review) and `response` (one per answered finding)."""
+(the implementer was resumed for the answer_required items of a passing review), `response` (one per answered finding),
+`scope` (a re-review's blocking item outside the delta, about no earlier finding, was deferred: `id`, `file`),
+`swap` (an agent below the context reserve was replaced by a fresh one: `name`, `role`, `remaining_tokens`) and
+`context` (`context: unknown`: no usable usage measurement, so the agent was resumed)."""
 
 from datetime import datetime, timezone
 import json

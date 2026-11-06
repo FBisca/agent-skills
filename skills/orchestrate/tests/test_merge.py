@@ -6,7 +6,7 @@ import sys
 import unittest
 from unittest import mock
 
-from fixtures import load_script, plan_text, recorded_idles
+from fixtures import load_script, plan_text, recorded_idles, report_wait, resume_id
 from test_gates import GateFixture, MAJOR
 
 PR = "https://github.com/o/r/pull/7"
@@ -35,16 +35,18 @@ class MergeTests(GateFixture, unittest.TestCase):
     def test_S8_a_failing_check_sends_the_failed_log_to_the_worker_as_a_fix_round(self):
         """code-driven-orchestrator/S8"""
         self.checks([[1, "FAIL o/r#7\nunit tests: boom at line 3"], [0, "PASS o/r#7"]])
-        self.waits([self.worker_done(tests=True), self.reviewer_done(), self.worker_done("t1r1")])
+        again = report_wait("demo-t1-review", "complete", id=resume_id("demo-t1-review"))
+        again["write"] = [[str(self.run_dir / "t1" / "review.2.json"), self.review()]]
+        self.waits([self.worker_done(tests=True), self.reviewer_done(), self.worker_done("t1r1"), again])
         self.run_driver()
         findings = json.loads((self.run_dir / "t1r1" / "findings.json").read_text(encoding="utf-8"))
         self.assertEqual((findings["source"], findings["attempt"]), ("ci", 1))
         self.assertEqual([(i["check"], i["excerpt"]) for i in findings["items"]], [("ci", "unit tests: boom at line 3")])
         self.assertIn("boom at line 3", (self.run_dir / "t1r1" / "task.md").read_text(encoding="utf-8"))
-        self.assertEqual([r["args"]["name"] for r in self.calls("resume")], ["demo-t1"])
+        self.assertEqual([r["args"]["name"] for r in self.calls("resume")], ["demo-t1", "demo-t1-review"])
         self.assertEqual(self.wait_checks_log(), ["o/r#7", "o/r#7"])
         self.assertEqual(self.task("t1")["report"]["review_rounds"], 1)
-        # the fix round opened no PR of its own; the gate finds the unit's earlier one, and converge alone gates it
+        # the fix round opened no PR of its own; the gate finds the unit's earlier one, and the reviewer's delta pass gates it
         self.assertEqual(self.task("t1r1")["status"], "COMPLETE")
 
     def test_S9_the_ticket_reads_awaiting_merge_until_gh_reports_it_merged(self):
@@ -95,7 +97,7 @@ class MergeTests(GateFixture, unittest.TestCase):
         """code-driven-orchestrator/S10"""
         self.waits([self.worker_committed(), self.reviewer_done()])
         self.run_driver()
-        self.assertEqual([c["args"] for c in self.calls("stop")], [{"name": "demo-t1"}])
+        self.assertEqual(sorted(c["args"]["name"] for c in self.calls("stop")), ["demo-t1", "demo-t1-review"])
         self.assertFalse(self.worktree.exists())
         self.assertIn("feat/demo-t1", self.git(self.repo, "branch", "--list", "feat/demo-t1"))
         self.assertNotIn("demo-t1", self.git(self.repo, "worktree", "list"))
@@ -105,7 +107,7 @@ class MergeTests(GateFixture, unittest.TestCase):
         """code-driven-orchestrator/S10"""
         self.waits([self.worker_done(tests=True), self.reviewer_done()])
         self.run_driver()
-        self.assertEqual(self.calls("stop"), [])
+        self.assertEqual(sorted(c["args"]["name"] for c in self.calls("stop")), ["demo-t1", "demo-t1-review"])  # the panes stop, the files stay
         self.assertTrue(self.worktree.exists())
         self.assertIn("uncommitted", self.task()["cleanup"])
 
@@ -113,7 +115,7 @@ class MergeTests(GateFixture, unittest.TestCase):
         """code-driven-orchestrator/S10"""
         self.waits([self.worker_committed(push=False), self.reviewer_done()])
         self.run_driver()
-        self.assertEqual(self.calls("stop"), [])
+        self.assertEqual(sorted(c["args"]["name"] for c in self.calls("stop")), ["demo-t1", "demo-t1-review"])
         self.assertTrue(self.worktree.exists())
         self.assertIn("neither pushed nor merged", self.task()["cleanup"])
 

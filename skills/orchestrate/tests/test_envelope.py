@@ -24,6 +24,15 @@ class EnvelopeFixture(GateFixture):
         step["write"] = [[str(self.run_dir / task_id / name), self.report(task_id, **over)]]
         return step
 
+    def re_review(self, index=2, nth=1):
+        """The unit's reviewer, resumed, passes the fix round."""
+        step = report_wait("demo-t1-review", "complete", id=resume_id("demo-t1-review", nth))
+        step["write"] = [[str(self.run_dir / "t1" / ("review.%d.json" % index)), self.review2()]]
+        return step
+
+    def worker_resumes(self):
+        return [r["args"]["name"] for r in self.calls("resume") if r["args"]["name"] == "demo-t1"]
+
     def blocked_with_question(self, **over):
         return self.review2(verdict="block", items=[BLOCKING, QUESTION, NIT, CONCERN], checks_run=[RUN], **over)
 
@@ -170,13 +179,14 @@ class FixRoundTests(EnvelopeFixture, unittest.TestCase):
 
     def test_S16_a_missing_response_resumes_the_worker_once_at_no_round_cost(self):
         self.waits(self.to_fix_round() + [self.fix_round_report(),
-                                          self.fix_round_report(name="report.2.json", nth=2, responses=[RESPONSE])])
+                                          self.fix_round_report(name="report.2.json", nth=2, responses=[RESPONSE]),
+                                          self.re_review()])
         self.run_driver()
         errors = self.events("contract-error")
         self.assertEqual(len(errors), 1)
         self.assertIn("Q1", errors[0]["error"])
         resumes = self.calls("resume")
-        self.assertEqual([r["args"]["name"] for r in resumes], ["demo-t1", "demo-t1"])
+        self.assertEqual([r["args"]["name"] for r in resumes], ["demo-t1", "demo-t1", "demo-t1-review"])
         self.assertEqual(resumes[1]["args"]["task"], "Read %s and follow it." % (self.run_dir / "t1r1" / "missing.md"))
         brief = (self.run_dir / "t1r1" / "missing.md").read_text(encoding="utf-8")
         self.assertIn("Q1", brief)
@@ -194,9 +204,9 @@ class FixRoundTests(EnvelopeFixture, unittest.TestCase):
         self.assertEqual(len(self.calls("resume")), 2)
 
     def test_S16_a_complete_set_of_responses_passes_the_first_time(self):
-        self.waits(self.to_fix_round() + [self.fix_round_report(responses=[RESPONSE])])
+        self.waits(self.to_fix_round() + [self.fix_round_report(responses=[RESPONSE]), self.re_review()])
         self.run_driver()
-        self.assertEqual(len(self.calls("resume")), 1)
+        self.assertEqual(self.worker_resumes(), ["demo-t1"])
         self.assertEqual(self.events("contract-error"), [])
         self.assertEqual(self.task("t1r1")["gate"], "done")
 

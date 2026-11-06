@@ -99,12 +99,12 @@ class GateTests(GateFixture, unittest.TestCase):
         data = self.ledger()
         return load_script().unit_summary(data, unit)
 
-    def test_S5_a_fix_round_is_gated_by_converge_alone(self):
-        """code-driven-orchestrator/S5"""
-        self.waits([self.worker_done(), self.worker_done("t1r1", tests=True)])
+    def test_S5_a_fix_round_passing_converge_goes_to_the_reviewer(self):
+        """code-driven-orchestrator/S5 (a fix round is reviewed since orchestrate-lean-loop/S8)"""
+        self.waits([self.worker_done(), self.worker_done("t1r1", tests=True), self.reviewer_done()])
         self.run_driver()
         self.assertEqual(len(self.calls("resume")), 1)
-        self.assertEqual(self.spawned()[:1], ["demo-t1"])
+        self.assertEqual(self.spawned()[:2], ["demo-t1", "demo-t1-review"])
         self.assertEqual(self.task("t1r1")["gate"], "done")
 
     def test_S5_a_third_failure_goes_to_the_lead_not_a_third_fix_round(self):

@@ -30,6 +30,13 @@ if tool == "spawn":
     if args["name"] in json.load(open(os.path.join(home, "refuse.json"))):
         print(json.dumps({"content": [{"type": "text", "text": "name_taken"}], "isError": True}))
         sys.exit(1)
+    stopped_path = os.path.join(home, "stopped.json")  # a name the driver stopped is live again once it is spawned
+    stopped = json.load(open(stopped_path)) if os.path.exists(stopped_path) else []
+    if args["name"] in stopped:
+        states = json.load(open(os.path.join(home, "states.json")))
+        states.pop(args["name"], None)
+        json.dump(states, open(os.path.join(home, "states.json"), "w"))
+        json.dump([n for n in stopped if n != args["name"]], open(stopped_path, "w"))
     print(json.dumps({"worker_id": "w-" + args["name"], "assignment_id": "a-%s%s" % (args["name"], "" if nth == 1 else "-%d" % nth),
                       "name": args["name"], "address": "term-" + args["name"], "parent": "driver"}))
 elif tool == "wait":
@@ -60,6 +67,9 @@ elif tool == "stop":
     states = json.load(open(os.path.join(home, "states.json")))
     states[args["name"]] = "exited"
     json.dump(states, open(os.path.join(home, "states.json"), "w"))
+    stopped_path = os.path.join(home, "stopped.json")
+    stopped = json.load(open(stopped_path)) if os.path.exists(stopped_path) else []
+    json.dump(stopped + [args["name"]], open(stopped_path, "w"))
     print(json.dumps({"name": args["name"], "state": "exited"}))
 elif tool == "resume":
     print(json.dumps({"worker_id": "w-" + args["name"], "assignment_id": "r%d-%s" % (nth, args["name"]),
