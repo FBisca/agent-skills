@@ -1,0 +1,221 @@
+"""The gates after a worker reports: converge, a fresh reviewer, fix rounds, a fresh worker for a dead pane."""
+
+import json
+from pathlib import Path
+import unittest
+
+from fixtures import RunFixture, plan_text
+
+
+MAJOR = {"id": "M1", "file": "src/a/x.py", "line": 7, "problem": "drops the last row", "fix": "include the final row"}
+DEFERRED = {"id": "D1", "note": "rename the helper someday"}
+
+
+class GateTests(RunFixture, unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        self.plan.write_text(plan_text(rows=("T1",)), encoding="utf-8")
+        self.run_dir = self.state_dir / "demo"
+        self.worktree = self.root / "repo.worktrees" / "demo-t1"
+        self.sent = 0
+
+    def report(self, task_id, **over):
+        return json.dumps(dict({"contract": 1, "task_id": task_id, "status": "COMPLETE", "summary": "done",
+                                "acceptance_met": True, "files": [], "decisions": [], "interfaces": [],
+                                "remaining": [], "checks": [], "review_rounds": 0, "usage": "unknown",
+                                "head": "abc1234", "pr": None}, **over))
+
+    def message(self, name, kind="complete"):
+        self.sent += 1
+        return {"messages": [{"message_id": "m%d" % self.sent, "assignment_id": "a-" + name, "kind": kind,
+                              "text": "%s - see run directory" % kind.upper()}],
+                "assignments": [{"name": name, "assignment_id": "a-" + name, "state": kind}],
+                "unfinished": [], "reason": "completed"}
+
+    def worker_done(self, task_id="t1", tests=False, report=None, name="demo-t1"):
+        """A wait step: the worker wrote its report (and, with tests, a tagged test) and says complete."""
+        step = self.message(name)
+        step["write"] = []
+        if report is not False:
+            step["write"].append([str(self.run_dir / task_id / "report.json"), report or self.report(task_id)])
+        if tests:
+            step["write"].append([str(self.worktree / "src" / "a" / "test_a.py"),
+                                  'def test_a():\n    """S1"""\n'])
+        return step
+
+    def review(self, **over):
+        return json.dumps(dict({"contract": 1, "verdict": "pass", "major": [], "deferred": [], "commit": "abc1234"}, **over))
+
+    def reviewer_done(self, review=None):
+        step = self.message("demo-t1-review")
+        step["write"] = [[str(self.run_dir / "t1" / "review.json"), review or self.review()]]
+        return step
+
+    def task(self, task_id="t1"):
+        return self.ledger()["tasks"][task_id]
+
+    def spawned(self):
+        return [c["args"]["name"] for c in self.calls("spawn")]
+
+    def test_S5_failing_converge_resumes_the_worker_in_a_new_task_directory(self):
+        """code-driven-orchestrator/S5"""
+        self.waits([self.worker_done()])
+        self.run_driver()
+        resumes = self.calls("resume")
+        self.assertEqual(len(resumes), 1)
+        self.assertEqual(resumes[0]["args"]["name"], "demo-t1")
+        self.assertEqual(resumes[0]["args"]["task"], "Read %s and follow it." % (self.run_dir / "t1r1" / "task.md"))
+        findings = json.loads((self.run_dir / "t1r1" / "findings.json").read_text(encoding="utf-8"))
+        self.assertEqual((findings["contract"], findings["source"], findings["attempt"]), (1, "converge", 1))
+        self.assertEqual(findings["items"], ["FAIL coverage: S1"])
+        task_md = (self.run_dir / "t1r1" / "task.md").read_text(encoding="utf-8")
+        for needle in ("FAIL coverage: S1", str(self.run_dir / "t1r1" / "report.json"), "t1r1", "findings.json"):
+            self.assertIn(needle, task_md)
+        self.assertEqual(self.spawned(), ["demo-t1"])
+        tasks = self.ledger()["tasks"]
+        self.assertEqual((tasks["t1"]["status"], tasks["t1"]["report"]["review_rounds"]), ("RELEASED", 1))
+        self.assertEqual((tasks["t1r1"]["status"], tasks["t1r1"]["runtime_id"]), ("ACTIVE", "term-demo-t1"))
+        self.assertEqual(tasks["t1r1"]["packet"]["unit"], "t1")
+        self.assertEqual(self.ledger_unit("t1")["failed_reviews"], 1)
+
+    def ledger_unit(self, unit):
+        from fixtures import load_script
+        data = self.ledger()
+        return load_script().unit_summary(data, unit)
+
+    def test_S5_a_fix_round_is_gated_by_converge_alone(self):
+        """code-driven-orchestrator/S5"""
+        self.waits([self.worker_done(), self.worker_done("t1r1", tests=True)])
+        self.run_driver()
+        self.assertEqual(len(self.calls("resume")), 1)
+        self.assertEqual(self.spawned(), ["demo-t1"])
+        self.assertEqual(self.task("t1r1")["gate"], "ready-for-ci")
+
+    def test_S5_a_third_failure_stops_at_the_escalation_hook(self):
+        """code-driven-orchestrator/S5"""
+        self.waits([self.worker_done(), self.worker_done("t1r1"), self.worker_done("t1r2")])
+        self.run_driver()
+        self.assertEqual(len(self.calls("resume")), 2)
+        self.assertEqual(self.task("t1r2")["gate"], "escalated")
+        self.assertEqual(self.ledger_unit("t1")["failed_reviews"], 3)
+
+    def test_S6_passing_converge_spawns_a_fresh_large_reviewer_with_paths_only(self):
+        """code-driven-orchestrator/S6"""
+        self.waits([self.worker_done(tests=True)])
+        self.run_driver()
+        self.assertEqual(self.spawned(), ["demo-t1", "demo-t1-review"])
+        args = self.calls("spawn")[1]["args"]
+        self.assertEqual((args["kind"], args["model"], args["effort"], args["cwd"]),
+                         ("worker", "opus", "high", str(self.worktree)))
+        self.assertEqual(args["task"], "Read %s and follow it." % (self.run_dir / "t1-review" / "task.md"))
+        text = (self.run_dir / "t1-review" / "task.md").read_text(encoding="utf-8")
+        for needle in (str(self.run_dir / "t1" / "task.md"), str(self.plan), "origin/main...HEAD", str(self.worktree),
+                       str(self.run_dir / "t1" / "review.json"), "MAJOR", "deferred"):
+            self.assertIn(needle, text)
+        task = self.task()
+        self.assertEqual((task["status"], task["gate"], task["report"]["head"]), ("PARTIAL", "reviewing", "abc1234"))
+        self.assertEqual(self.calls("resume"), [])
+
+    def test_S6_a_blocking_review_sends_only_its_major_items_as_a_fix_round(self):
+        """code-driven-orchestrator/S6"""
+        review = self.review(verdict="block", major=[MAJOR], deferred=[DEFERRED])
+        self.waits([self.worker_done(tests=True), self.reviewer_done(review)])
+        self.run_driver()
+        resumes = self.calls("resume")
+        self.assertEqual([r["args"]["name"] for r in resumes], ["demo-t1"])
+        findings = json.loads((self.run_dir / "t1r1" / "findings.json").read_text(encoding="utf-8"))
+        self.assertEqual((findings["source"], findings["items"]), ("review", [MAJOR]))
+        task_md = (self.run_dir / "t1r1" / "task.md").read_text(encoding="utf-8")
+        self.assertIn("drops the last row", task_md)
+        self.assertIn("src/a/x.py", task_md)
+        self.assertNotIn("rename the helper", task_md)
+        self.assertIn("rename the helper someday", (self.run_dir / "deferred.md").read_text(encoding="utf-8"))
+        self.assertEqual(self.task()["report"]["review_rounds"], 1)
+        self.assertEqual(self.task("t1r1")["status"], "ACTIVE")
+
+    def test_S6_a_passing_review_leaves_the_ticket_for_the_ci_gate(self):
+        """code-driven-orchestrator/S6"""
+        self.waits([self.worker_done(tests=True), self.reviewer_done()])
+        self.run_driver()
+        self.assertEqual(self.calls("resume"), [])
+        self.assertEqual(self.spawned(), ["demo-t1", "demo-t1-review"])
+        task = self.task()
+        self.assertEqual((task["status"], task["gate"]), ("PARTIAL", "ready-for-ci"))
+        self.assertEqual(task["report_path"], str(self.run_dir / "t1" / "report.json"))
+        self.assertIn("| IN PROGRESS |", self.plan.read_text(encoding="utf-8"))
+
+    def test_S7_a_fix_round_for_a_dead_pane_spawns_a_fresh_worker_with_the_original_task(self):
+        """code-driven-orchestrator/S7"""
+        self.states({"demo-t1": "exited"})
+        self.waits([self.worker_done()])
+        self.run_driver()
+        self.assertEqual(self.calls("resume"), [])
+        self.assertEqual(self.spawned(), ["demo-t1", "demo-t1"])
+        fresh = self.calls("spawn")[1]["args"]
+        for needle in (str(self.run_dir / "t1" / "task.md"), str(self.run_dir / "t1r1" / "findings.json"),
+                       str(self.run_dir / "t1r1" / "task.md")):
+            self.assertIn(needle, fresh["task"])
+        first = self.calls("spawn")[0]["args"]
+        self.assertEqual((fresh["cwd"], fresh["model"], fresh["effort"]), (first["cwd"], first["model"], first["effort"]))
+        self.assertEqual(self.calls("status")[0]["args"], {"name": "demo-t1"})
+        tasks = self.ledger()["tasks"]
+        self.assertEqual((tasks["t1"]["status"], tasks["t1r1"]["status"]), ("RELEASED", "ACTIVE"))
+        self.assertEqual(tasks["t1r1"]["runtime_id"], "term-demo-t1")
+
+    def test_S7_an_unreadable_status_counts_as_a_gone_pane(self):
+        """code-driven-orchestrator/S7"""
+        self.states({"demo-t1": "error"})
+        self.waits([self.worker_done()])
+        self.run_driver()
+        self.assertEqual(self.calls("resume"), [])
+        self.assertEqual(self.spawned(), ["demo-t1", "demo-t1"])
+
+    def test_S6a_a_missing_report_does_not_advance_the_ticket(self):
+        """code-driven-orchestrator/S6a"""
+        self.waits([self.worker_done(report=False)])
+        self.run_driver()
+        self.assertEqual(self.spawned(), ["demo-t1"])
+        self.assertEqual(self.calls("resume"), [])
+        task = self.task()
+        self.assertEqual(task["gate"], "attention")
+        self.assertIn("report.json", task["attention"][0]["reason"])
+        self.assertNotIn("report", task)
+
+    def test_S6a_an_invalid_report_does_not_advance_the_ticket(self):
+        """code-driven-orchestrator/S6a"""
+        self.waits([self.worker_done(report=self.report("t1", contract=2))])
+        self.run_driver()
+        self.assertEqual(self.spawned(), ["demo-t1"])
+        task = self.task()
+        self.assertEqual(task["gate"], "attention")
+        self.assertIn("contract", task["attention"][0]["reason"])
+
+    def test_S6a_a_report_for_another_task_does_not_advance_the_ticket(self):
+        """code-driven-orchestrator/S6a"""
+        self.waits([self.worker_done(report=self.report("t9"))])
+        self.run_driver()
+        self.assertEqual(self.task()["gate"], "attention")
+        self.assertEqual(self.calls("resume"), [])
+
+    def test_S6a_an_invalid_review_does_not_start_a_fix_round(self):
+        """code-driven-orchestrator/S6a"""
+        broken = self.review(verdict="pass", major=[MAJOR])
+        self.waits([self.worker_done(tests=True), self.reviewer_done(broken)])
+        self.run_driver()
+        self.assertEqual(self.calls("resume"), [])
+        task = self.task()
+        self.assertEqual(task["gate"], "attention")
+        self.assertIn("review.json", task["attention"][0]["reason"])
+
+    def test_S6a_a_missing_review_does_not_advance_the_ticket(self):
+        """code-driven-orchestrator/S6a"""
+        step = self.reviewer_done()
+        step["write"] = []
+        self.waits([self.worker_done(tests=True), step])
+        self.run_driver()
+        self.assertEqual(self.calls("resume"), [])
+        self.assertEqual(self.task()["gate"], "attention")
+
+
+if __name__ == "__main__":
+    unittest.main()

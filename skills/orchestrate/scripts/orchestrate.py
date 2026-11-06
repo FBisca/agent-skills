@@ -17,6 +17,9 @@ import subprocess
 import sys
 import tempfile
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import contracts  # noqa: E402
+
 
 def now():
     return datetime.now(timezone.utc).isoformat()
@@ -311,9 +314,9 @@ MATRIX = {("small", "simple"): ("small", "low"), ("small", "complex"): ("medium"
           ("regular", "simple"): ("medium", "medium"), ("regular", "complex"): ("medium", "high")}
 CONTRACT = """# Contract for every task in this run
 
-- Write your result to the report path your task.md names, as JSON in this shape:
-  {"task_id","status":"COMPLETE|PARTIAL|BLOCKED","summary","acceptance_met":bool,"files":[],"decisions":[],"interfaces":[],"remaining":[],"checks":[{"command","outcome":"passed|failed|not_run","reason?"}],"review_rounds":0,"usage":"unknown","context":{"status":"unknown"}}
-  BLOCKED needs "blocker" and a next action in "remaining".
+- Write your result to the report path your task.md names, as JSON in this shape. The driver validates it; a missing or invalid file counts as no report:
+  {"contract":1,"task_id","status":"COMPLETE|PARTIAL|BLOCKED","summary","acceptance_met":bool,"files":[],"decisions":[],"interfaces":[],"remaining":[],"checks":[{"command","outcome":"passed|failed|not_run","reason?"}],"review_rounds":0,"usage":"unknown","head":"<commit sha>","pr":"<url or null>","context":{"status":"unknown"}}
+  BLOCKED needs "blocker" and a next action in "remaining". In a fix round report "review_rounds":0: the driver counts failed rounds.
 - Prose, if any, goes in report.md beside it. Files are write-once: a later attempt writes report.2.json.
 - Your agent-runtime `report` call carries ONE line: status + report path. Use kind=complete, blocked or decision.
 - Red-first: one test per scenario, named with its S-ID, seen failing before the code exists.
@@ -323,9 +326,9 @@ CONTRACT = """# Contract for every task in this run
 """
 
 
-def worker_name(slug, number):
-    """`<slug>-t<n>` within agent-runtime's 32-character name limit; the `-t<n>` suffix always survives."""
-    suffix = "-t" + str(number)
+def worker_name(slug, number, tail=""):
+    """`<slug>-t<n>[tail]` within agent-runtime's 32-character name limit; the `-t<n>` suffix always survives."""
+    suffix = "-t" + str(number) + tail
     return slug[:32 - len(suffix)].rstrip("-_") + suffix
 
 
@@ -492,6 +495,28 @@ def event(message):
     print("[orchestrate] " + message, file=sys.stderr, flush=True)
 
 
+GATES = ("reported", "converged", "reviewed", "fix-pending")  # ledger `gate` stages the loop acts on
+MAX_FIX_ROUNDS = 2  # a unit's 3rd failed gate goes to Driver.escalate
+FIX_ROUND = re.compile(r"r\d+$")
+CONVERGE = Path(__file__).resolve().parents[2] / "converge" / "scripts" / "converge.py"
+
+
+def next_path(directory, stem, suffix):
+    """The first write-once file name free in `directory`: <stem><suffix>, <stem>.2<suffix>, ..."""
+    for index in range(1, 1000):
+        path = directory / (stem + ("" if index == 1 else ".%d" % index) + suffix)
+        if not path.exists():
+            return path, index
+    raise ValueError("too many %s files in %s" % (stem, directory))
+
+
+def describe(item):
+    """One line for a findings item: converge and CI items are lines already; a review item is an object."""
+    if isinstance(item, dict):
+        return "%s: %s:%s %s. Fix: %s" % (item["id"], item["file"], item["line"], item["problem"], item["fix"])
+    return str(item)
+
+
 class Driver:
     """The dispatch loop. It keeps no state of its own: the plan, the ledger and the runtime hold it."""
 
@@ -503,6 +528,7 @@ class Driver:
         self.errors = []
         self.spawned = []
         self.failed = set()
+        self.stuck = set()
         self.receipt = None
 
     def read_plan(self):
@@ -533,15 +559,279 @@ class Driver:
             except PlanError as error:
                 event("plan not runnable, nothing dispatched this round: %s" % error)
                 plan = None
+            acted = self.advance()
             dispatched = self.dispatch_ready(plan) if plan else 0
-            if idle and not dispatched:
+            if idle and not dispatched and not acted:
                 return
             wait = {"target": "all", "timeout": self.args.wait_seconds}
             if self.receipt:
                 wait["receipt"] = self.receipt
             result = runtime_call(self.lead, "wait", wait, timeout=self.args.wait_seconds + 60)
             self.receipt = result.get("receipt")
+            self.receive(result)
             idle = not result.get("unfinished")
+
+    # ---- gates: a worker's report -> converge -> one review -> fix rounds -----------------------------------
+    # The ledger task's `gate` field is the whole state: reported -> converged -> reviewing -> reviewed ->
+    # ready-for-ci, or fix-pending -> superseded. `ready-for-ci`, `attention` and `escalated` are the seams
+    # for the CI gate and the decider: nothing here acts on them.
+
+    def receive(self, result):
+        """Turn the runtime's `complete` messages into gate stages. Only names and kinds are read here."""
+        names = {a.get("assignment_id"): a.get("name") for a in result.get("assignments") or []}
+        for message in result.get("messages") or []:
+            name = message.get("name") or names.get(message.get("assignment_id"))
+            kind = message.get("kind")
+            if not name or kind not in ("complete", "blocked", "decision"):
+                continue
+            if kind != "complete":
+                self.on_agent_attention(name, kind)
+                continue
+            with ledger(self.ledger_path) as data:
+                for task in data["tasks"].values():
+                    if task.get("gate") == "reviewing" and task["review"]["name"] == name:
+                        task["gate"] = "reviewed"
+                        break
+                    if (task["packet"]["worker"] == name and task["status"] not in ("COMPLETE", "RELEASED")
+                            and not task.get("gate")):
+                        task["gate"] = "reported"
+                        break
+                else:
+                    event("complete from %s matches no open gate" % name)
+
+    def on_agent_attention(self, name, kind):
+        """Hook for the decider: a worker reported `blocked` or `decision`."""
+        event("%s reported %s; no handler yet" % (name, kind))
+
+    def advance(self):
+        """Run every pending gate stage once; each step changes the task's gate or raises. Returns the steps run."""
+        steps = {"reported": self.step_reported, "converged": self.step_converged,
+                 "reviewed": self.step_reviewed, "fix-pending": self.step_fix}
+        with ledger(self.ledger_path) as data:
+            ids = [task_id for task_id, task in data["tasks"].items() if task.get("gate") in steps]
+        acted = 0
+        for task_id in ids:
+            while True:
+                gate = self.task(task_id).get("gate")
+                if gate not in steps or (task_id, gate) in self.stuck:
+                    break
+                try:
+                    steps[gate](task_id)
+                except (ValueError, OSError, subprocess.TimeoutExpired) as error:
+                    self.stuck.add((task_id, gate))
+                    self.errors.append("%s: %s" % (task_id, error))
+                    event("%s gate %s failed: %s" % (task_id, gate, error))
+                    break
+                acted += 1
+        return acted
+
+    def task(self, task_id):
+        with ledger(self.ledger_path) as data:
+            return json.loads(json.dumps(data["tasks"][task_id]))
+
+    def mark(self, task_id, **fields):
+        with ledger(self.ledger_path) as data:
+            data["tasks"][task_id].update(fields, updated_at=now())
+
+    def attention(self, task_id, kind, reason):
+        """Hook for the decider and the pause: a gate cannot advance. Recorded on the unit; nothing else moves."""
+        with ledger(self.ledger_path) as data:
+            task = data["tasks"][task_id]
+            task.setdefault("attention", []).append({"at": now(), "kind": kind, "reason": reason})
+            task["gate"] = "attention"
+        event("%s needs attention (%s): %s" % (task_id, kind, reason))
+
+    def escalate(self, task_id, reason):
+        """Hook for the decider: a unit failed its gates a 3rd time. Recorded; the worker is left as it is."""
+        self.mark(task_id, gate="escalated", escalation=reason)
+        event("%s escalated: %s" % (task_id, reason))
+
+    def record_report(self, task_id, report, **changes):
+        """Checkpoint the worker's report as PARTIAL: the unit is not COMPLETE until CI and the merge."""
+        path = self.run_dir / task_id / "report.json"
+        with ledger(self.ledger_path) as data:
+            checkpoint(data, task_id, dict(report, status="PARTIAL", **changes))
+            data["tasks"][task_id]["report_path"] = str(path)
+
+    def step_reported(self, task_id):
+        task = self.task(task_id)
+        try:
+            report = contracts.load(self.run_dir / task_id / "report.json", contracts.validate_report)
+            contracts.need(report["task_id"] == task_id, "report task_id %r is not %s" % (report["task_id"], task_id))
+            contracts.need(report["status"] == "COMPLETE" and report["acceptance_met"],
+                           "the worker said complete but report.json says %s" % report["status"])
+        except contracts.ContractError as error:
+            return self.attention(task_id, "report", str(error))
+        verdict, lines = self.converge(task["packet"])
+        if verdict == "error":
+            return self.attention(task_id, "converge", lines[0])
+        try:
+            if verdict == "FAIL":
+                return self.fail_gate(task_id, report, "converge", lines)
+            self.record_report(task_id, report)
+        except ValueError as error:
+            return self.attention(task_id, "report", "the ledger rejected the report: %s" % error)
+        # A fix round is gated by converge alone; the first build also gets one review.
+        self.mark(task_id, gate="ready-for-ci" if FIX_ROUND.search(task_id) else "converged")
+
+    def converge(self, packet):
+        """Run converge for the unit's ticket: ("PASS" | "FAIL" | "error", FAIL lines or the reason)."""
+        argv = [sys.executable, str(self.args.converge), str(self.plan_path), "--ticket", packet["unit"].upper(),
+                "--repo", packet["checkout"], "--base", self.args.base]
+        result = subprocess.run(argv, capture_output=True, text=True, timeout=300)
+        lines = [line for line in result.stdout.splitlines() if line.startswith("FAIL")]
+        if result.returncode == 0:
+            return "PASS", []
+        if result.returncode == 1 and lines:
+            return "FAIL", lines
+        return "error", [(result.stderr.strip() or result.stdout.strip() or "converge exited %d" % result.returncode)[:500]]
+
+    def fail_gate(self, task_id, report, source, items):
+        """A gate failed: raise review_rounds, then a fix round, or the escalation hook on the 3rd failure."""
+        remaining = [describe(item) for item in items]
+        self.record_report(task_id, report, review_rounds=report.get("review_rounds", 0) + 1, remaining=remaining)
+        with ledger(self.ledger_path) as data:
+            unit = data["tasks"][task_id]["packet"]["unit"]
+            failures = unit_summary(data, unit)["failed_reviews"]
+        if failures > MAX_FIX_ROUNDS:
+            return self.escalate(task_id, "%s failed its gates %d times; last: %s" % (unit, failures, "; ".join(remaining)))
+        self.mark(task_id, gate="fix-pending", fix={"source": source, "items": items, "attempt": failures})
+
+    def step_converged(self, task_id):
+        task = self.task(task_id)
+        packet = task["packet"]
+        unit, name = packet["unit"], worker_name(self.slug, packet["unit"][1:], "-review")
+        review = task.get("review")
+        if not review:
+            path, index = next_path(self.run_dir / unit, "review", ".json")
+            review = {"name": name, "path": str(path), "dir": str(self.run_dir / (unit + "-review" + ("" if index == 1 else str(index))))}
+            self.mark(task_id, review=review)
+        review_dir = Path(review["dir"])
+        review_dir.mkdir(exist_ok=True, mode=0o700)
+        task_md = review_dir / "task.md"
+        if not task_md.exists():
+            task_md.write_text(self.review_text(packet, review["path"]), encoding="utf-8")
+        runtime_call(self.lead, "spawn", {
+            "kind": "worker", "name": name, "task": "Read %s and follow it." % task_md, "cwd": packet["checkout"],
+            "cli": self.args.cli, "model": self.models["large"], "effort": "high"})
+        self.mark(task_id, gate="reviewing")
+        event("spawned %s (large, %s, high)" % (name, self.models["large"]))
+
+    def review_text(self, packet, review_path):
+        checkout = Path(packet["checkout"])
+        rules = [str(checkout / n) for n in ("AGENTS.md", "CLAUDE.md") if (checkout / n).exists()]
+        return "\n".join([
+            "# Review %s: one pass, paths only" % packet["unit"].upper(),
+            "",
+            "Read these yourself; nothing is pasted here.",
+            "- Task: %s" % (self.run_dir / packet["unit"] / "task.md"),
+            "- Plan: %s (its Decisions, Scenarios and Seams)" % self.plan_path,
+            "- Commit range: run `git -C %s diff %s...HEAD`" % (checkout, self.args.base),
+            "- Repo rules: %s" % (", ".join(rules) or "none found; follow the code's own conventions"),
+            "",
+            "Block only on MAJOR defects: wrong behaviour, data loss, or a scenario that is not really tested. "
+            "Everything else goes in `deferred`; it never blocks.",
+            "Touch nothing in the repository.",
+            "",
+            "Write %s as JSON, exactly this shape:" % review_path,
+            '{"contract":1,"verdict":"pass|block","major":[{"id","file","line","problem","fix"}],'
+            '"deferred":[{"id","note"}],"commit":"<sha you reviewed>"}',
+            'The verdict is "block" exactly when `major` is not empty. Prose for people may go in review.md beside it.',
+            "Then call the agent-runtime `report` tool with kind=complete and one line: `<n> major - %s`." % review_path,
+            ""])
+
+    def step_reviewed(self, task_id):
+        task = self.task(task_id)
+        try:
+            review = contracts.load(task["review"]["path"], contracts.validate_review)
+            report = contracts.load(task["report_path"], contracts.validate_report)
+        except contracts.ContractError as error:
+            return self.attention(task_id, "review", str(error))
+        if review["deferred"]:
+            deferred = self.run_dir / "deferred.md"
+            if not deferred.exists():
+                deferred.write_text("# Deferred findings: %s (for the major review after the driver ships)\n\n" % self.slug,
+                                    encoding="utf-8")
+            with deferred.open("a", encoding="utf-8") as stream:
+                for item in review["deferred"]:
+                    stream.write("- %s %s: %s (%s)\n" % (task["packet"]["unit"].upper(), item["id"], item["note"],
+                                                         task["review"]["path"]))
+        if review["verdict"] == "block":
+            return self.fail_gate(task_id, report, "review", review["major"])
+        self.mark(task_id, gate="ready-for-ci")
+
+    def pane_alive(self, name):
+        try:
+            return runtime_call(self.lead, "status", {"name": name}).get("state") not in (None, "exited", "unknown")
+        except (ValueError, OSError, subprocess.TimeoutExpired):
+            return False
+
+    def step_fix(self, task_id):
+        """Hand the failing items to the unit's worker in a new task directory; a gone pane gets a fresh worker."""
+        task = self.task(task_id)
+        packet, fix = task["packet"], task["fix"]
+        unit, attempt = packet["unit"], fix["attempt"]
+        new_id = "%sr%d" % (unit, attempt)
+        new_dir = self.run_dir / new_id
+        new_dir.mkdir(exist_ok=True, mode=0o700)
+        findings_path = new_dir / "findings.json"
+        try:
+            findings = contracts.make_findings(fix["source"], attempt, fix["items"])
+            if not findings_path.exists():
+                findings_path.write_text(json.dumps(findings, indent=2) + "\n", encoding="utf-8")
+            contracts.load(findings_path, contracts.validate_findings)
+        except contracts.ContractError as error:
+            return self.attention(task_id, "findings", str(error))
+        task_md = new_dir / "task.md"
+        if not task_md.exists():
+            task_md.write_text(self.fix_text(task, new_id, new_dir, findings), encoding="utf-8")
+        successor = dict(packet, task_id=new_id, objective="Fix round %d for %s: %s findings" % (attempt, unit.upper(), fix["source"]))
+        with ledger(self.ledger_path) as data:
+            if data["tasks"][task_id]["status"] != "RELEASED":
+                release(data, task_id, "superseded by fix round " + new_id)
+            claim(data, successor)
+            bound = data["tasks"][new_id]["runtime_id"]
+        if not bound:
+            runtime_id = self.hand_over(task, new_id, task_md, findings_path)
+            with ledger(self.ledger_path) as data:
+                bind(data, new_id, str(runtime_id))
+        self.mark(task_id, gate="superseded", fix_task=new_id)
+        event("fix round %s for %s from %s findings" % (new_id, packet["worker"], fix["source"]))
+
+    def hand_over(self, task, new_id, task_md, findings_path):
+        packet = task["packet"]
+        name = packet["worker"]
+        if self.pane_alive(name):
+            resumed = runtime_call(self.lead, "resume", {"name": name, "task": "Read %s and follow it." % task_md})
+            return resumed.get("address") or task["runtime_id"]
+        original = self.run_dir / packet["unit"] / "task.md"
+        spawned = runtime_call(self.lead, "spawn", {
+            "kind": "worker", "name": name, "cwd": packet["checkout"], "cli": packet["backend"],
+            "model": packet["model"], "effort": packet["effort"],
+            "task": "Read %s and follow it. Its work is already in this checkout; this is a fix round: read the findings at %s "
+                    "and the round's brief at %s, then fix only what the findings name." % (original, findings_path, task_md)})
+        event("pane of %s is gone; spawned a fresh worker for %s" % (name, new_id))
+        return spawned.get("address") or spawned.get("assignment_id") or name
+
+    def fix_text(self, task, new_id, new_dir, findings):
+        packet = task["packet"]
+        return "\n".join([
+            "Contract: %s" % (self.run_dir / "contract.md"),
+            "Report: %s" % (new_dir / "report.json"),
+            "",
+            "# Fix round %d for %s (task %s): %s findings" % (findings["attempt"], packet["unit"].upper(), new_id, findings["source"]),
+            "",
+            "Original task: %s. Use task_id `%s` in your report." % (self.run_dir / packet["unit"] / "task.md", new_id),
+            "Same checkout and branch: %s on %s. Work only here; edit only: %s." % (
+                packet["checkout"], task["checkout_at_claim"]["branch"], ", ".join(packet["owns"])),
+            "Findings, verbatim, also in %s. Fix only these:" % (new_dir / "findings.json"),
+            "",
+            *["- " + describe(item) for item in findings["items"]],
+            "",
+            "Commit and push to the same branch; open no new pull request. Run before you report COMPLETE: %s." % (
+                "; ".join(packet["checks"]) or "the repository's full CI gate"),
+            "Report review_rounds 0: the driver counts failed rounds.",
+            ""])
 
     def dispatch_ready(self, plan):
         with ledger(self.ledger_path) as data:
@@ -683,6 +973,7 @@ def main():
     sub.add_argument("--gate", action="append", default=[], help="CI command a worker must pass (repeatable)")
     sub.add_argument("--state-dir", default="~/.local/state/orchestrate", help="Holds <slug>.json and the <slug>/ run directory")
     sub.add_argument("--models-file", default="~/.claude/CLAUDE.md", help="File holding the 'Model classes' table")
+    sub.add_argument("--converge", default=str(CONVERGE), help="converge.py used to gate each report")
     sub.add_argument("--wait-seconds", type=int, default=60, help="Longest one wait blocks before the plan is re-read")
     args = parser.parse_args()
     if args.command == "run":
