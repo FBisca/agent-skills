@@ -15,7 +15,7 @@ Three documents, three jobs: the **PRD**, when there is one, says why and for wh
 
 A PRD is not a gate. Plan an idea or task from the request and whatever sources exist; the request itself is a source. Suggest `/to-spec` only when the work hinges on a product decision (who it is for, what users get, whether to build it) that no PRD settles, and keep planning unless the user chooses to write one. A product question that surfaces later goes to the PRD owner, or to the user when there is no PRD, not into the plan.
 
-Dispatch a fresh-context subagent to gather. It lists every source with its link (the request, the PRD if any, the Linear project and issues, the vault project note and its decision notes, RFCs, the living spec for the area), extracts each decision they already settle with its source, and reads the code the feature touches. When a decision depends on real data (backfill, migration, existing records), it runs read-only queries and returns the counts and edge cases: empty sets, conflicts, departed or archived owners.
+Dispatch a fresh-context Sonnet subagent to gather. It lists every source with its link (the request, the PRD if any, the Linear project and issues, the vault project note and its decision notes, RFCs, the living spec for the area), extracts each decision they already settle with its source, and reads the code the feature touches. When a decision depends on real data (backfill, migration, existing records), it runs read-only queries and returns the counts and edge cases: empty sets, conflicts, departed or archived owners.
 
 Done when the subagent has returned the Sources table and every settled decision with its source.
 
@@ -43,9 +43,9 @@ Slug: `<slug>`. Living spec: `docs/specs/<area>.md`. Status: AWAITING APPROVAL.
 ## Risks          (security, performance, migration, rollback: each covered or n/a)
 ## Seams          (where tests attach: the highest existing seam, as few as possible)
 ## Tickets
-| # | What it delivers | Satisfies | Blocked by | Paths | Owner | Status |
-|---|---|---|---|---|---|---|
-| T1 | <end-to-end behaviour> | S1, S2 | none | src/feature/, tests/feature.test.ts | agent | TO-DO |
+| # | What it delivers | Satisfies | Blocked by | Paths | Tier | Owner | Status |
+|---|---|---|---|---|---|---|---|
+| T1 | <end-to-end behaviour> | S1, S2 | none | src/feature/, tests/feature.test.ts | standard | agent | TO-DO |
 ```
 
 Each scenario is one observable behaviour that a test would catch if it broke. IDs are `S<n>`, with an optional letter suffix (`S4a`). Every requirement becomes a scenario; one you can't phrase as WHEN/THEN is an open decision, so take it back to step 2.
@@ -59,6 +59,11 @@ Each ticket is a **tracer bullet**: one narrow path through every layer it needs
 - **Satisfies**: the S-IDs the ticket makes true, as a comma list or a range (`S1–S4`). Every scenario sits in some ticket's Satisfies.
 - **Blocked by**: the ticket IDs that must merge first, comma-separated, or `none`. A blocked ticket branches from main after its blockers merge; stacked branches break under squash merge.
 - **Paths**: the repo-relative files, directories (ending `/`) or globs the ticket may change, comma-separated. The build is fenced to them.
+- **Tier**: the cheapest worker that can finish the ticket, which `/orchestrate` maps to a model and effort.
+  - `brief`: the change is fully specified once a strong planner writes it down (files, anchors, exact code, the test). A cheap model types it with no reconnaissance.
+  - `standard`: the worker reads the code and designs within settled Decisions.
+  - `hard`: open design inside the ticket, subtle concurrency, security or data migration.
+  - A person-owned ticket leaves Tier empty.
 - **Owner**: `agent` for code. Every step a person runs or approves (prod data apply, sign-off, deploy) is its own ticket with that person as Owner; a code PR never closes it.
 - **Status**: TO-DO, IN PROGRESS or COMPLETE.
 
@@ -70,4 +75,4 @@ Done when every scenario appears in some ticket's Satisfies.
 
 ## 5. Approve
 
-Show the plan path, the decisions, the scenarios and the tickets table, then stop for one approval. Build nothing at this point. On approval, set `Status: APPROVED <date>` and hand off to `/orchestrate <plan-path>`.
+Show the plan path, the decisions, the scenarios and the tickets table with each Tier, then stop for one approval. Build nothing at this point. On approval, set `Status: APPROVED <date>` and hand off to `/orchestrate <plan-path>`.

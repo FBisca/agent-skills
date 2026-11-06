@@ -100,6 +100,10 @@ def ledger(path):
                     os.unlink(tmp_path)
 
 
+TIERS = ("brief", "standard", "hard")
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
+
+
 def claim(data, packet):
     require(isinstance(packet, dict), "packet must be an object")
     for key in ("task_id", "worker", "plan", "objective", "checkout", "backend"):
@@ -111,6 +115,10 @@ def claim(data, packet):
     require(all(isinstance(c, str) and c.strip() for c in packet["acceptance"]), "invalid acceptance criterion")
     require(isinstance(packet.get("depends_on", []), list)
             and all(isinstance(c, str) for c in packet.get("depends_on", [])), "invalid dependency list")
+    if "tier" in packet:
+        require(packet["tier"] in TIERS, "tier must be one of " + ", ".join(TIERS))
+        require(isinstance(packet.get("model"), str) and packet["model"].strip(), "a tiered packet needs its model")
+        require(packet.get("effort") in EFFORTS, "effort must be one of " + ", ".join(EFFORTS))
     snapshot = checkout_snapshot(packet["checkout"])
     packet = dict(packet, checkout=snapshot["checkout"])
     paths = owned_paths(packet)
@@ -169,6 +177,12 @@ def checkpoint(data, task_id, report):
         require(all(c["outcome"] == "passed" for c in checks), "complete result has failed or omitted checks")
         passed = {c["command"] for c in checks if c["outcome"] == "passed"}
         require(set(task["packet"]["checks"]).issubset(passed), "required checks are missing")
+        if "tier" in task["packet"]:
+            rounds = report.get("review_rounds")
+            require(isinstance(rounds, int) and not isinstance(rounds, bool) and rounds >= 0,
+                    "a tiered task needs review_rounds")
+            require(isinstance(report.get("usage"), str) and report["usage"].strip(),
+                    "a tiered task needs usage (the runtime's metric line, or unknown)")
         task["finished_at"] = now()
     elif status == "BLOCKED":
         require(report.get("blocker") and report["remaining"], "blocked result needs a blocker and next action")
@@ -178,8 +192,12 @@ def checkpoint(data, task_id, report):
 
 
 def task_summary(task):
-    return {"task_id": task["packet"]["task_id"], "worker": task["packet"]["worker"],
-            "status": task["status"], "runtime_id": task["runtime_id"]}
+    summary = {"task_id": task["packet"]["task_id"], "worker": task["packet"]["worker"],
+               "status": task["status"], "runtime_id": task["runtime_id"]}
+    for key in ("tier", "model", "effort"):
+        if key in task["packet"]:
+            summary[key] = task["packet"][key]
+    return summary
 
 
 def context_verdict(sample, reserve, max_age=300):

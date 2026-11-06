@@ -108,6 +108,21 @@ class WorkflowTests(unittest.TestCase):
                 app.checkpoint(self.data, "validation", report)
         self.assertEqual(self.data["tasks"]["validation"]["status"], "ACTIVE")
 
+    def test_tiered_packet_records_model_and_completion_records_usage(self):
+        tiered = dict(self.packet, tier="brief", model="MiniMax-M3.1-Flash", effort="low")
+        for bad in (dict(tiered, tier="easy"), dict(tiered, effort="huge"), dict(tiered, model="")):
+            with self.assertRaises(ValueError):
+                app.claim(self.data, bad)
+        app.claim(self.data, tiered)
+        app.bind(self.data, "validation", "child")
+        for bad in (self.report(), dict(self.report(), review_rounds=-1, usage="unknown"),
+                    dict(self.report(), review_rounds=1, usage="")):
+            with self.assertRaises(ValueError):
+                app.checkpoint(self.data, "validation", bad)
+        done = app.checkpoint(self.data, "validation", dict(self.report(), review_rounds=1, usage="unknown"))
+        self.assertEqual(done["status"], "COMPLETE")
+        self.assertEqual(app.task_summary(done)["tier"], "brief")
+
     def test_blocked_retains_ownership_and_release_requires_stopped(self):
         app.claim(self.data, self.packet)
         app.bind(self.data, "validation", "child")

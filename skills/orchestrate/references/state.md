@@ -25,7 +25,7 @@ Write a compact JSON packet with the available file-edit tool. Example shape:
 }
 ```
 
-These are example values, not paths or commands to run unchanged. `owns` accepts literal relative files/directories, including `.` for exclusive ownership of the checkout. It rejects globs and paths that escape the checkout. Add focused context, peers, exclusions, or plan excerpts to the packet when useful. `worker` is a logical worker key; `runtime_id` is bound after native dispatch.
+These are example values, not paths or commands to run unchanged. A packet built from a plan ticket adds `"tier"` (`brief`, `standard` or `hard`), `"model"` and `"effort"` (`low` through `max`), the values the spawn uses; `claim` rejects a tier without a valid model and effort. `owns` accepts literal relative files/directories, including `.` for exclusive ownership of the checkout. It rejects globs and paths that escape the checkout. Add focused context, peers, exclusions, or plan excerpts to the packet when useful. `worker` is a logical worker key; `runtime_id` is bound after native dispatch.
 
 ```sh
 python3 <skill-dir>/scripts/orchestrate.py claim --state <ledger> --packet <packet.json>
@@ -66,7 +66,7 @@ The worker sends a compact result. The orchestrator normalizes it to JSON and re
 python3 <skill-dir>/scripts/orchestrate.py checkpoint --state <ledger> --task <task-id> --report <report.json>
 ```
 
-`COMPLETE` requires a runtime ID, confirmed acceptance, no remaining work, and passing evidence for every required check. This validates the report contract; it does not independently prove the report true. `PARTIAL` keeps ownership. `BLOCKED` also requires `blocker` and a next action in `remaining`. A failed or omitted check needs a `reason`. Store short decisions, not transcripts. Optional `context` and `presentation` objects can preserve observed telemetry and verified runtime IDs.
+`COMPLETE` requires a runtime ID, confirmed acceptance, no remaining work, and passing evidence for every required check. For a tiered packet it also requires `review_rounds` (a whole number, 0 when the first review passed) and `usage` (the runtime's metric line for the worker, or `unknown`); these are the evidence for changing a tier's model. This validates the report contract; it does not independently prove the report true. `PARTIAL` keeps ownership. `BLOCKED` also requires `blocker` and a next action in `remaining`. A failed or omitted check needs a `reason`. Store short decisions, not transcripts. Optional `context` and `presentation` objects can preserve observed telemetry and verified runtime IDs.
 
 If replacing a worker for an unfinished task, first stop or confirm it stopped using native tools. Then:
 

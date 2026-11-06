@@ -5,7 +5,7 @@ description: Build an approved plan's tickets with implementer agents, gate each
 
 # Orchestrate
 
-**Input:** an approved plan (`docs/plans/*.plan.md`) with these fields: `Slug: <slug>`; `Living spec: docs/specs/<area>.md`; `Status: APPROVED`; a Decisions table; scenario lines `- **S<n>** WHEN …, THEN …`; a `## Tickets` table whose IDs are `T<n>` with the columns Satisfies, Blocked by, Paths, Owner and Status.
+**Input:** an approved plan (`docs/plans/*.plan.md`) with these fields: `Slug: <slug>`; `Living spec: docs/specs/<area>.md`; `Status: APPROVED`; a Decisions table; scenario lines `- **S<n>** WHEN …, THEN …`; a `## Tickets` table whose IDs are `T<n>` with the columns Satisfies, Blocked by, Paths, Owner and Status, plus Tier (a plan without it reads every ticket as `standard`).
 **Output:** each ticket merged and COMPLETE, the scenarios archived into the living spec, and the plan set to `Status: ARCHIVED`.
 **Hand-off:** new scope goes back to `/start-planning`.
 
@@ -27,6 +27,21 @@ Own ticket selection, dependencies, worker assignments, and integration. Delegat
 - Use the assigned checkout. A blocked ticket branches from `main` after its blockers merge; stacked branches break under squash merge. Use isolated worktrees for concurrent tickets. Preserve existing user changes.
 - Verify predecessor behavior in the **actual implementation checkout**. A completion message or commit in another checkout is insufficient.
 - Set file or directory ownership per worker. Serialize overlapping edits in one checkout. Assign an integration owner for changes across branches or repositories.
+
+## Match the model to the tier
+
+Each ticket's Tier picks the worker's model and effort, passed to `spawn` as `cli`, `model` and `effort`:
+
+| Tier | Worker | Effort |
+| --- | --- | --- |
+| `brief` | `cli: "minimax"` (MiniMax-M3.1-Flash); Claude fallback `model: "haiku"`. Only through [chunked dispatch](references/chunked-dispatch.md): an Opus planner writes the briefs first | low |
+| `standard` | `cli: "claude"`, `model: "sonnet"`; or `cli: "codex"`, whose worker profile runs gpt-6.1-terra | medium |
+| `hard` | `cli: "claude"`, `model: "opus"` | high |
+
+- Choose the model at spawn, the cache boundary. Resume a worker only for a ticket of the same tier; a different tier gets a fresh worker.
+- A review fix round with more than ~5 findings runs through chunked dispatch, whatever the ticket's tier.
+- Move a ticket up one tier when it fails two review rounds or two cutoffs at its tier. Record the move in the ledger packet.
+- Change the table only on ledger evidence: at least 3 completed tickets of that tier on the new model, compared on review rounds and usage.
 - Existing authorization persists. Starting a worker does not authorize commits, PRs, merges, cleanup, or work beyond the selected scope.
 
 ## Select the execution mode
@@ -78,7 +93,7 @@ If spawn delivery is uncertain, inspect the runtime and reservation before retry
 - Wait for PR checks with `~/bin/wait-checks <owner>/<repo>#<pr> ...` (full path: shells started before `~/bin` existed don't have it on PATH), run in the background: one PASS/FAIL line per PR, plus the failed log on FAIL. Do not write ad-hoc watch loops.
 - Workers run relevant checks and return commands, outcomes, and omissions. Inspect their diff and evidence. Rerun checks only for changed inputs, integration, failures, or unresolved risk.
 - Require verification on the combined result when repositories or branches interact. A pane state of `idle` or `done` is not evidence of task completion.
-- Record the result and handoff. Use available runtime usage data for comparisons; include parent and worker costs, cache use, time, and correctness. Never claim measured savings without measurements.
+- Record the result and handoff. The ledger packet carries `tier`, `model` and `effort`; the completing report carries `review_rounds` and `usage`, the runtime's metric line for that worker from `wait` or `status`, or `unknown` when the runtime has none. Include parent and worker costs, cache use, time and correctness in comparisons. Never claim measured savings without measurements.
 
 ## 2. Gate each ticket
 
@@ -86,7 +101,7 @@ When a worker reports a ticket done, run three gates in the implementation check
 
 1. **Converge:** call the Skill tool with `converge` for this ticket (`--ticket T<n>`). Its checks: every scenario has a test named with its S-ID, every changed test carries an ID, and the diff stays inside the ticket's Paths. Any FAIL blocks.
 2. **Review:** dispatch a fresh-context reviewer subagent (Opus) with only the ticket, its scenarios, the plan's Decisions, the diff, and the repo's AGENTS.md / CLAUDE.md. It checks correctness and the repo's conventions, plus a security lens when the diff touches auth, permissions or personal data. Its blocking findings go back to the worker.
-3. **Gaps (advice):** a fresh-context subagent compares the plan with the diff and classifies each gap as missing, partial, contradicts or unrequested. Each gap becomes a new ticket. It never blocks and never edits code.
+3. **Gaps (advice):** a fresh-context Sonnet subagent compares the plan with the diff and classifies each gap as missing, partial, contradicts or unrequested. Each gap becomes a new ticket. It never blocks and never edits code.
 
 A ticket is COMPLETE when converge passes, the review has no blocking finding, and CI is green on its PR. Record the commands and results in its row.
 
