@@ -65,7 +65,7 @@ class ArchiveTests(ArchiveFixture, unittest.TestCase):
 
     def test_S15_nothing_archives_while_an_agent_ticket_is_unfinished(self):
         """code-driven-orchestrator/S15"""
-        self.waits([self.worker_done(tests=True), self.reviewer_done()])
+        self.waits([self.worker_done(tests=True), self.reviewer_done(), self.decide_step("t1", "skip")])
         self.prs(["CLOSED"])
         self.run_driver()
         self.assertNotIn(ARCHIVE, self.spawned())
@@ -111,13 +111,10 @@ class MetricsTests(ArchiveFixture, unittest.TestCase):
         self.assertIn("t1", result.stderr)
         self.assertIn("lead model turns: 0", result.stderr)
 
-    def test_S16_a_paused_run_counts_escalations_and_decider_calls(self):
+    def test_S16_a_run_with_a_request_counts_the_escalation_and_no_decider_calls(self):
         """code-driven-orchestrator/S16"""
         blocked = report_wait("demo-t1", "blocked", "cannot reach the database")
-        decided = report_wait("demo-t1-decide", "complete")
-        decided["write"] = [[str(self.run_dir / "t1" / "decision.json"),
-                             json.dumps({"contract": 1, "action": "ask user", "reason": "scope", "question": "which?"})]]
-        self.waits([blocked, decided])
+        self.waits([blocked, self.decide_step("t1", "skip")])
         self.run_driver()
         t1 = json.loads((self.run_dir / "metrics.json").read_text(encoding="utf-8"))["tickets"]["t1"]
-        self.assertEqual((t1["decider_calls"], t1["escalations"], t1["usage"]), (1, 2, "unknown"))
+        self.assertEqual((t1["decider_calls"], t1["escalations"], t1["usage"]), (0, 1, "unknown"))

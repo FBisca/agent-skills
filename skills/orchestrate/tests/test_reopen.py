@@ -1,4 +1,5 @@
-"""A pause is answered through the plan: TO-DO retries the unit, COMPLETE hands it back done, anything else holds."""
+"""A unit the Lead parked (mark blocked) is answered through the plan: TO-DO retries it, COMPLETE hands it back done,
+anything else holds."""
 
 import unittest
 
@@ -9,12 +10,12 @@ from fixtures import plan_text
 class ReopenTests(DeciderFixture, unittest.TestCase):
     def pause(self, rows=("T1",)):
         self.plan.write_text(plan_text(rows=rows), encoding="utf-8")
-        self.waits([self.blocked(), self.decided("ask user", question="which way?")])
+        self.waits([self.blocked(), self.decided("mark blocked", reason="which way?")])
         self.run_driver()
-        self.assertEqual(self.task()["gate"], "attention")
+        self.assertEqual(self.task()["gate"], "blocked")
 
     def set_status(self, new):
-        text = self.plan.read_text(encoding="utf-8").replace("IN PROGRESS · needs you: which way?", new)
+        text = self.plan.read_text(encoding="utf-8").replace("BLOCKED · which way?", new)
         self.assertIn(new, text)
         self.plan.write_text(text, encoding="utf-8")
 
@@ -27,7 +28,7 @@ class ReopenTests(DeciderFixture, unittest.TestCase):
         self.set_status("TO-DO")
         self.waits([])
         self.run_driver()
-        self.assertEqual(self.spawned(), ["demo-t1", "demo-t1-decide", "demo-t1"])
+        self.assertEqual(self.spawned(), ["demo-t1", "demo-t1"])
         self.assertEqual(self.stops(), ["demo-t1"])
         tasks = self.ledger()["tasks"]
         self.assertEqual(tasks["t1"]["status"], "RELEASED")
@@ -41,7 +42,7 @@ class ReopenTests(DeciderFixture, unittest.TestCase):
         self.set_status("COMPLETE 2026-11-07")
         self.waits([])
         self.run_driver()
-        self.assertEqual(self.spawned(), ["demo-t1", "demo-t1-decide", "demo-t2"])
+        self.assertEqual(self.spawned(), ["demo-t1", "demo-t2"])
         self.assertEqual(self.ledger()["tasks"]["t1"]["status"], "RELEASED")
         self.assertEqual(self.plan_status("T1"), "COMPLETE 2026-11-07")
 
@@ -51,9 +52,9 @@ class ReopenTests(DeciderFixture, unittest.TestCase):
         self.set_status("IN PROGRESS · thinking")
         self.waits([])
         self.run_driver()
-        self.assertEqual(self.spawned(), ["demo-t1", "demo-t1-decide"])
+        self.assertEqual(self.spawned(), ["demo-t1"])
         self.assertEqual(self.stops(), [])
-        self.assertEqual(self.task()["gate"], "attention")
+        self.assertEqual(self.task()["gate"], "blocked")
 
 
 if __name__ == "__main__":

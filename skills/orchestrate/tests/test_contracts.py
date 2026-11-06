@@ -91,16 +91,30 @@ class ContractTests(unittest.TestCase):
 
     def test_S11_a_decision_names_one_action_from_the_menu(self):
         """code-driven-orchestrator/S11"""
-        for action in ("retry", "retry one class up", "fresh worker", "mark blocked", "skip", "ask user"):
+        for action in ("retry", "retry one class up", "fresh worker", "mark blocked", "skip"):
             decision = {"contract": 1, "action": action, "reason": "because"}
             self.assertEqual(contracts.validate_decision(decision)["action"], action)
-        ask = {"contract": 1, "action": "ask user", "reason": "scope", "question": "which API?"}
-        self.assertEqual(contracts.validate_decision(ask)["question"], "which API?")
+        answer = {"contract": 1, "action": "answer", "reason": "scope", "answer": "use the public API"}
+        self.assertEqual(contracts.validate_decision(answer)["answer"], "use the public API")
+        self.rejects(contracts.validate_decision, {"contract": 1, "action": "answer", "reason": "x"}, "answer")
+        self.rejects(contracts.validate_decision, {"contract": 1, "action": "skip", "reason": "x", "answer": "y"}, "answer")
+        self.rejects(contracts.validate_decision, {"contract": 1, "action": "ask user", "reason": "x"}, "action")
         self.rejects(contracts.validate_decision, {"contract": 1, "action": "retry now", "reason": "x"}, "action")
         self.rejects(contracts.validate_decision, {"contract": 1, "action": "skip"}, "reason")
         self.rejects(contracts.validate_decision, {"contract": 2, "action": "skip", "reason": "x"}, "contract")
-        self.rejects(contracts.validate_decision, {"contract": 1, "action": "skip", "reason": "x", "question": 3}, "question")
         self.rejects(contracts.validate_decision, ["skip"], "object")
+
+    def test_S1_a_request_names_the_unit_the_event_the_evidence_and_the_menu(self):
+        request = contracts.make_request("t1", "t1", "blocked", "cannot reach the database", ["/run/t1/task.md"])
+        self.assertEqual((request["status"], request["decision"], request["menu"]),
+                         ("open", None, list(contracts.ACTIONS)))
+        resolved = dict(request, status="resolved", decision="/run/t1/decision.json")
+        self.assertEqual(contracts.validate_request(resolved)["status"], "resolved")
+        self.rejects(contracts.validate_request, dict(request, status="resolved"), "decision")
+        self.rejects(contracts.validate_request, dict(request, decision="/x"), "decision")
+        self.rejects(contracts.validate_request, dict(request, menu=["retry", "ask user"]), "menu")
+        self.rejects(contracts.validate_request, dict(request, evidence="a"), "evidence")
+        self.rejects(contracts.validate_request, dict(request, reason=""), "reason")
 
 
 if __name__ == "__main__":

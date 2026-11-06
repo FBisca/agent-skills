@@ -50,6 +50,14 @@ class GateFixture(RunFixture):
     def task(self, task_id="t1"):
         return self.ledger()["tasks"][task_id]
 
+    def request(self, unit="t1"):
+        """The unit's first request.json: what the Lead was asked."""
+        return json.loads((self.run_dir / unit / "request.json").read_text(encoding="utf-8"))
+
+    def skipped(self):
+        """A wait step in which the Lead drops the unit, so a run that ends in a request can finish."""
+        return self.decide_step("t1", "skip")
+
     def spawned(self):
         return [c["args"]["name"] for c in self.calls("spawn")]
 
@@ -89,13 +97,13 @@ class GateTests(GateFixture, unittest.TestCase):
         self.assertEqual(self.spawned()[:1], ["demo-t1"])
         self.assertEqual(self.task("t1r1")["gate"], "done")
 
-    def test_S5_a_third_failure_goes_to_the_decider_not_a_third_fix_round(self):
+    def test_S5_a_third_failure_goes_to_the_lead_not_a_third_fix_round(self):
         """code-driven-orchestrator/S5"""
-        self.waits([self.worker_done(), self.worker_done("t1r1"), self.worker_done("t1r2")])
+        self.waits([self.worker_done(), self.worker_done("t1r1"), self.worker_done("t1r2"), self.skipped()])
         self.run_driver()
         self.assertEqual(len(self.calls("resume")), 2)
-        self.assertEqual(self.task("t1r2")["gate"], "deciding")
-        self.assertEqual(self.spawned(), ["demo-t1", "demo-t1-decide"])
+        self.assertEqual(self.request()["task"], "t1r2")
+        self.assertEqual(self.spawned(), ["demo-t1"])
         self.assertEqual(self.ledger_unit("t1")["failed_reviews"], 3)
 
     def test_S6_passing_converge_spawns_a_fresh_large_reviewer_with_paths_only(self):
@@ -171,49 +179,47 @@ class GateTests(GateFixture, unittest.TestCase):
 
     def test_S6a_a_missing_report_does_not_advance_the_ticket(self):
         """code-driven-orchestrator/S6a"""
-        self.waits([self.worker_done(report=False)])
+        self.waits([self.worker_done(report=False), self.skipped()])
         self.run_driver()
         self.assertEqual(self.spawned(), ["demo-t1"])
         self.assertEqual(self.calls("resume"), [])
         task = self.task()
-        self.assertEqual(task["gate"], "attention")
-        self.assertIn("report.json", task["attention"][0]["reason"])
+        self.assertEqual(self.request()["event"], "report")
+        self.assertIn("report.json", self.request()["reason"])
         self.assertNotIn("report", task)
 
     def test_S6a_an_invalid_report_does_not_advance_the_ticket(self):
         """code-driven-orchestrator/S6a"""
-        self.waits([self.worker_done(report=self.report("t1", contract=2))])
+        self.waits([self.worker_done(report=self.report("t1", contract=2)), self.skipped()])
         self.run_driver()
         self.assertEqual(self.spawned(), ["demo-t1"])
-        task = self.task()
-        self.assertEqual(task["gate"], "attention")
-        self.assertIn("contract", task["attention"][0]["reason"])
+        self.assertEqual(self.request()["event"], "report")
+        self.assertIn("contract", self.request()["reason"])
 
     def test_S6a_a_report_for_another_task_does_not_advance_the_ticket(self):
         """code-driven-orchestrator/S6a"""
-        self.waits([self.worker_done(report=self.report("t9"))])
+        self.waits([self.worker_done(report=self.report("t9")), self.skipped()])
         self.run_driver()
-        self.assertEqual(self.task()["gate"], "attention")
+        self.assertEqual(self.request()["event"], "report")
         self.assertEqual(self.calls("resume"), [])
 
     def test_S6a_an_invalid_review_does_not_start_a_fix_round(self):
         """code-driven-orchestrator/S6a"""
         broken = self.review(verdict="pass", major=[MAJOR])
-        self.waits([self.worker_done(tests=True), self.reviewer_done(broken)])
+        self.waits([self.worker_done(tests=True), self.reviewer_done(broken), self.skipped()])
         self.run_driver()
         self.assertEqual(self.calls("resume"), [])
-        task = self.task()
-        self.assertEqual(task["gate"], "attention")
-        self.assertIn("review.json", task["attention"][0]["reason"])
+        self.assertEqual(self.request()["event"], "review")
+        self.assertIn("review.json", self.request()["reason"])
 
     def test_S6a_a_missing_review_does_not_advance_the_ticket(self):
         """code-driven-orchestrator/S6a"""
         step = self.reviewer_done()
         step["write"] = []
-        self.waits([self.worker_done(tests=True), step])
+        self.waits([self.worker_done(tests=True), step, self.skipped()])
         self.run_driver()
         self.assertEqual(self.calls("resume"), [])
-        self.assertEqual(self.task()["gate"], "attention")
+        self.assertEqual(self.request()["event"], "review")
 
 
 if __name__ == "__main__":
