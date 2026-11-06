@@ -40,7 +40,7 @@ The driver parses the "Model classes" table in `~/.claude/CLAUDE.md` (`--models-
 
 A **unit** keeps one ID across every attempt at it: the first build and each fix round. The driver handles a known gate failure itself, up to two fix rounds. The unit's third failed gate, a worker that blocks or exits without a report, or conflicting reports go to a fresh large-class **decider**, which writes `decision.json` with one action from a fixed menu (the menu and schema live in `scripts/contracts.py`). The driver validates and applies it. A unit gets at most two decider calls; after that, and for any scope or product question, the ticket pauses for the user (`needs you: …` in its Status, and `attention.md`).
 
-The user picks among the options in `attention.md`: one class up, re-plan, or split the unit. They answer by editing the plan.
+The user picks among the options in `attention.md`: one class up, re-plan, or split the unit. They answer by setting the ticket's Status in the plan (TO-DO retries it as a fresh attempt of the same unit; COMPLETE marks it done by hand).
 
 `show --unit <id>` still sums a unit's failed review rounds and cutoffs for diagnosis.
 

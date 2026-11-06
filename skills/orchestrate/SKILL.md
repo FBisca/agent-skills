@@ -24,14 +24,14 @@ You are a launcher. A Python driver runs the build, so the loop costs no model t
 2. Exit 2 means the plan is not runnable: relay what it says is missing and stop. Nothing was started.
 3. Otherwise report the pane name it prints (`orchestrate-<slug>`) and end the turn. If a driver with that name is already live, `launch` starts no second one and prints the same name.
 
-Do not run the loop, wait on workers, write `task.md`, review or gate tickets, merge, or archive. The driver does all of it through the `agent-runtime` tools: dispatch, converge, review, fix rounds, CI, merge, unblocking, archive. For its options and behavior: `orchestrate.py run --help`.
+Do not run the loop, wait on workers, write `task.md`, review or gate tickets, merge, or archive. The driver does all of it through the `agent-runtime` tools: dispatch, converge, review, fix rounds, CI, unblocking once you merge, archive. It never merges a PR. For its options and behavior: `orchestrate.py run --help`.
 
 The pane is named `orchestrate-<slug>`: Herdr names allow only `a-z 0-9 - _`, so the hyphen replaces the colon.
 
 ## What the user sees
 
 - The Herdr pane `orchestrate-<slug>` is the lead. Workers `<slug>-t<n>` nest under it and appear on their ticket rows in the Plans panel.
-- Status cells of the plan, including `IN PROGRESS · needs you: <reason>` when a ticket waits for a person.
+- Status cells of the plan. A ticket stops at `IN PROGRESS · awaiting merge (<PR>)` until the user merges its PR; the driver then marks it COMPLETE and unblocks the tickets that depend on it. Status also reads `IN PROGRESS · needs you: <reason>` when a ticket waits for a person.
 - `<run>/attention.md`: everything waiting for the user, with the question or action.
 - `<run>/gaps.md`: the advisory gaps review of the whole plan, written once at archive. Gaps become plan edits, your call.
 - `<run>/metrics.json`: per ticket the route, review rounds, escalations, decider calls and worker usage; lead model turns are 0. Written when the run stops.
@@ -56,12 +56,15 @@ The schemas and field lists live in `scripts/contracts.py` only.
 
 ## When the run pauses
 
-The driver pauses a ticket when it needs a person: a scope or product question, a person-owned ticket (prod data, sign-off, deploy), or a failure the decider sends up. The user answers either way:
+The driver pauses a ticket when it needs a person: a scope or product question, a person-owned ticket (prod data, sign-off, deploy), or a failure the decider could not settle. The decider is one-shot: it never takes a reply. Read `<run>/attention.md`, decide, and answer through the plan Status:
 
-- edit the plan: set the ticket's Status, or add a Decisions row or a scenario; or
-- answer the decider's question named in `attention.md`.
+- `TO-DO`: retry. On its next round the driver stops the held worker if live, releases the assignment, and dispatches a fresh attempt of the same unit (escalation counts carry over).
+- `COMPLETE <date>`: done by hand. Its dependents and the archive unblock.
+- Any other edit leaves the ticket paused.
 
-The driver re-reads the plan every round and picks the answer up; nothing needs to be re-launched. If the driver pane has ended, run `launch` again: all state is in the ledger and the plan, so it re-attaches.
+If the answer changes scope, add a Decisions row or a ticket (with its scenarios) to the plan first.
+
+When only paused tickets remain, the run exits. After editing the plan, run `launch` again: the driver re-reads the plan and the ledger, so it picks up where it stopped. A run still alive picks the edit up on its next round.
 
 ## References
 

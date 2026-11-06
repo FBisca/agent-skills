@@ -647,7 +647,7 @@ class Driver:
             except PlanError as error:
                 event("plan not runnable, nothing dispatched this round: %s" % error)
                 plan = None
-            dispatched = (self.dispatch_ready(plan) + self.attend_people(plan) + self.start_archive(plan)) if plan else 0
+            dispatched = (self.reopen_parked(plan) + self.dispatch_ready(plan) + self.attend_people(plan) + self.start_archive(plan)) if plan else 0
             if idle and not dispatched and not acted and not self.awaiting():
                 return
             wait = {"target": "all", "timeout": self.args.wait_seconds}
@@ -1479,9 +1479,46 @@ class Driver:
             count += 1
         return count
 
-    def dispatch(self, plan, ticket):
+    def reopen_parked(self, plan):
+        """The user answers a pause through the plan (S4). A parked ticket whose Status is now TO-DO gets a fresh
+        attempt of the same unit; one now COMPLETE (done by hand) is released so its dependents and the archive
+        proceed. Any other Status leaves it parked. The held worker is stopped first, when its pane is live."""
+        by_id = {t["#"].lower(): t for t in plan["tickets"]}
+        with ledger(self.ledger_path) as data:
+            parked = [(task_id, json.loads(json.dumps(task))) for task_id, task in data["tasks"].items()
+                      if task.get("gate") in PARKED and task["status"] not in ("COMPLETE", "RELEASED")]
+        count = 0
+        for task_id, task in parked:
+            ticket = by_id.get(task["packet"]["unit"])
+            if not ticket or not is_agent(ticket):
+                continue
+            status = ticket["Status"].strip().upper()
+            if not status.startswith(("TO-DO", "COMPLETE")):
+                continue
+            again = status.startswith("TO-DO")
+            if self.pane_alive(task["packet"]["worker"]):
+                runtime_call(self.lead, "stop", {"name": task["packet"]["worker"]})
+            with ledger(self.ledger_path) as data:
+                release(data, task_id, "the user set %s to %s" % (ticket["#"], "TO-DO: retry" if again else "COMPLETE: done by hand"))
+            event("%s %s" % (ticket["#"], "reopened by the user: fresh attempt" if again else "completed by hand"))
+            if not again:
+                continue
+            with ledger(self.ledger_path) as data:
+                taken = set(data["tasks"])
+            attempt = next(n for n in range(1, 1000) if "%sp%d" % (task["packet"]["unit"], n) not in taken)
+            try:
+                self.dispatch(plan, ticket, "%sp%d" % (task["packet"]["unit"], attempt))
+            except (ValueError, OSError, subprocess.TimeoutExpired) as error:
+                self.errors.append("%s: %s" % (ticket["#"], error))
+                event("%s not re-dispatched: %s" % (ticket["#"], error))
+                continue
+            count += 1
+        return count
+
+    def dispatch(self, plan, ticket, task_id=None):
         number = ticket["#"][1:]
-        task_id, name = "t" + number, worker_name(plan["slug"], number)
+        name = worker_name(plan["slug"], number)
+        task_id = task_id or "t" + number
         size, difficulty = ticket["Size"].strip(), ticket["Difficulty"].strip()
         klass, effort = MATRIX[(size, difficulty)]
         checkout = self.worktree(name, "feat/" + name)
@@ -1490,7 +1527,7 @@ class Driver:
                   "checkout": str(checkout), "backend": self.args.cli,
                   "owns": [p.strip() for p in ticket["Paths"].split(",") if p.strip()],
                   "acceptance": [re.sub(r"^- \*\*(S\d+[a-z]?)\*\*", r"\1:", s) for s in scenarios],
-                  "checks": list(self.args.gate), "depends_on": [], "unit": task_id, "size": size,
+                  "checks": list(self.args.gate), "depends_on": [], "unit": "t" + number, "size": size,
                   "difficulty": difficulty, "class": klass, "effort": effort, "model": self.models[klass]}
         with ledger(self.ledger_path) as data:
             claim(data, packet)
