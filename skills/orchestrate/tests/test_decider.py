@@ -1,7 +1,10 @@
 """The decider, the pause with attention.md, person-owned tickets, and a loop that never spins on a paused unit."""
 
 import json
+import os
+import sys
 import unittest
+from unittest import mock
 
 from fixtures import ROWS, RunFixture, assignment, load_script, plan_text, report_wait, resume_id, spawn_id, wait_result
 
@@ -306,6 +309,21 @@ class PauseTests(DeciderFixture, unittest.TestCase):
         self.assertEqual(len(self.calls("wait")), 3)
         self.assertEqual(self.task()["gate"], "attention")
         self.assertEqual(len(self.task()["attention"]), 1)
+
+    def test_S12_a_parked_assignment_counts_as_no_progress_so_the_loop_backs_off(self):
+        """code-driven-orchestrator/S12"""
+        spec = load_script()
+        busy = wait_result([assignment("demo-t1", "blocked"), assignment("demo-t3")], reason="timeout")
+        self.waits([self.blocked(), self.decided("ask user", question="which way?")] + [busy] * 4
+                   + [wait_result([assignment("demo-t3", "complete")])])
+        env = dict(os.environ, PATH=str(self.home) + os.pathsep + os.environ["PATH"], FAKE_RUNTIME_HOME=str(self.home))
+        argv = ["orchestrate", "run", str(self.plan), "--state-dir", str(self.state_dir), "--models-file", str(self.models),
+                "--wait-seconds", "1", "--idle-interval", "30"]
+        with mock.patch.dict(os.environ, env), mock.patch.object(sys, "argv", argv), mock.patch.object(spec.time, "sleep") as sleep:
+            spec.main()
+        self.assertGreaterEqual(sleep.call_count, 4)
+        self.assertEqual({c.args[0] for c in sleep.call_args_list}, {30})
+        self.assertEqual(self.spawned(), ["demo-t1", "demo-t3", "demo-t1-decide"])
 
     def test_S12_another_units_open_assignment_still_counts_as_work(self):
         """code-driven-orchestrator/S12"""
