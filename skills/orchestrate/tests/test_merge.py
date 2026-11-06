@@ -96,13 +96,13 @@ class MergeTests(GateFixture, unittest.TestCase):
         self.assertIn("neither pushed nor merged", self.task()["cleanup"])
 
     def test_D2_review_rounds_comes_from_the_drivers_gate_history_not_the_worker(self):
-        """code-driven-orchestrator/D2"""
+        """code-driven-orchestrator/S6"""
         self.waits([self.worker_done(tests=True, report=self.report("t1", review_rounds=5)), self.reviewer_done()])
         self.run_driver()
         self.assertEqual(self.task()["report"]["review_rounds"], 0)
 
     def test_D5_a_review_of_another_commit_is_a_contract_error(self):
-        """code-driven-orchestrator/D5"""
+        """code-driven-orchestrator/S6a"""
         self.waits([self.worker_done(tests=True), self.reviewer_done(self.review(commit="deadbee"))])
         self.run_driver()
         task = self.task()
