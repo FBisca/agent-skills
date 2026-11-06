@@ -519,6 +519,7 @@ TURN_ENDED = ("idle", "done", "unreported", "error")  # runtime_state of a `work
 ATTENTION = {"blocked": "reported blocked", "decision": "asked for a decision",
              "exited": "ended without a report"}
 FIX_ROUND = re.compile(r"r\d+$")
+ARCHIVE = "archive"  # the unit (and task id) of the archive worker
 CONVERGE = Path(__file__).resolve().parents[2] / "converge" / "scripts" / "converge.py"
 
 
@@ -542,6 +543,63 @@ def describe(item):
     if isinstance(item, dict):
         return "%s: %s:%s %s. Fix: %s" % (item["id"], item["file"], item["line"], item["problem"], item["fix"])
     return str(item)
+
+
+ARCHIVE_ACCEPTANCE = [
+    "The living spec exists with a `Paths:` line and every scenario as a requirement with provenance",
+    "Every test is renamed from S<n> to <area>/R<m>",
+    "The plan's Status is ARCHIVED",
+    "converge --final passes",
+]
+
+
+def sum_usage(values):
+    """One ticket's usage from the runtime's per-assignment values: numeric fields summed, else the values as listed;
+    `unknown` when the runtime reported none."""
+    if not values:
+        return "unknown"
+    if all(isinstance(v, dict) and all(type(x) in (int, float) for x in v.values()) for v in values):
+        total = {}
+        for value in values:
+            for key, number in value.items():
+                total[key] = total.get(key, 0) + number
+        return total
+    return values if len(values) > 1 else values[0]
+
+
+def run_metrics(data, slug):
+    """Per unit: route, failed review rounds, escalations (events sent to a decider plus pauses for the user), decider
+    calls, worker usage; the lead's own model turns are 0 by construction (the driver is code)."""
+    units = {}
+    for task in data["tasks"].values():
+        unit = task["packet"].get("unit") or task["packet"]["task_id"]
+        entry = units.setdefault(unit, {"tasks": []})
+        entry["tasks"].append(task)
+    tickets = {}
+    for unit, entry in units.items():
+        tasks = entry["tasks"]
+        route = {key: tasks[0]["packet"].get(key) for key in ("size", "difficulty", "class", "model")}
+        ids = {a.get("assignment_id") for t in tasks for a in (t, t.get("review") or {}, t.get("decision") or {})} - {None}
+        usage = [data.get("usage", {})[i] for i in sorted(ids) if i in data.get("usage", {})]
+        tickets[unit] = {
+            "route": route,
+            "review_rounds": sum((t.get("report") or {}).get("review_rounds", 0) for t in tasks),
+            "escalations": sum(1 for t in tasks if t.get("event")) + sum(len(t.get("attention") or []) for t in tasks),
+            "decider_calls": sum(1 for t in tasks if t.get("decision")),
+            "usage": sum_usage(usage)}
+    return {"slug": slug, "lead": {"model_turns": 0}, "tickets": tickets}
+
+
+def metrics_table(metrics):
+    rows = [("unit", "route", "rounds", "escalations", "deciders", "usage")]
+    for unit, row in metrics["tickets"].items():
+        route = "%s·%s" % (row["route"]["size"], row["route"]["difficulty"])
+        usage = row["usage"] if isinstance(row["usage"], str) else json.dumps(row["usage"], separators=(",", ":"))
+        rows.append((unit, route, str(row["review_rounds"]), str(row["escalations"]), str(row["decider_calls"]), usage))
+    widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]
+    lines = ["  ".join(c.ljust(w) for c, w in zip(r, widths)).rstrip() for r in rows]
+    return "\n".join(["[orchestrate] metrics for %s" % metrics["slug"], *lines,
+                      "lead model turns: %d" % metrics["lead"]["model_turns"]])
 
 
 class Driver:
@@ -583,13 +641,13 @@ class Driver:
     def loop(self):
         idle = False
         while True:
+            acted = self.advance()  # before the plan is read: a merge it makes unblocks work in this same round
             try:
                 plan = self.read_plan()
             except PlanError as error:
                 event("plan not runnable, nothing dispatched this round: %s" % error)
                 plan = None
-            acted = self.advance()
-            dispatched = (self.dispatch_ready(plan) + self.attend_people(plan)) if plan else 0
+            dispatched = (self.dispatch_ready(plan) + self.attend_people(plan) + self.start_archive(plan)) if plan else 0
             if idle and not dispatched and not acted and not self.awaiting():
                 return
             wait = {"target": "all", "timeout": self.args.wait_seconds}
@@ -621,6 +679,7 @@ class Driver:
         """Turn the runtime's reports into gate stages. Agents are told apart by assignment id only: the runtime's
         messages carry no name, and a resumed worker keeps its name across assignments."""
         self.received = bool(result.get("messages"))
+        self.record_usage(result.get("assignments") or [])
         for message in result.get("messages") or []:
             kind, assignment_id = message.get("kind"), message.get("assignment_id")
             if not assignment_id or kind not in ("complete", "blocked", "decision", "failed"):
@@ -629,6 +688,9 @@ class Driver:
                 self.on_agent_attention(assignment_id, "exited" if kind == "failed" else kind, message.get("text") or "")
                 continue
             with ledger(self.ledger_path) as data:
+                if (data.get("gaps") or {}).get("assignment_id") == assignment_id:
+                    data["gaps"]["ended"] = True  # advisory: nothing waits on it any more
+                    continue
                 for task in data["tasks"].values():
                     if task["status"] in ("COMPLETE", "RELEASED"):
                         continue
@@ -663,8 +725,10 @@ class Driver:
     def parked_assignments(self):
         """Assignment ids that belong to a parked unit (paused, blocked or skipped): open in the runtime, not work."""
         with ledger(self.ledger_path) as data:
+            gaps = data.get("gaps") or {}
             return {agent.get("assignment_id") for task in data["tasks"].values() if task.get("gate") in PARKED
-                    for agent in (task, task.get("review") or {}, task.get("decision") or {})} - {None}
+                    for agent in (task, task.get("review") or {}, task.get("decision") or {})} - {None} | (
+                        {gaps.get("assignment_id")} if gaps.get("ended") else set())
 
     def on_agent_attention(self, assignment_id, kind, text="", quiet=False):
         """An agent reported `blocked` or `decision`, or its assignment failed or ended with no report. Each event is
@@ -683,6 +747,10 @@ class Driver:
                 elif not gate and task.get("assignment_id") == assignment_id:
                     hit = (task_id, "worker", task["packet"]["worker"])
         if not hit:
+            with ledger(self.ledger_path) as data:
+                if (data.get("gaps") or {}).get("assignment_id") == assignment_id:
+                    data["gaps"]["ended"] = True  # the gaps review is advisory: it never blocks or pauses anything
+                    return event("gaps reviewer %s: %s" % (ATTENTION[kind], text or "no gaps.md"))
             if not quiet:
                 event("assignment %s %s: already handled or not an open assignment" % (assignment_id, ATTENTION[kind]))
             return
@@ -745,6 +813,8 @@ class Driver:
         self.write_status(unit, "IN PROGRESS · needs you: " + cell(reason))
 
     def write_status(self, ticket_id, status):
+        if ticket_id == ARCHIVE.upper():
+            return  # the archive unit has no ticket row
         try:
             set_status(self.plan_path, ticket_id, status)
         except (ValueError, OSError) as error:
@@ -803,13 +873,19 @@ class Driver:
             self.record_report(task_id, report)
         except ValueError as error:
             return self.attention(task_id, "report", "the ledger rejected the report: %s" % error)
-        # A fix round is gated by converge alone; the first build also gets one review.
-        self.mark(task_id, gate="ready-for-ci" if FIX_ROUND.search(task_id) else "converged")
+        # A fix round is gated by converge alone, and so is the archive (converge --final); a first build gets one review.
+        self.mark(task_id, gate="ready-for-ci" if FIX_ROUND.search(task_id) or task["packet"]["unit"] == ARCHIVE else "converged")
 
     def converge(self, packet):
         """Run converge for the unit's ticket: ("PASS" | "FAIL" | "error", FAIL lines or the reason)."""
-        argv = [sys.executable, str(self.args.converge), str(self.plan_path), "--ticket", packet["unit"].upper(),
-                "--repo", packet["checkout"], "--base", self.args.base]
+        if packet["unit"] == ARCHIVE:
+            # The archive branch holds the plan with Status ARCHIVED; fall back to the driver's copy if it is untracked.
+            copy = Path(packet["checkout"]) / self.plan_rel()
+            argv = [sys.executable, str(self.args.converge), str(copy if copy.exists() else self.plan_path), "--final",
+                    "--repo", packet["checkout"], "--base", self.args.base]
+        else:
+            argv = [sys.executable, str(self.args.converge), str(self.plan_path), "--ticket", packet["unit"].upper(),
+                    "--repo", packet["checkout"], "--base", self.args.base]
         result = subprocess.run(argv, capture_output=True, text=True, timeout=300)
         lines = [line for line in result.stdout.splitlines() if line.startswith("FAIL")]
         if result.returncode == 0:
@@ -922,7 +998,7 @@ class Driver:
             event("%s checks of %s still running; polling again" % (task_id, ref))
             return False
         if result.returncode == 0:
-            set_status(self.plan_path, self.ticket_name(task_id), "IN PROGRESS · awaiting merge (%s)" % url)
+            self.put_status(task_id, "IN PROGRESS · awaiting merge (%s)" % url)
             self.mark(task_id, gate="awaiting-merge", pr=url)
             return None
         lines = [line for line in result.stdout.splitlines() if line.strip()]
@@ -931,6 +1007,11 @@ class Driver:
                                                   or "wait-checks exited %d" % result.returncode)[:500])
         report = contracts.load(self.task(task_id)["report_path"], contracts.validate_report)
         self.fail_gate(task_id, report, "ci", lines[:60])
+
+    def put_status(self, task_id, status):
+        """The ticket's Status cell; the archive unit has no row."""
+        if self.task(task_id)["packet"]["unit"] != ARCHIVE:
+            set_status(self.plan_path, self.ticket_name(task_id), status)
 
     def ticket_name(self, task_id):
         return self.task(task_id)["packet"]["unit"].upper()
@@ -958,8 +1039,7 @@ class Driver:
         except ValueError as error:
             return self.attention(task_id, "merge", "merged, but the ledger rejected COMPLETE: %s" % error)
         commit = (state.get("mergeCommit") or {}).get("oid", "")
-        set_status(self.plan_path, self.ticket_name(task_id),
-                   "COMPLETE %s · merged %s%s" % (now()[:10], url, " (%s)" % commit[:7] if commit else ""))
+        self.put_status(task_id, "COMPLETE %s · merged %s%s" % (now()[:10], url, " (%s)" % commit[:7] if commit else ""))
         self.mark(task_id, gate="cleanup", merge_commit=commit)
         event("%s merged: %s" % (task_id, url))
 
@@ -1213,6 +1293,150 @@ class Driver:
             "Report review_rounds 0: the driver counts failed rounds.",
             ""])
 
+    # ---- archive: one more worker unit, a gaps review, then converge --final ----------------------------------
+    # When every agent ticket is COMPLETE the driver claims unit `archive` (small, simple) like a ticket and starts
+    # a medium gaps reviewer beside it. The archive's report is gated by `converge --final` alone (a failure is a
+    # fix round), then the normal CI and merge gates. The gaps review is advisory: `<run>/gaps.md`, never a gate.
+
+    def plan_rel(self):
+        try:
+            return self.plan_path.relative_to(self.repo).as_posix()
+        except ValueError:
+            return "docs/plans/" + self.plan_path.name
+
+    def start_archive(self, plan):
+        agents = [t for t in plan["tickets"] if is_agent(t)]
+        if not agents or not all(is_done(t) for t in agents) or ARCHIVE in self.failed:
+            return 0
+        with ledger(self.ledger_path) as data:
+            held = data["tasks"].get(ARCHIVE)
+        if held and held["runtime_id"]:
+            return 0
+        try:
+            self.dispatch_archive(plan, agents)
+        except (ValueError, OSError, subprocess.TimeoutExpired) as error:
+            self.failed.add(ARCHIVE)
+            self.errors.append("archive: %s" % error)
+            event("archive not dispatched: %s" % error)
+            return 0
+        self.start_gaps(plan)
+        return 1
+
+    def dispatch_archive(self, plan, agents):
+        name = self.slug[:32 - len("-archive")].rstrip("-_") + "-archive"
+        klass, effort = MATRIX[("small", "simple")]
+        checkout = self.worktree(name, "feat/" + name)
+        owns = ["docs/specs/", "docs/plans/"]
+        for ticket in agents:
+            owns += [p.strip() for p in ticket["Paths"].split(",") if p.strip() and p.strip() not in owns]
+        packet = {"task_id": ARCHIVE, "worker": name, "plan": str(self.plan_path),
+                  "objective": "Archive the plan into the living spec", "checkout": str(checkout), "backend": self.args.cli,
+                  "owns": owns, "acceptance": ARCHIVE_ACCEPTANCE, "checks": list(self.args.gate), "depends_on": [],
+                  "unit": ARCHIVE, "size": "small", "difficulty": "simple", "class": klass, "effort": effort,
+                  "model": self.models[klass]}
+        with ledger(self.ledger_path) as data:
+            claim(data, packet)
+        task_dir = self.run_dir / ARCHIVE
+        task_dir.mkdir(exist_ok=True, mode=0o700)
+        task_md = task_dir / "task.md"
+        if not task_md.exists():
+            task_md.write_text(self.archive_text(plan, packet, task_dir), encoding="utf-8")
+        spawned = runtime_call(self.lead, "spawn", {
+            "kind": "worker", "name": name, "task": "Read %s and follow it." % task_md, "cwd": str(checkout),
+            "cli": self.args.cli, "model": packet["model"], "effort": effort})
+        with ledger(self.ledger_path) as data:
+            bind(data, ARCHIVE, str(spawned.get("address") or spawned.get("assignment_id") or name))
+            data["tasks"][ARCHIVE]["assignment_id"] = assignment_of(spawned)
+        self.spawned.append(name)
+        event("spawned %s (%s, %s, %s)" % (name, klass, packet["model"], effort))
+
+    def archive_text(self, plan, packet, task_dir):
+        text = self.plan_path.read_text(encoding="utf-8")
+        found = re.search(r"Living spec:\s*`([^`]+)`", text)
+        spec = found.group(1) if found else "docs/specs/%s.md" % self.slug
+        area = Path(spec).stem
+        return "\n".join([
+            "Contract: %s" % (self.run_dir / "contract.md"),
+            "Report: %s" % (task_dir / "report.json"),
+            "",
+            "# Archive %s into its living spec" % self.slug,
+            "",
+            "Plan: %s (repo path `%s`)." % (self.plan_path, self.plan_rel()),
+            "Checkout: %s on branch feat/%s (new, from %s). Work only here. If the plan file is not tracked there, "
+            "copy it from the path above first." % (packet["checkout"], packet["worker"], self.args.base),
+            "Owns (edit nothing else): %s." % ", ".join(packet["owns"]),
+            "",
+            "Steps:",
+            "- Create the living spec `%s` if it is missing. Its first lines are `# %s` and `Paths: src/area/, tests/area/**`: "
+            "the comma-separated code paths the area covers. Converge fails a spec without a parseable `Paths:` line." % (
+                spec, area.title()),
+            "- Append each scenario below as a requirement with the next free number and its provenance: "
+            "`- **R4** WHEN ..., THEN ... (from %s/S3)`." % self.slug,
+            "- Rename each test's `S<n>` to `%s/R<m>`: in the test name, or in a Python test's docstring first line." % area,
+            "- Set the plan's `Status: ARCHIVED %s`." % now()[:10],
+            "- Run before you report COMPLETE: %s. Then open a pull request against %s." % (
+                "; ".join(packet["checks"]) or "the repository's full CI gate", self.args.base.partition("/")[2]),
+            "The driver then runs `converge.py --final` on this branch; a FAIL comes back as a fix round.",
+            "",
+            "Scenarios, verbatim:",
+            "",
+            *plan["scenarios"].values(),
+            ""])
+
+    def start_gaps(self, plan):
+        """Spawn the advisory gaps reviewer once. Its failure never blocks anything."""
+        with ledger(self.ledger_path) as data:
+            if data.get("gaps"):
+                return
+            merges = [(tid, t.get("pr"), t.get("merge_commit")) for tid, t in data["tasks"].items() if t.get("merge_commit")]
+        name = self.slug[:32 - len("-gaps")].rstrip("-_") + "-gaps"
+        path, task_md = self.run_dir / "gaps.md", self.run_dir / "gaps-task.md"
+        task_md.write_text("\n".join([
+            "# Gaps review of %s: advisory, paths only" % self.slug,
+            "",
+            "Read these yourself; nothing is pasted here.",
+            "- Plan: %s (its Decisions, Scenarios, Risks and Out of scope)" % self.plan_path,
+            "- Repository: %s; the built work is merged on %s" % (self.repo, self.args.base),
+            *["- Merged %s: %s %s" % (tid, pr or "no PR url", (commit or "")[:12]) for tid, pr, commit in merges],
+            "",
+            "Look for what the plan promised and the final code lacks: a scenario with no real test, a decision not "
+            "reflected, a risk left open, behaviour nobody asked for. Findings become plan edits, so be specific.",
+            "Advisory only: it blocks nothing. Touch nothing in the repository.",
+            "",
+            "Write %s for the user: one line per gap (missing, partial, contradicts, unrequested) with the file or "
+            "scenario it concerns. If there are none, say so." % path,
+            "Then call the agent-runtime `report` tool with kind=complete and one line: `<n> gaps - %s`." % path,
+            ""]), encoding="utf-8")
+        try:
+            spawned = runtime_call(self.lead, "spawn", {
+                "kind": "worker", "name": name, "task": "Read %s and follow it." % task_md, "cwd": str(self.repo),
+                "cli": self.args.cli, "model": self.models["medium"], "effort": "medium"})
+        except (ValueError, OSError, subprocess.TimeoutExpired) as error:
+            event("gaps reviewer not started: %s" % error)
+            gaps = {"name": name, "path": str(path), "ended": True, "error": str(error)}
+        else:
+            gaps = {"name": name, "path": str(path), "assignment_id": assignment_of(spawned), "ended": False}
+            event("spawned %s (medium, %s, medium)" % (name, self.models["medium"]))
+        with ledger(self.ledger_path) as data:
+            data["gaps"] = gaps
+
+    # ---- metrics: what a run cost, from the ledger and the runtime's own usage numbers ----------------------
+
+    def record_usage(self, assignments):
+        """Keep the `usage` the runtime attaches to an assignment; nothing is ever estimated."""
+        seen = {a["assignment_id"]: a["usage"] for a in assignments if a.get("assignment_id") and a.get("usage") is not None}
+        if seen:
+            with ledger(self.ledger_path) as data:
+                data.setdefault("usage", {}).update(seen)
+
+    def report_metrics(self):
+        with ledger(self.ledger_path) as data:
+            data = json.loads(json.dumps(data))
+        metrics = run_metrics(data, self.slug)
+        (self.run_dir / "metrics.json").write_text(json.dumps(metrics, indent=2) + "\n", encoding="utf-8")
+        print(metrics_table(metrics), file=sys.stderr, flush=True)
+        return metrics
+
     def dispatch_ready(self, plan):
         with ledger(self.ledger_path) as data:
             tasks = data["tasks"]
@@ -1325,7 +1549,10 @@ def drive(args):
     require(args.max_workers >= 1, "--max-workers must be at least 1")
     driver = Driver(args)
     driver.start()
-    driver.loop()
+    try:
+        driver.loop()
+    finally:
+        driver.report_metrics()
     return {"slug": driver.slug, "lead": driver.lead, "spawned": driver.spawned, "errors": driver.errors}
 
 

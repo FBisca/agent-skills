@@ -331,6 +331,33 @@ class ConvergeTests(unittest.TestCase):
     def test_S17h_status_must_not_merely_mention_approved(self):
         self.assert_refused(PLAN.replace("Status: APPROVED", "Status: DRAFT (was APPROVED)"), "APPROVED")
 
+    def test_final_accepts_an_archived_plan(self):
+        """code-driven-orchestrator/S15"""
+        code, out, err = self.refuse(PLAN.replace("APPROVED", "ARCHIVED"))
+        self.assertNotIn("REFUSED", out + err)
+        self.assertIn(code, (0, 1))
+
+    def test_ticket_and_other_statuses_still_refuse_under_the_archived_rule(self):
+        """code-driven-orchestrator/S15"""
+        self.assert_refused(PLAN.replace("APPROVED", "ARCHIVED"), "ARCHIVED", "--ticket", "T1")
+        self.assert_refused(PLAN.replace("APPROVED", "DRAFT"), "DRAFT", "--final")
+
+    def test_final_exempts_exactly_the_plan_file_from_scope_when_the_plan_lives_elsewhere(self):
+        """code-driven-orchestrator/S15"""
+        with tempfile.TemporaryDirectory() as other:
+            plan = Path(other) / "p.plan.md"
+            plan.write_text(PLAN.replace("APPROVED", "ARCHIVED"))
+            self.write("docs/plans/p.plan.md", PLAN.replace("APPROVED", "ARCHIVED"))
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                app.main([str(plan), "--repo", str(self.repo), "--final"])
+            self.assertIn("PASS scope", out.getvalue())
+            self.write("docs/plans/other.plan.md", "x\n")
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                app.main([str(plan), "--repo", str(self.repo), "--final"])
+            self.assertIn("FAIL scope: docs/plans/other.plan.md", out.getvalue())
+
     def test_S17h_refuses_plan_without_scenarios(self):
         self.assert_refused(PLAN.replace("- **S", "- S"), "scenario")
 

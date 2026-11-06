@@ -11,7 +11,7 @@ description: Deterministic gate that checks a ticket or a whole plan against its
 
 ## What it reads
 
-- **Plan header:** `Slug: \`<slug>\``, and `Status:` anywhere on a line. "Approved" means the first word after `Status:` is `APPROVED`.
+- **Plan header:** `Slug: \`<slug>\``, and `Status:` anywhere on a line. "Approved" means the first word after `Status:` is `APPROVED`; `--final` also accepts `ARCHIVED`, since the archive branch sets it, and exempts that plan file (`docs/plans/<plan file name>`) from the scope check.
 - **Scenario lines:** `- **S<n>** WHEN …, THEN …` (also `S2a`). These are the IDs to cover.
 - **`## Tickets` table:** IDs `T<n>`; `Satisfies` (comma lists, or ranges like `S1–S9` expanded over declared IDs in order); `Paths` (comma-separated repo-relative files, globs, or directories ending `/`).
 - **Living specs** `docs/specs/<area>.md`: one line `Paths: src/area/, tests/area/**` (backticks allowed around items), and requirement lines `- **R4** WHEN …, THEN … (from <slug>/S3)`.
