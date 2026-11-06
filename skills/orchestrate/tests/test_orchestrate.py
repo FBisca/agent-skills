@@ -108,12 +108,15 @@ class WorkflowTests(unittest.TestCase):
                 app.checkpoint(self.data, "validation", report)
         self.assertEqual(self.data["tasks"]["validation"]["status"], "ACTIVE")
 
-    def test_tiered_packet_records_model_and_completion_records_usage(self):
-        tiered = dict(self.packet, tier="brief", model="MiniMax-M3.1-Flash", effort="low")
-        for bad in (dict(tiered, tier="easy"), dict(tiered, effort="huge"), dict(tiered, model="")):
+    def test_routed_packet_records_its_cell_and_completion_records_usage(self):
+        routed = dict(self.packet, size="small", difficulty="simple", **{"class": "small"},
+                      effort="low", model="any-small-model")
+        for bad in (dict(routed, size="huge"), dict(routed, difficulty="hard"), dict(routed, **{"class": "tiny"}),
+                    dict(routed, effort="huge"), dict(routed, model=""),
+                    {k: v for k, v in routed.items() if k != "difficulty"}):
             with self.assertRaises(ValueError):
                 app.claim(self.data, bad)
-        app.claim(self.data, tiered)
+        app.claim(self.data, routed)
         app.bind(self.data, "validation", "child")
         for bad in (self.report(), dict(self.report(), review_rounds=-1, usage="unknown"),
                     dict(self.report(), review_rounds=1, usage="")):
@@ -121,7 +124,7 @@ class WorkflowTests(unittest.TestCase):
                 app.checkpoint(self.data, "validation", bad)
         done = app.checkpoint(self.data, "validation", dict(self.report(), review_rounds=1, usage="unknown"))
         self.assertEqual(done["status"], "COMPLETE")
-        self.assertEqual(app.task_summary(done)["tier"], "brief")
+        self.assertEqual(app.task_summary(done)["class"], "small")
 
     def test_blocked_retains_ownership_and_release_requires_stopped(self):
         app.claim(self.data, self.packet)

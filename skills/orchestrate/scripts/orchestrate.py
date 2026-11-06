@@ -100,8 +100,12 @@ def ledger(path):
                     os.unlink(tmp_path)
 
 
-TIERS = ("brief", "standard", "hard")
-EFFORTS = ("low", "medium", "high", "xhigh", "max")
+ROUTE = {"size": ("small", "regular", "big"), "difficulty": ("simple", "complex"),
+         "class": ("small", "medium", "large"), "effort": ("low", "medium", "high", "xhigh", "max")}
+
+
+def routed(packet):
+    return any(key in packet for key in (*ROUTE, "model"))
 
 
 def claim(data, packet):
@@ -115,10 +119,10 @@ def claim(data, packet):
     require(all(isinstance(c, str) and c.strip() for c in packet["acceptance"]), "invalid acceptance criterion")
     require(isinstance(packet.get("depends_on", []), list)
             and all(isinstance(c, str) for c in packet.get("depends_on", [])), "invalid dependency list")
-    if "tier" in packet:
-        require(packet["tier"] in TIERS, "tier must be one of " + ", ".join(TIERS))
-        require(isinstance(packet.get("model"), str) and packet["model"].strip(), "a tiered packet needs its model")
-        require(packet.get("effort") in EFFORTS, "effort must be one of " + ", ".join(EFFORTS))
+    if routed(packet):
+        for key, allowed in ROUTE.items():
+            require(packet.get(key) in allowed, key + " must be one of " + ", ".join(allowed))
+        require(isinstance(packet.get("model"), str) and packet["model"].strip(), "a routed packet needs its model")
     snapshot = checkout_snapshot(packet["checkout"])
     packet = dict(packet, checkout=snapshot["checkout"])
     paths = owned_paths(packet)
@@ -177,12 +181,12 @@ def checkpoint(data, task_id, report):
         require(all(c["outcome"] == "passed" for c in checks), "complete result has failed or omitted checks")
         passed = {c["command"] for c in checks if c["outcome"] == "passed"}
         require(set(task["packet"]["checks"]).issubset(passed), "required checks are missing")
-        if "tier" in task["packet"]:
+        if routed(task["packet"]):
             rounds = report.get("review_rounds")
             require(isinstance(rounds, int) and not isinstance(rounds, bool) and rounds >= 0,
-                    "a tiered task needs review_rounds")
+                    "a routed task needs review_rounds")
             require(isinstance(report.get("usage"), str) and report["usage"].strip(),
-                    "a tiered task needs usage (the runtime's metric line, or unknown)")
+                    "a routed task needs usage (the runtime's metric line, or unknown)")
         task["finished_at"] = now()
     elif status == "BLOCKED":
         require(report.get("blocker") and report["remaining"], "blocked result needs a blocker and next action")
@@ -194,7 +198,7 @@ def checkpoint(data, task_id, report):
 def task_summary(task):
     summary = {"task_id": task["packet"]["task_id"], "worker": task["packet"]["worker"],
                "status": task["status"], "runtime_id": task["runtime_id"]}
-    for key in ("tier", "model", "effort"):
+    for key in (*ROUTE, "model"):
         if key in task["packet"]:
             summary[key] = task["packet"][key]
     return summary
