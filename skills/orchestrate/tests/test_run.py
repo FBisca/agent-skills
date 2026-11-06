@@ -165,6 +165,40 @@ class RunTests(unittest.TestCase):
         self.assertEqual((tasks["t1"]["packet"]["class"], tasks["t1"]["packet"]["unit"]), ("small", "t1"))
         self.assertEqual(tasks["t1"]["packet"]["owns"], ["src/a/"])
 
+    def test_S1_worktree_branches_from_the_fetched_origin_main(self):
+        """code-driven-orchestrator/S1"""
+        other = self.root / "other"
+        self.git(self.root, "clone", "-q", str(self.origin), str(other))
+        (other / "new.txt").write_text("remote\n", encoding="utf-8")
+        self.git(other, "add", ".")
+        self.git(other, "-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "remote")
+        self.git(other, "push", "-q", "origin", "main")
+        remote_head = self.git(other, "rev-parse", "HEAD")
+        (self.repo / "local.txt").write_text("local\n", encoding="utf-8")
+        self.git(self.repo, "add", ".")
+        self.git(self.repo, "-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "local")
+        self.assertNotEqual(self.git(self.repo, "rev-parse", "origin/main"), remote_head)
+        self.plan.write_text(plan_text(rows=("T1",)), encoding="utf-8")
+        self.run_driver()
+        worktree = Path(self.calls("spawn")[0]["args"]["cwd"])
+        self.assertEqual(self.git(worktree, "rev-parse", "HEAD"), remote_head)
+        self.assertTrue((worktree / "new.txt").exists())
+        self.assertFalse((worktree / "local.txt").exists())
+
+    def test_S1_long_slug_gets_a_valid_worker_name_ending_in_the_ticket(self):
+        """code-driven-orchestrator/S1"""
+        slug = "parallel-wait-and-cli-profiles"
+        self.assertEqual(len(slug), 30)
+        self.plan.write_text(plan_text(rows=("T1", "T3")).replace("`demo`", "`%s`" % slug), encoding="utf-8")
+        self.run_driver()
+        names = [c["args"]["name"] for c in self.calls("spawn")]
+        self.assertEqual(len(names), 2)
+        for name, ticket in zip(names, ("t1", "t3")):
+            self.assertRegex(name, r"^[a-z0-9][a-z0-9_-]{0,31}$")
+            self.assertTrue(name.endswith("-" + ticket), name)
+            self.assertTrue(name.startswith("parallel-wait-and-cli-profil"), name)
+        self.assertEqual(importlib_load().worker_name("a" * 27 + "-bcd", 12), "a" * 27 + "-t12")
+
     def test_S1_default_cap_is_three(self):
         """code-driven-orchestrator/S1"""
         self.run_driver()

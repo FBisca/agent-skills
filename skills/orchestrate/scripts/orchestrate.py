@@ -323,6 +323,12 @@ CONTRACT = """# Contract for every task in this run
 """
 
 
+def worker_name(slug, number):
+    """`<slug>-t<n>` within agent-runtime's 32-character name limit; the `-t<n>` suffix always survives."""
+    suffix = "-t" + str(number)
+    return slug[:32 - len(suffix)].rstrip("-_") + suffix
+
+
 def split_row(line):
     line = line.strip()
     if not (line.startswith("|") and line.endswith("|")):
@@ -569,7 +575,7 @@ class Driver:
 
     def dispatch(self, plan, ticket):
         number = ticket["#"][1:]
-        task_id, name = "t" + number, "%s-t%s" % (plan["slug"], number)
+        task_id, name = "t" + number, worker_name(plan["slug"], number)
         size, difficulty = ticket["Size"].strip(), ticket["Difficulty"].strip()
         klass, effort = MATRIX[(size, difficulty)]
         checkout = self.worktree(name, "feat/" + name)
