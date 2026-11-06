@@ -1,9 +1,12 @@
 """CI, merge and cleanup: wait-checks, the merge poll, COMPLETE and dependents, worker stop and worktree removal."""
 
 import json
+import os
+import sys
 import unittest
+from unittest import mock
 
-from fixtures import plan_text
+from fixtures import load_script, plan_text
 from test_gates import GateFixture, MAJOR
 
 PR = "https://github.com/o/r/pull/7"
@@ -59,6 +62,25 @@ class MergeTests(GateFixture, unittest.TestCase):
         self.assertIn("merged " + PR, text)
         self.assertEqual(self.task()["status"], "COMPLETE")
         self.assertEqual(self.wait_checks_log(), ["o/r#7"])
+
+    def test_S9_an_unmerged_pr_backs_off_instead_of_spinning_on_gh(self):
+        """code-driven-orchestrator/S9"""
+        self.prs(["OPEN"] * 6 + ["MERGED"])
+        self.waits([self.worker_done(tests=True), self.reviewer_done()])
+        spec = load_script()
+        env = dict(os.environ, PATH=str(self.home) + os.pathsep + os.environ["PATH"],
+                   FAKE_RUNTIME_HOME=str(self.home), FAKE_PLAN=str(self.plan))
+        argv = ["orchestrate", "run", str(self.plan), "--state-dir", str(self.state_dir),
+                "--models-file", str(self.models), "--wait-seconds", "1", "--idle-interval", "30"]
+        with mock.patch.dict(os.environ, env), mock.patch.object(sys, "argv", argv), \
+                mock.patch.object(spec.time, "sleep") as sleep:
+            spec.main()
+        polls = len([c for c in self.gh_log() if c["argv"][:2] == ["pr", "view"]])
+        self.assertEqual(polls, 7)
+        # the fake wait returns at once, so every no-progress poll must be followed by the idle sleep
+        self.assertGreaterEqual(sleep.call_count, 5)
+        self.assertEqual({c.args[0] for c in sleep.call_args_list}, {30})
+        self.assertEqual(self.task()["status"], "COMPLETE")
 
     def test_S9_a_merged_ticket_makes_its_dependents_dispatchable(self):
         """code-driven-orchestrator/S9"""

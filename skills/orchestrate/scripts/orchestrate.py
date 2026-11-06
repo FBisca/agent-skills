@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import contracts  # noqa: E402
@@ -530,6 +531,8 @@ class Driver:
         self.failed = set()
         self.stuck = set()
         self.receipt = None
+        self.received = False
+        self.sleep = time.sleep  # injectable so tests do not really sleep
 
     def read_plan(self):
         plan = parse_plan(self.plan_path.read_text(encoding="utf-8"))
@@ -570,6 +573,13 @@ class Driver:
             self.receipt = result.get("receipt")
             self.receive(result)
             idle = not result.get("unfinished")
+            if not (dispatched or acted or self.received):
+                self.idle()
+
+    def idle(self):
+        """Back off after an iteration that dispatched, advanced and handled nothing: the runtime's wait returns
+        at once when nothing is unfinished, so a PR awaiting merge or a parked gate would otherwise spin."""
+        self.sleep(self.args.idle_interval)
 
     # ---- gates: a worker's report -> converge -> one review -> fix rounds -----------------------------------
     # The ledger task's `gate` field is the whole state: reported -> converged -> reviewing -> reviewed ->
@@ -578,6 +588,7 @@ class Driver:
 
     def receive(self, result):
         """Turn the runtime's `complete` messages into gate stages. Only names and kinds are read here."""
+        self.received = bool(result.get("messages"))
         names = {a.get("assignment_id"): a.get("name") for a in result.get("assignments") or []}
         for message in result.get("messages") or []:
             name = message.get("name") or names.get(message.get("assignment_id"))
@@ -1082,6 +1093,7 @@ def main():
     sub.add_argument("--converge", default=str(CONVERGE), help="converge.py used to gate each report")
     sub.add_argument("--ci-seconds", type=int, default=600, help="Longest one wait-checks call blocks before the loop moves on")
     sub.add_argument("--wait-seconds", type=int, default=60, help="Longest one wait blocks before the plan is re-read")
+    sub.add_argument("--idle-interval", type=float, default=30, help="Seconds to sleep after an iteration that made no progress")
     args = parser.parse_args()
     if args.command == "run":
         return drive(args)

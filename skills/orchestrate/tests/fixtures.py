@@ -199,7 +199,7 @@ class RunFixture:
                    FAKE_RUNTIME_HOME=str(self.home), FAKE_PLAN=str(self.plan))
         result = subprocess.run(
             [sys.executable, "-B", str(SCRIPT), "run", str(plan or self.plan), "--state-dir", str(self.state_dir),
-             "--models-file", str(self.models), "--wait-seconds", "1", *extra],
+             "--models-file", str(self.models), "--wait-seconds", "1", "--idle-interval", "0", *extra],
             capture_output=True, text=True, env=env, timeout=60)
         self.assertEqual(result.returncode, expect, result.stderr)
         return result
