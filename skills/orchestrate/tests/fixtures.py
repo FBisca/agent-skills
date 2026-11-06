@@ -1,11 +1,13 @@
 """Shared fixtures for the driver tests: a fake agent-runtime, a temp git repo with an origin, a temp plan."""
 
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from unittest import mock
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "orchestrate.py"
@@ -20,12 +22,14 @@ lead = argv[argv.index("--lead") + 1] if "--lead" in argv else None
 args = json.loads(argv[argv.index("--json") + 1]) if "--json" in argv else {}
 with open(os.path.join(home, "calls.jsonl"), "a") as log:
     log.write(json.dumps({"tool": tool, "lead": lead, "args": args}) + "\\n")
+rows = [json.loads(line) for line in open(os.path.join(home, "calls.jsonl"))]
+nth = sum(1 for r in rows if r["tool"] == tool and r["args"].get("name") == args.get("name"))
 if tool == "spawn":
     if args["name"] in json.load(open(os.path.join(home, "refuse.json"))):
         print(json.dumps({"content": [{"type": "text", "text": "name_taken"}], "isError": True}))
         sys.exit(1)
-    print(json.dumps({"name": args["name"], "address": "term-" + args["name"], "parent": "driver",
-                      "assignment_id": "a-" + args["name"]}))
+    print(json.dumps({"worker_id": "w-" + args["name"], "assignment_id": "a-%s%s" % (args["name"], "" if nth == 1 else "-%d" % nth),
+                      "name": args["name"], "address": "term-" + args["name"], "parent": "driver"}))
 elif tool == "wait":
     queue_path = os.path.join(home, "waits.json")
     queue = json.load(open(queue_path))
@@ -50,8 +54,8 @@ elif tool == "status":
 elif tool == "stop":
     print(json.dumps({"name": args["name"], "state": "exited"}))
 elif tool == "resume":
-    print(json.dumps({"name": args["name"], "address": "term-" + args["name"], "parent": "driver",
-                      "assignment_id": "r-" + args["name"]}))
+    print(json.dumps({"worker_id": "w-" + args["name"], "assignment_id": "r%d-%s" % (nth, args["name"]),
+                      "name": args["name"], "address": "term-" + args["name"], "parent": "driver"}))
 else:
     print(json.dumps({}))
 '''
@@ -114,6 +118,72 @@ ROWS = {
     "T4": "| T4 | sign-off | none | none | | | | Felippe | TO-DO |",
     "T5": "| T5 | fifth | S1 | none | src/e/ | small | complex | agent | TO-DO |",
 }
+
+
+# ---- the real shapes of `wait` (agent-runtime server/dispatch_wait.py, dispatch_store.py) ---------------------------
+# A result is {reason, messages, assignments, unfinished: [assignment_id], receipt, more}. An assignment entry is
+# {assignment_id, worker_id, state: working|complete|blocked|decision|failed, name}, plus `runtime_state`
+# (idle|done|unreported|error|...) when `wait` observed the terminal. A message envelope has no name: {message_id,
+# team_id, worker_id, assignment_id, sender, recipient, kind: progress|complete|blocked|decision|failed, text}.
+
+MESSAGES = iter(range(1, 10**6))
+TURN_ENDED = ("idle", "done")
+NEEDS_PERSON = ("unreported", "error")
+
+
+def spawn_id(name, nth=1):
+    """The assignment id the fake runtime gives the nth spawn of `name`."""
+    return "a-" + name + ("" if nth == 1 else "-%d" % nth)
+
+
+def resume_id(name, nth=1):
+    """The assignment id the fake runtime gives the nth resume of `name`."""
+    return "r%d-%s" % (nth, name)
+
+
+def assignment(name, state="working", runtime_state=None, id=None):
+    entry = {"assignment_id": id or spawn_id(name), "worker_id": "w-" + name, "state": state, "name": name}
+    if runtime_state:
+        entry["runtime_state"] = runtime_state
+    return entry
+
+
+def envelope(assignment_entry, kind, text=None):
+    return {"message_id": "m%d" % next(MESSAGES), "team_id": "team", "worker_id": assignment_entry["worker_id"],
+            "assignment_id": assignment_entry["assignment_id"], "sender": assignment_entry["worker_id"],
+            "recipient": "lead", "kind": kind, "text": text or "%s - see run directory" % kind.upper()}
+
+
+def wait_result(assignments=(), messages=(), write=(), replace=(), reason=None):
+    """What `wait(all)` answers, with `reason` derived the way the runtime does unless given."""
+    assignments = [dict(a) for a in assignments]
+    unfinished = [a["assignment_id"] for a in assignments if a["state"] != "complete"]
+    states = {a["state"] for a in assignments}
+    ended = any(a["state"] == "working" and a.get("runtime_state") in TURN_ENDED + NEEDS_PERSON for a in assignments)
+    if reason is None:
+        if not assignments:
+            reason = "messages" if messages else "empty"
+        elif "failed" in states:
+            reason = "failed"
+        elif ended or states & {"blocked", "decision"}:
+            reason = "attention"
+        elif not unfinished:
+            reason = "completed"
+        else:
+            reason = "messages" if messages else "timeout"
+    step = {"reason": reason, "messages": list(messages), "assignments": assignments, "unfinished": unfinished,
+            "receipt": "r%d" % next(MESSAGES), "more": False}
+    if write:
+        step["write"] = [list(w) for w in write]
+    if replace:
+        step["replace"] = [list(r) for r in replace]
+    return step
+
+
+def report_wait(name, kind="complete", text=None, id=None, **extra):
+    """An agent reports `kind`: its assignment takes the matching state and the envelope names it by id."""
+    entry = assignment(name, kind if kind in ("complete", "blocked", "decision", "failed") else "working", id=id)
+    return wait_result([entry], [envelope(entry, kind, text)], **extra)
 
 
 def plan_text(rows=("T1", "T2", "T3", "T4", "T5"), status="APPROVED"):
@@ -214,3 +284,12 @@ def load_script():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+@contextmanager
+def recorded_idles(spec):
+    """Replace `Driver.idle` with a recorder of its interval. Patching `time.sleep` itself would also hit
+    `subprocess` (its timeout loop sleeps ~1 ms), which makes the count and the interval flaky."""
+    intervals = []
+    with mock.patch.object(spec.Driver, "idle", lambda driver: intervals.append(driver.args.idle_interval)):
+        yield intervals

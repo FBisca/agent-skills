@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import unittest
 
-from fixtures import RunFixture, plan_text
+from fixtures import RunFixture, plan_text, report_wait, resume_id, spawn_id
 
 
 MAJOR = {"id": "M1", "file": "src/a/x.py", "line": 7, "problem": "drops the last row", "fix": "include the final row"}
@@ -20,7 +20,6 @@ class GateFixture(RunFixture):
         self.plan.write_text(plan_text(rows=("T1",)), encoding="utf-8")
         self.run_dir = self.state_dir / "demo"
         self.worktree = self.root / "repo.worktrees" / "demo-t1"
-        self.sent = 0
 
     def report(self, task_id, **over):
         return json.dumps(dict({"contract": 1, "task_id": task_id, "status": "COMPLETE", "summary": "done",
@@ -28,16 +27,10 @@ class GateFixture(RunFixture):
                                 "remaining": [], "checks": [], "review_rounds": 0, "usage": "unknown",
                                 "head": "abc1234", "pr": "https://github.com/o/r/pull/7"}, **over))
 
-    def message(self, name, kind="complete"):
-        self.sent += 1
-        return {"messages": [{"message_id": "m%d" % self.sent, "assignment_id": "a-" + name, "kind": kind,
-                              "text": "%s - see run directory" % kind.upper()}],
-                "assignments": [{"name": name, "assignment_id": "a-" + name, "state": kind}],
-                "unfinished": [], "reason": "completed"}
-
     def worker_done(self, task_id="t1", tests=False, report=None, name="demo-t1"):
         """A wait step: the worker wrote its report (and, with tests, a tagged test) and says complete."""
-        step = self.message(name)
+        fix_round = int(task_id.split("r")[1]) if "r" in task_id else 0
+        step = report_wait(name, "complete", id=resume_id(name, fix_round) if fix_round else spawn_id(name))
         step["write"] = []
         if report is not False:
             step["write"].append([str(self.run_dir / task_id / "report.json"), report or self.report(task_id)])
@@ -50,7 +43,7 @@ class GateFixture(RunFixture):
         return json.dumps(dict({"contract": 1, "verdict": "pass", "major": [], "deferred": [], "commit": "abc1234"}, **over))
 
     def reviewer_done(self, review=None):
-        step = self.message("demo-t1-review")
+        step = report_wait("demo-t1-review", "complete")
         step["write"] = [[str(self.run_dir / "t1" / "review.json"), review or self.review()]]
         return step
 
@@ -96,12 +89,13 @@ class GateTests(GateFixture, unittest.TestCase):
         self.assertEqual(self.spawned(), ["demo-t1"])
         self.assertEqual(self.task("t1r1")["gate"], "done")
 
-    def test_S5_a_third_failure_stops_at_the_escalation_hook(self):
+    def test_S5_a_third_failure_goes_to_the_decider_not_a_third_fix_round(self):
         """code-driven-orchestrator/S5"""
         self.waits([self.worker_done(), self.worker_done("t1r1"), self.worker_done("t1r2")])
         self.run_driver()
         self.assertEqual(len(self.calls("resume")), 2)
-        self.assertEqual(self.task("t1r2")["gate"], "escalated")
+        self.assertEqual(self.task("t1r2")["gate"], "deciding")
+        self.assertEqual(self.spawned(), ["demo-t1", "demo-t1-decide"])
         self.assertEqual(self.ledger_unit("t1")["failed_reviews"], 3)
 
     def test_S6_passing_converge_spawns_a_fresh_large_reviewer_with_paths_only(self):
