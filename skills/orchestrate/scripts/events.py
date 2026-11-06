@@ -9,7 +9,9 @@ ledger status changed), `intent` and `agent` (an agent is about to be started / 
 `round` (a failed gate), `escalation` (a unit raised a request for the Lead), `attention` (a unit paused), `decision`, `usage`,
 `idle` (a loop iteration that made no progress), `error`, `wake` (a line for the Lead was written to `wakes.jsonl`),
 `held`, `held-acted` and `held-dropped` (a worker message that arrived while its unit had an open request), `finish`
-(the run ended; `orchestrate.py await` reads it)."""
+(the run ended; `orchestrate.py await` reads it), `contract-error` (a handoff file broke its contract: `where`, `error`),
+`clarification` (an agent listed a question in `clarifications[]`: `finding`, `asked_by`, `note`, `source`), `answers`
+(the implementer was resumed for the answer_required items of a passing review) and `response` (one per answered finding)."""
 
 from datetime import datetime, timezone
 import json

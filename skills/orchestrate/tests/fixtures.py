@@ -39,6 +39,9 @@ elif tool == "wait":
     json.dump(queue, open(queue_path, "w"))
     for path, text in step.pop("write", []):
         os.makedirs(os.path.dirname(path), exist_ok=True)
+        if "@HEAD" in text:  # the sha the unit's checkout is at now, as a reviewer would read it
+            text = text.replace("@HEAD", subprocess.run(["git", "-C", os.environ["FAKE_CHECKOUT"], "rev-parse", "HEAD"],
+                                                        capture_output=True, text=True).stdout.strip())
         open(path, "w").write(text)
     for path, old, new in step.pop("replace", []):
         text = open(path).read()
@@ -274,6 +277,7 @@ class RunFixture:
     def env(self):
         return dict(os.environ, PATH=str(self.home) + os.pathsep + os.environ["PATH"],
                     FAKE_RUNTIME_HOME=str(self.home), FAKE_PLAN=str(self.plan),
+                    FAKE_CHECKOUT=str(self.root / "repo.worktrees" / "demo-t1"),
                     FAKE_EVENTS=str(self.state_dir / "demo" / "events.jsonl"))
 
     def cli(self, *args, timeout=60):
