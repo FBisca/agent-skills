@@ -440,8 +440,30 @@ def check_plan(plan):
         for blocker in re.split(r"[,\s]+", ticket["Blocked by"].strip()):
             if blocker and blocker.lower() != "none" and blocker not in {t["#"] for t in plan["tickets"]}:
                 problems.append("%s: Blocked by %s is not a ticket" % (name, blocker))
+    problems += cycles(plan["tickets"])
     if problems:
         raise PlanError("; ".join(problems))
+
+
+def cycles(tickets):
+    """One problem per cycle in the Blocked by graph, named by the tickets on it."""
+    edges = {t["#"]: [b for b in re.split(r"[,\s]+", t["Blocked by"].strip()) if b and b.lower() != "none"] for t in tickets}
+    found, state = [], {}
+
+    def walk(name, path):
+        state[name] = "open"
+        for blocker in edges.get(name, []):
+            if state.get(blocker) == "open":
+                loop = path[path.index(blocker):] + [blocker] if blocker in path else [name, blocker]
+                found.append("Blocked by has a cycle: " + " -> ".join(loop))
+            elif blocker in edges and blocker not in state:
+                walk(blocker, path + [blocker])
+        state[name] = "done"
+
+    for name in edges:
+        if name not in state:
+            walk(name, [name])
+    return found
 
 
 def set_status(plan_path, ticket_id, status):
@@ -511,11 +533,10 @@ def event(message):
     print("[orchestrate] " + message, file=sys.stderr, flush=True)
 
 
-GATES = ("reported", "converged", "reviewed", "fix-pending", "decide", "decided", "redo-pending",
+GATES = ("reported", "converged", "reviewed", "fix-pending", "requested", "decided", "redo-pending",
          "ready-for-ci", "awaiting-merge", "cleanup")  # ledger `gate` stages the loop acts on
-PARKED = ("attention", "blocked", "skipped")  # nothing runs for the unit until the user acts
+PARKED = ("attention", "blocked", "skipped")  # nothing runs for the unit until the user acts (`attention`: runs of the old driver)
 MAX_FIX_ROUNDS = 2  # a unit's 3rd failed gate goes to Driver.escalate
-MAX_DECIDERS = 2  # decider calls per unit; the next event pauses the unit instead
 TURN_ENDED = ("idle", "done", "unreported", "error")  # runtime_state of a `working` assignment that needs a person
 ATTENTION = {"blocked": "reported blocked", "decision": "asked for a decision",
              "exited": "ended without a report"}
@@ -604,6 +625,7 @@ class Driver:
         self.receipt = None
         self.received = False
         self.sleep = time.sleep  # injectable so tests do not really sleep
+        self.last_plan = None
 
     # ---- the event log: every state change is on disk before the next step -----------------------------------
 
@@ -632,7 +654,7 @@ class Driver:
         return plan
 
     def start(self):
-        plan = self.read_plan()
+        plan = self.last_plan = self.read_plan()
         self.slug = plan["slug"]
         self.models = class_models(self.args.models_file, self.args.cli)
         state_dir = Path(self.args.state_dir).expanduser()
@@ -654,12 +676,11 @@ class Driver:
         idle = False
         while True:
             acted = self.advance()  # before the plan is read: a merge it makes unblocks work in this same round
-            try:
-                plan = self.read_plan()
-            except PlanError as error:
-                event("plan not runnable, nothing dispatched this round: %s" % error)
-                plan = None
-            dispatched = (self.reopen_parked(plan) + self.dispatch_ready(plan) + self.attend_people(plan) + self.start_archive(plan)) if plan else 0
+            plan, valid = self.current_plan()
+            if valid:
+                dispatched = self.reopen_parked(plan) + self.dispatch_ready(plan) + self.attend_people(plan) + self.start_archive(plan)
+            else:  # the last valid plan keeps the work going; what the user's edit might have changed waits for a valid file
+                dispatched = self.dispatch_ready(plan)
             if idle and not dispatched and not acted and not self.awaiting():
                 return
             wait = {"target": "all", "timeout": self.args.wait_seconds}
@@ -675,6 +696,17 @@ class Driver:
             if not (dispatched or acted or self.received):
                 self.idle()
 
+    def current_plan(self):
+        """(plan, valid): the plan file as it stands, or the last valid one with a `plan-invalid` wake for the error.
+        The same error wakes the Lead once; a different one wakes it again."""
+        try:
+            self.last_plan = self.read_plan()
+            return self.last_plan, True
+        except PlanError as error:
+            event("plan not runnable, running on the last valid plan: %s" % error)
+            self.wake("plan-invalid", "plan", "plan-invalid plan: %s -> %s" % (cell(error, 300), self.plan_path), key=str(error))
+            return self.last_plan, False
+
     def idle(self):
         """Back off after an iteration that dispatched, advanced and handled nothing: the runtime's wait returns
         at once when nothing is unfinished, so a PR awaiting merge or a parked gate would otherwise spin."""
@@ -683,10 +715,10 @@ class Driver:
 
     # ---- gates: a worker's report -> converge -> one review -> fix rounds -----------------------------------
     # The ledger task's `gate` field is the whole state: reported -> converged -> reviewing -> reviewed ->
-    # ready-for-ci, or fix-pending -> superseded. An event only a decider can settle (a 3rd failed gate, a worker
-    # that is blocked or asks, or ends with no report) runs decide -> deciding -> decided -> fix-pending
-    # or redo-pending (retry, fresh worker), blocked, skipped, or attention. `attention` is the pause: Status
-    # `needs you`, an `attention.md` entry, nothing else moves. `ready-for-ci` is the seam for the CI gate.
+    # ready-for-ci, or fix-pending -> superseded. An event only the Lead can settle (a 3rd failed gate, a worker
+    # that is blocked or asks, a handoff file that breaks its contract) goes requested -> decided -> fix-pending
+    # or redo-pending (retry, answer, fresh worker), blocked, or skipped. `requested` is the pause: request.json,
+    # a wake, nothing else moves for the unit. `ready-for-ci` is the seam for the CI gate.
 
     def receive(self, result):
         """Turn the runtime's reports into gate stages. Agents are told apart by assignment id only: the runtime's
@@ -700,6 +732,7 @@ class Driver:
             if kind != "complete":
                 self.on_agent_attention(assignment_id, "exited" if kind == "failed" else kind, message.get("text") or "")
                 continue
+            held = None
             with self.book() as data:
                 if (data.get("gaps") or {}).get("assignment_id") == assignment_id:
                     data["gaps"]["ended"] = True  # advisory: nothing waits on it any more
@@ -711,14 +744,16 @@ class Driver:
                     if gate == "reviewing" and task["review"].get("assignment_id") == assignment_id:
                         task["gate"] = "reviewed"
                         break
-                    if gate == "deciding" and task["decision"].get("assignment_id") == assignment_id:
-                        task["gate"] = "decided"
-                        break
                     if not gate and task.get("assignment_id") == assignment_id:
                         task["gate"] = "reported"
                         break
+                    if gate == "requested" and task.get("assignment_id") == assignment_id:
+                        held = (task["packet"]["task_id"], message.get("text") or "")
+                        break
                 else:
                     event("complete from assignment %s matches no open gate" % assignment_id)
+            if held:
+                self.hold(held[0], assignment_id, "complete", held[1])
         self.check_ended(result.get("assignments") or [])
 
     def check_ended(self, assignments):
@@ -745,16 +780,17 @@ class Driver:
 
     def on_agent_attention(self, assignment_id, kind, text="", quiet=False):
         """An agent reported `blocked` or `decision`, or its assignment failed or ended with no report. Each event is
-        handled once: a unit that already has a gate (deciding, paused, reviewing, ...) ignores it. A reviewer or
-        decider that ends silently moves its gate on, so the missing file is reported as a contract error."""
+        handled once: a unit that already has a gate (reviewing, requested, ...) ignores it, except that a `blocked` or
+        `decision` from the worker of a unit with an open request is held (S7). A reviewer that ends silently moves its
+        gate on, so the missing file is reported as a contract error."""
         hit = None
         with self.book() as data:
             for task_id, task in data["tasks"].items():
                 gate = task.get("gate")
                 if task["status"] in ("COMPLETE", "RELEASED"):
                     continue
-                if gate == "deciding" and task["decision"].get("assignment_id") == assignment_id:
-                    hit = (task_id, "decider", task["decision"]["name"])
+                if gate == "requested" and task.get("assignment_id") == assignment_id:
+                    hit = (task_id, "held", task["packet"]["worker"])
                 elif gate == "reviewing" and task["review"].get("assignment_id") == assignment_id:
                     hit = (task_id, "reviewer", task["review"]["name"])
                 elif not gate and task.get("assignment_id") == assignment_id:
@@ -769,16 +805,18 @@ class Driver:
             return
         task_id, role, name = hit
         reason = "%s %s%s" % (name, ATTENTION[kind], ": " + text if text else "")
+        if role == "held":
+            return self.hold(task_id, assignment_id, kind, reason) if kind in ("blocked", "decision") else None
         if role == "worker":
-            return self.raise_event(task_id, kind, reason)
+            return self.request(task_id, kind, reason)
         if kind == "exited":
-            return self.mark(task_id, gate="decided" if role == "decider" else "reviewed")
-        self.attention(task_id, role, reason)
+            return self.mark(task_id, gate="reviewed")
+        self.request(task_id, role, reason)
 
     def advance(self):
         """Run every pending gate stage once; each step changes the task's gate or raises. Returns the steps run."""
         steps = {"reported": self.step_reported, "converged": self.step_converged,
-                 "reviewed": self.step_reviewed, "fix-pending": self.step_fix, "decide": self.step_decide,
+                 "reviewed": self.step_reviewed, "fix-pending": self.step_fix, "requested": self.step_requested,
                  "decided": self.step_decided, "redo-pending": self.step_redo,
                  "ready-for-ci": self.step_ci, "awaiting-merge": self.step_merge, "cleanup": self.step_cleanup}
         with self.book() as data:
@@ -802,9 +840,9 @@ class Driver:
         return acted
 
     def awaiting(self):
-        """Tickets whose PR is not merged yet: the run stays up and re-polls them."""
+        """Tickets whose PR is not merged yet, or whose request the Lead has not answered: the run stays up."""
         with self.book() as data:
-            return any(t.get("gate") in ("ready-for-ci", "awaiting-merge") for t in data["tasks"].values())
+            return any(t.get("gate") in ("ready-for-ci", "awaiting-merge", "requested") for t in data["tasks"].values())
 
     def task(self, task_id):
         with self.book() as data:
@@ -819,18 +857,87 @@ class Driver:
         with self.book() as data:
             data["tasks"][task_id].update(fields, updated_at=now())
 
-    def attention(self, task_id, kind, reason):
-        """Pause the unit: a gate cannot advance and no decider can settle it. The ticket's Status reads
-        `needs you`, `attention.md` gets an entry, and the other tickets keep running."""
+    # ---- the Lead: a request.json and one wake per escalation, answered by `decide` -------------------------------
+    # A unit that needs a decision (a worker that blocks or asks, a failed gate past the cap, a handoff file that is
+    # missing or breaks its contract) gets `<run>/<unit>/request.json` and one wake line in `<run>/wakes.jsonl`; its
+    # gate is `requested` and nothing runs for it. Every other unit goes on. `orchestrate.py decide` writes the
+    # decision and marks the request resolved; the next round applies it (`step_decided`).
+
+    def wake(self, kind, unit, text, key=None):
+        """Append one wake for the Lead, unless a wake of this kind with the same `key` is already there."""
+        path = self.run_dir / "wakes.jsonl"
+        if key is not None and any(w.get("kind") == kind and w.get("key") == key for w in events.read(path)):
+            return False
+        events.append(path, kind, unit=unit, text=text, key=key)
+        self.log("wake", wake=kind, unit=unit, text=text)
+        return True
+
+    def request(self, task_id, kind, reason, fix=None):
+        """The unit needs the Lead. A unit that already has an open request keeps it."""
         with self.book() as data:
             task = data["tasks"][task_id]
-            task.setdefault("attention", []).append({"at": now(), "kind": kind, "reason": reason})
-            task["gate"] = "attention"
-            unit = task["packet"]["unit"].upper()
-        event("%s needs attention (%s): %s" % (task_id, kind, reason))
-        self.log("attention", unit=unit.lower(), task=task_id, cause=kind, reason=reason[:500])
-        self.note_attention(unit, kind, reason)
-        self.write_status(unit, "IN PROGRESS · needs you: " + cell(reason))
+            if task.get("gate") == "requested":
+                return
+            unit = task["packet"]["unit"]
+            path, _ = next_path(self.run_dir / unit, "request", ".json")
+            task.update(event={"at": now(), "kind": kind, "reason": reason}, gate="requested", updated_at=now(),
+                        request={"path": str(path), "kind": kind})
+            if fix:
+                task["fix"] = fix
+        event("%s needs a decision (%s): %s" % (task_id, kind, reason))
+        self.log("escalation", unit=unit, task=task_id, cause=kind, reason=reason[:500])
+        self.write_status(unit.upper(), "IN PROGRESS · decision pending: " + cell(reason))
+        self.write_request(task_id)
+
+    def write_request(self, task_id):
+        """Write the request file of a `requested` task (again, if the driver died before it was on disk) and its wake."""
+        task = self.task(task_id)
+        unit, path = task["packet"]["unit"], Path(task["request"]["path"])
+        if not path.exists():
+            candidates = [self.run_dir / unit / "task.md", self.run_dir / task_id / "report.json",
+                          Path((task.get("review") or {}).get("path") or "/nonexistent"),
+                          self.run_dir / task_id / "findings.json", self.run_dir / "events.jsonl"]
+            row = contracts.make_request(unit, task_id, task["event"]["kind"], task["event"]["reason"],
+                                         [str(c) for c in candidates if c.exists()])
+            path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            write_atomic(path, json.dumps(row, indent=2) + "\n")
+        self.wake("decision", unit, "decision %s: %s -> %s" % (unit, cell(task["event"]["reason"], 200), path), key=str(path))
+
+    def step_requested(self, task_id):
+        """Wait for the Lead: a resolved request moves the unit on to `decided`. False while it is still open."""
+        task = self.task(task_id)
+        path = Path(task["request"]["path"])
+        if not path.exists():
+            self.write_request(task_id)  # the driver died after the ledger and before the file
+        request = contracts.load(path, contracts.validate_request)
+        if request["status"] != "resolved":
+            return False
+        self.mark(task_id, gate="decided", decision={"path": request["decision"]})
+
+    def hold(self, task_id, assignment_id, kind, text):
+        """A worker message that arrives while its unit has an open request is kept on the task and acted on after the
+        decision. The event that caused the request, and a repeat of a held message, are not held."""
+        with self.book() as data:
+            task = data["tasks"][task_id]
+            held = task.setdefault("held", [])
+            if kind == task["event"]["kind"] or any(h["assignment_id"] == assignment_id and h["kind"] == kind for h in held):
+                return
+            held.append({"at": now(), "kind": kind, "assignment_id": assignment_id, "text": text})
+            unit = task["packet"]["unit"]
+        self.log("held", unit=unit, task=task_id, held=kind, assignment_id=assignment_id, text=cell(text, 200))
+
+    def replay_held(self, task, successor_id):
+        """After a decision handed the unit on: a held blocked or decision message that the Lead has not seen becomes
+        a request on the unit's new task. A held complete never gets here (`step_decided` takes it first)."""
+        for held in task.get("held") or []:
+            if held["kind"] in ("blocked", "decision"):
+                self.log("held-acted", unit=task["packet"]["unit"], task=successor_id, held=held["kind"], acted="request")
+                self.request(successor_id, held["kind"], "%s (arrived while the earlier request was open)" % (
+                    held["text"] or "worker " + held["kind"]))
+
+    def escalate(self, task_id, reason, fix):
+        """A unit failed its gates past the cap. `fix` is the round a `retry` would run."""
+        self.request(task_id, "gate", reason, fix=fix)
 
     def write_status(self, ticket_id, status):
         if ticket_id == ARCHIVE.upper():
@@ -849,25 +956,6 @@ class Driver:
         with path.open("a", encoding="utf-8") as stream:
             stream.write("- %s %s (%s): %s\n" % (now(), ticket_id, kind, " ".join(reason.split())))
 
-    def raise_event(self, task_id, kind, reason, fix=None):
-        """An event only a decider can settle. It gets a fresh decider, `MAX_DECIDERS` times per unit; then the user."""
-        with self.book() as data:
-            unit = data["tasks"][task_id]["packet"]["unit"]
-            used = sum(1 for t in data["tasks"].values() if t["packet"].get("unit") == unit and t.get("decision"))
-            if used < MAX_DECIDERS:
-                task = data["tasks"][task_id]
-                task.update(event={"at": now(), "kind": kind, "reason": reason}, gate="decide", updated_at=now())
-                if fix:
-                    task["fix"] = fix
-        if used >= MAX_DECIDERS:
-            return self.attention(task_id, kind, "%s (%d decider calls on %s already)" % (reason, used, unit))
-        event("%s needs a decision (%s): %s" % (task_id, kind, reason))
-        self.log("escalation", unit=unit, task=task_id, cause=kind, reason=reason[:500])
-
-    def escalate(self, task_id, reason, fix):
-        """A unit failed its gates a 3rd time: a decider settles it. `fix` is the round a `retry` would run."""
-        self.raise_event(task_id, "gate", reason, fix=fix)
-
     def record_report(self, task_id, report, **changes):
         """Checkpoint the worker's report as PARTIAL: the unit is not COMPLETE until CI and the merge."""
         path = self.run_dir / task_id / "report.json"
@@ -884,16 +972,16 @@ class Driver:
             contracts.need(report["status"] == "COMPLETE" and report["acceptance_met"],
                            "the worker said complete but report.json says %s" % report["status"])
         except contracts.ContractError as error:
-            return self.attention(task_id, "report", str(error))
+            return self.request(task_id, "report", str(error))
         verdict, lines = self.converge(task["packet"])
         if verdict == "error":
-            return self.attention(task_id, "converge", lines[0])
+            return self.request(task_id, "converge", lines[0])
         try:
             if verdict == "FAIL":
                 return self.fail_gate(task_id, report, "converge", lines)
             self.record_report(task_id, report)
         except ValueError as error:
-            return self.attention(task_id, "report", "the ledger rejected the report: %s" % error)
+            return self.request(task_id, "report", "the ledger rejected the report: %s" % error)
         # A fix round is gated by converge alone, and so is the archive (converge --final); a first build gets one review.
         self.mark(task_id, gate="ready-for-ci" if FIX_ROUND.search(task_id) or task["packet"]["unit"] == ARCHIVE else "converged")
 
@@ -986,9 +1074,9 @@ class Driver:
             review = contracts.load(task["review"]["path"], contracts.validate_review)
             report = contracts.load(task["report_path"], contracts.validate_report)
         except contracts.ContractError as error:
-            return self.attention(task_id, "review", str(error))
+            return self.request(task_id, "review", str(error))
         if not (review["commit"].startswith(report["head"]) or report["head"].startswith(review["commit"])):
-            return self.attention(task_id, "review", "review.json reviewed commit %s but the report's head is %s"
+            return self.request(task_id, "review", "review.json reviewed commit %s but the report's head is %s"
                                   % (review["commit"], report["head"]))
         blocking, deferred_items = contracts.review_items(review)
         for item in deferred_items:
@@ -1025,19 +1113,22 @@ class Driver:
         try:
             url, ref = self.pr_url(task_id)
         except (contracts.ContractError, ValueError) as error:
-            return self.attention(task_id, "ci", str(error))
+            return self.request(task_id, "ci", str(error))
         try:
             result = subprocess.run(["wait-checks", ref], capture_output=True, text=True, timeout=self.args.ci_seconds)
         except subprocess.TimeoutExpired:
             event("%s checks of %s still running; polling again" % (task_id, ref))
             return False
         if result.returncode == 0:
+            unit = self.unit_of(task_id)
+            head = contracts.load(self.task(task_id)["report_path"], contracts.validate_report)["head"]
+            self.wake("pr-ready", unit, "pr-ready %s: %s" % (unit, url), key="%s:%s" % (unit, head))
             self.put_status(task_id, "IN PROGRESS · awaiting merge (%s)" % url)
             self.mark(task_id, gate="awaiting-merge", pr=url)
             return None
         lines = [line for line in result.stdout.splitlines() if line.strip()]
         if result.returncode != 1 or not lines:
-            return self.attention(task_id, "ci", (result.stderr.strip() or result.stdout.strip()
+            return self.request(task_id, "ci", (result.stderr.strip() or result.stdout.strip()
                                                   or "wait-checks exited %d" % result.returncode)[:500])
         report = contracts.load(self.task(task_id)["report_path"], contracts.validate_report)
         self.fail_gate(task_id, report, "ci", lines[:60])
@@ -1062,7 +1153,7 @@ class Driver:
         except ValueError:
             return False
         if state.get("state") == "CLOSED":
-            return self.attention(task_id, "merge", "%s was closed without a merge" % url)
+            return self.request(task_id, "merge", "%s was closed without a merge" % url)
         if state.get("state") != "MERGED":
             return False
         try:
@@ -1071,7 +1162,7 @@ class Driver:
                 checkpoint(data, task_id, dict(task["report"], status="COMPLETE", remaining=[], acceptance_met=True,
                                                review_rounds=task["report"].get("review_rounds", 0)))
         except ValueError as error:
-            return self.attention(task_id, "merge", "merged, but the ledger rejected COMPLETE: %s" % error)
+            return self.request(task_id, "merge", "merged, but the ledger rejected COMPLETE: %s" % error)
         commit = (state.get("mergeCommit") or {}).get("oid", "")
         self.put_status(task_id, "COMPLETE %s · merged %s%s" % (now()[:10], url, " (%s)" % commit[:7] if commit else ""))
         self.mark(task_id, gate="cleanup", merge_commit=commit)
@@ -1182,7 +1273,7 @@ class Driver:
                 findings_path.write_text(json.dumps(findings, indent=2) + "\n", encoding="utf-8")
             contracts.load(findings_path, contracts.validate_findings)
         except contracts.ContractError as error:
-            return self.attention(task_id, "findings", str(error))
+            return self.request(task_id, "findings", str(error))
         task_md = new_dir / "task.md"
         if not task_md.exists():
             task_md.write_text(self.fix_text(task, new_id, new_dir, findings), encoding="utf-8")
@@ -1192,11 +1283,12 @@ class Driver:
         text = ("Read %s and follow it. Its work is already in this checkout; this is a fix round: read the findings at %s "
                 "and the round's brief at %s, then fix only what the findings name." % (
                     self.run_dir / unit / "task.md", findings_path, task_md))
-        self.hand_round(task, successor, task_md, text, fresh=fix.get("fresh") or fix.get("up"))
-        self.mark(task_id, gate="superseded", fix_task=new_id)
+        self.hand_round(task, successor, task_md, text, fresh=fix.get("fresh") or fix.get("up"), answer=fix.get("answer"))
+        self.mark(task_id, gate="superseded", fix_task=new_id, held=[])
+        self.replay_held(task, new_id)
         event("fix round %s for %s from %s findings" % (new_id, packet["worker"], fix["source"]))
 
-    def hand_round(self, task, successor, task_md, text, fresh=False):
+    def hand_round(self, task, successor, task_md, text, fresh=False, answer=None):
         """Close the unit's open task, claim its successor and put a worker on it: the live pane is resumed, a gone
         pane (or a `fresh` round) gets a new worker from `text`."""
         task_id, new_id = task["packet"]["task_id"], successor["task_id"]
@@ -1206,20 +1298,22 @@ class Driver:
             claim(data, successor)
             bound = data["tasks"][new_id]["runtime_id"]
         if not bound:
-            runtime_id, assignment_id = self.hand_over(task, successor, task_md, text, fresh)
+            runtime_id, assignment_id = self.hand_over(task, successor, task_md, text, fresh, answer)
             with self.book() as data:
                 bind(data, new_id, str(runtime_id))
                 data["tasks"][new_id]["assignment_id"] = assignment_id
 
-    def hand_over(self, task, successor, task_md, text, fresh=False):
+    def hand_over(self, task, successor, task_md, text, fresh=False, answer=None):
         name, unit = successor["worker"], successor["unit"]
+        said = " The Lead's answer: %s" % answer if answer else ""
+        text += said
         spawn = {"kind": "worker", "name": name, "cwd": successor["checkout"], "cli": successor["backend"],
                  "model": successor["model"], "effort": successor["effort"], "task": text}
         if self.open_intent(name):  # the driver died while starting this worker: find it, do not start another
             return self.ensure_agent(name, "worker", unit, spawn, fresh=True)
         alive = self.pane_alive(name)
         if alive and not fresh:
-            resumed = runtime_call(self.lead, "resume", {"name": name, "task": "Read %s and follow it." % task_md})
+            resumed = runtime_call(self.lead, "resume", {"name": name, "task": "Read %s and follow it.%s" % (task_md, said)})
             assignment_id = assignment_of(resumed)
             self.log("agent", name=name, role="worker", unit=unit, how="resume", assignment_id=assignment_id)
             return resumed.get("address") or task["runtime_id"], assignment_id
@@ -1240,95 +1334,48 @@ class Driver:
             return {"class": classes[at + 1], "model": self.models[classes[at + 1]]}
         return {"effort": efforts[min(efforts.index(packet["effort"]) + 1, len(efforts) - 1)]}
 
-    # ---- the decider: one action from a fixed menu, validated and applied here ----------------------------------
-
-    def step_decide(self, task_id):
-        task = self.task(task_id)
-        packet, unit = task["packet"], task["packet"]["unit"]
-        decision = task.get("decision")
-        if not decision:
-            path, index = next_path(self.run_dir / unit, "decision", ".json")
-            tail = "-decide" + ("" if index == 1 else str(index))
-            decision = {"name": worker_name(self.slug, unit[1:], tail), "path": str(path), "dir": str(self.run_dir / (unit + tail))}
-            self.mark(task_id, decision=decision)
-        decision_dir = Path(decision["dir"])
-        decision_dir.mkdir(exist_ok=True, mode=0o700)
-        task_md = decision_dir / "task.md"
-        if not task_md.exists():
-            task_md.write_text(self.decide_text(task_id, task, decision["path"]), encoding="utf-8")
-        try:
-            _, assignment_id = self.ensure_agent(decision["name"], "decider", unit, {
-                "kind": "worker", "name": decision["name"], "task": "Read %s and follow it." % task_md, "cwd": packet["checkout"],
-                "cli": self.args.cli, "model": self.models["large"], "effort": "high"})
-            decision = dict(decision, assignment_id=assignment_id)
-        except (ValueError, OSError, subprocess.TimeoutExpired) as error:
-            return self.attention(task_id, "decider", "could not start the decider %s: %s" % (decision["name"], error))
-        self.mark(task_id, gate="deciding", decision=decision)
-        event("spawned %s (large, %s, high)" % (decision["name"], self.models["large"]))
-
-    def decide_text(self, task_id, task, decision_path):
-        packet, unit = task["packet"], task["packet"]["unit"]
-        with self.book() as data:
-            summary = unit_summary(data, unit)
-        slice_ = {"unit": unit, "task": task_id, "attempts": summary["attempts"], "failed_reviews": summary["failed_reviews"],
-                  "cutoffs": summary["cutoffs"], "last_report": (task.get("report") or {}).get("summary"),
-                  "remaining": (task.get("report") or {}).get("remaining"), "attention": task.get("attention", [])}
-        paths = ["- Task: %s" % (self.run_dir / unit / "task.md"), "- Plan: %s (its Decisions and Scenarios)" % self.plan_path,
-                 "- This attempt's report: %s" % (self.run_dir / task_id / "report.json")]
-        if task.get("review"):
-            paths.append("- Review: %s" % task["review"]["path"])
-        if (self.run_dir / task_id / "findings.json").exists():
-            paths.append("- Findings this attempt was given: %s" % (self.run_dir / task_id / "findings.json"))
-        paths.append("- Checkout: %s" % packet["checkout"])
-        return "\n".join([
-            "# Decide %s: pick one action, nothing else" % unit.upper(),
-            "",
-            "Event: %s" % task["event"]["reason"],
-            "Ledger slice for the unit:",
-            "```json", json.dumps(slice_, indent=2), "```",
-            "",
-            "Paths (read what you need; nothing more is pasted here):", *paths,
-            "",
-            "Pick exactly one action:",
-            "- `retry`: the same worker tries again, with your reason as its brief.",
-            "- `retry one class up`: a fresh worker on the next model class (or more effort at the top class).",
-            "- `fresh worker`: replace the worker with a new one on the same class.",
-            "- `mark blocked`: the ticket cannot proceed; its Status reads BLOCKED with your reason.",
-            "- `skip`: the ticket is dropped; its Status reads SKIPPED with your reason.",
-            "- `ask user`: only the user can settle it. Always choose this for a scope or product question.",
-            "",
-            "Write %s as JSON, exactly this shape:" % decision_path,
-            '{"contract":1,"action":"<one of the six above>","reason":"<one or two sentences>","question":"<what the user must answer; only for ask user>"}',
-            "Touch nothing else. Then call the agent-runtime `report` tool with kind=complete and one line: `<action> - %s`." % decision_path,
-            ""])
-
     def step_decided(self, task_id):
+        """Apply the Lead's decision. A `complete` that arrived while the request was open and whose report is on disk
+        is acted on instead of handing the unit to a worker again: the worker had already finished."""
         task = self.task(task_id)
         try:
             decision = contracts.load(task["decision"]["path"], contracts.validate_decision)
         except contracts.ContractError as error:
-            return self.attention(task_id, "decision", str(error))
+            return self.request(task_id, "decision", str(error))
         action, reason, unit = decision["action"], decision["reason"], task["packet"]["unit"]
         event("%s decided %r: %s" % (task_id, action, reason))
         self.log("decision", unit=unit, task=task_id, action=action, reason=reason[:500])
-        if action == "ask user":
-            return self.attention(task_id, "ask-user", decision.get("question") or reason)
+        held = task.get("held") or []
         if action in ("mark blocked", "skip"):
             blocked = action == "mark blocked"
             with self.book() as data:
                 if blocked:
                     data["tasks"][task_id].update(status="BLOCKED", blocker=reason)
                 else:
-                    release(data, task_id, "skipped by the decider: " + reason)
-                data["tasks"][task_id].update(gate="blocked" if blocked else "skipped", updated_at=now())
+                    release(data, task_id, "skipped by the Lead: " + reason)
+                data["tasks"][task_id].update(gate="blocked" if blocked else "skipped", updated_at=now(), held=[])
+            for message in held:
+                self.log("held-dropped", unit=unit, task=task_id, held=message["kind"], why=action)
             return self.write_status(unit.upper(), ("BLOCKED" if blocked else "SKIPPED") + " · " + cell(reason))
-        flags = {"fresh": action == "fresh worker", "up": action == "retry one class up"}
+        self.write_status(unit.upper(), "IN PROGRESS")
+        finished = next((m for m in held if m["kind"] == "complete"), None)
+        if finished and self.report_is_valid(task_id):
+            self.log("held-acted", unit=unit, task=task_id, held="complete", acted="reported")
+            return self.mark(task_id, gate="reported", held=[])
+        flags = {"fresh": action == "fresh worker", "up": action == "retry one class up", "answer": decision.get("answer")}
         if task.get("fix"):
             return self.mark(task_id, gate="fix-pending", fix=dict(task["fix"], **flags))
         self.mark(task_id, gate="redo-pending", redo=dict(flags, reason=reason))
 
+    def report_is_valid(self, task_id):
+        try:
+            report = contracts.load(self.run_dir / task_id / "report.json", contracts.validate_report)
+        except contracts.ContractError:
+            return False
+        return report["task_id"] == task_id
+
     def step_redo(self, task_id):
-        """Hand the unit back to a worker after a decider's `retry`: a new task directory with the event and the reason."""
+        """Hand the unit back to a worker after the Lead's `retry`: a new task directory with the event and the reason."""
         task = self.task(task_id)
         packet, redo, unit = task["packet"], task["redo"], task["packet"]["unit"]
         with self.book() as data:
@@ -1346,8 +1393,9 @@ class Driver:
         self.mark(task_id, redo_task=new_id)
         text = ("Read %s and follow it. Its work is already in this checkout; this is a retry: read the retry brief at %s "
                 "and continue from where the work stands." % (self.run_dir / unit / "task.md", task_md))
-        self.hand_round(task, successor, task_md, text, fresh=redo["fresh"] or redo["up"])
-        self.mark(task_id, gate="superseded")
+        self.hand_round(task, successor, task_md, text, fresh=redo["fresh"] or redo["up"], answer=redo.get("answer"))
+        self.mark(task_id, gate="superseded", held=[])
+        self.replay_held(task, new_id)
         event("retry %s for %s after %s" % (new_id, packet["worker"], task["event"]["kind"]))
 
     def redo_text(self, task, new_id, new_dir, redo):
@@ -1359,7 +1407,8 @@ class Driver:
             "# Retry %s (task %s) after a decision" % (unit.upper(), new_id),
             "",
             "What happened: %s" % task["event"]["reason"],
-            "The decider's instruction: %s" % redo["reason"],
+            "The Lead's instruction: %s" % redo["reason"],
+            *(["The Lead's answer: %s" % redo["answer"]] if redo.get("answer") else []),
             "Original task: %s. Use task_id `%s` in your report." % (self.run_dir / unit / "task.md", new_id),
             "Same checkout and branch: %s on %s. Work only here; edit only: %s." % (
                 packet["checkout"], task["checkout_at_claim"]["branch"], ", ".join(packet["owns"])),
@@ -1383,6 +1432,7 @@ class Driver:
             "",
             *["- " + describe(item) for item in findings["items"]],
             "",
+            *(["The Lead's answer: %s" % task["fix"]["answer"], ""] if task["fix"].get("answer") else []),
             "Commit and push to the same branch; open no new pull request. Run before you report COMPLETE: %s." % (
                 "; ".join(packet["checks"]) or "the repository's full CI gate"),
             "Report review_rounds 0: the driver counts failed rounds.",
@@ -1728,12 +1778,118 @@ def rebuild_metrics(args):
     return result
 
 
+def write_atomic(path, text):
+    tmp_fd, tmp_path = tempfile.mkstemp(prefix=".orchestrate-", dir=path.parent)
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as stream:
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
+class Refused(PlanError):
+    """A command of the Lead that cannot be honoured; the command exits 2 and writes nothing."""
+
+
+def run_dir_of(args):
+    """The run directory of the plan a Lead command names."""
+    slug = parse_plan(Path(args.plan).resolve(strict=True).read_text(encoding="utf-8"))["slug"]
+    if not slug:
+        raise Refused("plan has no Slug")
+    return Path(args.state_dir).expanduser() / slug
+
+
+def numbered(directory, stem, suffix):
+    """The existing write-once files <stem><suffix>, <stem>.2<suffix>, ... in order."""
+    found = []
+    for index in range(1, 1000):
+        path = directory / (stem + ("" if index == 1 else ".%d" % index) + suffix)
+        if not path.exists():
+            break
+        found.append(path)
+    return found
+
+
+def decide(args):
+    """`decide <plan> <unit> <action> --reason R [--answer A]`: answer the unit's open request. The decision file is
+    written and validated first; only then is the request marked resolved, so the driver never sees a resolved request
+    without its decision."""
+    run_dir, unit = run_dir_of(args), args.unit.lower()
+    unit_dir = run_dir / unit
+    unit_dir.mkdir(parents=True, exist_ok=True)
+    fd = os.open(unit_dir / ".decide.lock", os.O_CREAT | os.O_RDWR, 0o600)
+    with os.fdopen(fd, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        requests = numbered(unit_dir, "request", ".json")
+        try:
+            request = contracts.load(requests[-1], contracts.validate_request) if requests else None
+        except contracts.ContractError as error:
+            raise Refused(str(error)) from None
+        if request is None or request["status"] != "open":
+            raise Refused("%s has no open request" % unit)
+        if args.action not in request["menu"]:
+            raise Refused("action %r is not on the menu: %s" % (args.action, ", ".join(request["menu"])))
+        try:
+            decision = contracts.validate_decision(dict(
+                {"contract": contracts.VERSION, "action": args.action, "reason": args.reason},
+                **({"answer": args.answer} if args.answer else {})))
+        except contracts.ContractError as error:
+            raise Refused(str(error)) from None
+        path = next_path(unit_dir, "decision", ".json")[0]
+        write_atomic(path, json.dumps(decision, indent=2) + "\n")
+        write_atomic(requests[-1], json.dumps(dict(request, status="resolved", decision=str(path)), indent=2) + "\n")
+    return {"unit": unit, "action": args.action, "decision": str(path), "request": str(requests[-1])}
+
+
+def take_wake(run_dir):
+    """The oldest wake `await` has not printed (and mark it printed), or None. Concurrent awaits take turns."""
+    run_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd = os.open(run_dir / "wakes.cursor", os.O_CREAT | os.O_RDWR, 0o600)
+    with os.fdopen(fd, "r+") as cursor:
+        fcntl.flock(cursor, fcntl.LOCK_EX)
+        raw = cursor.read().strip()
+        seen = int(raw) if raw.isdigit() else 0
+        wakes = events.read(run_dir / "wakes.jsonl")
+        if seen >= len(wakes):
+            return None
+        cursor.seek(0)
+        cursor.truncate()
+        cursor.write(str(seen + 1))
+        cursor.flush()
+        os.fsync(cursor.fileno())
+        return wakes[seen]["text"]
+
+
+def run_finished(run_dir):
+    """True when the newest of the driver's `start` and `finish` events is `finish`."""
+    marks = [row["kind"] for row in events.read(run_dir / "events.jsonl") if row["kind"] in ("start", "finish")]
+    return bool(marks) and marks[-1] == "finish"
+
+
+def await_wake(args):
+    """`await <plan>`: print the next wake the Lead has not seen and return; `finished -> <run>/retro.md` once the run
+    has ended and every wake is printed. Waits (polling, no tokens) while there is neither."""
+    run_dir = run_dir_of(args)
+    while True:
+        line = take_wake(run_dir)
+        if line:
+            return line
+        if run_finished(run_dir):
+            return "finished -> %s" % (run_dir / "retro.md")
+        time.sleep(args.poll_seconds)
+
+
 def drive(args):
     require(args.max_workers >= 1, "--max-workers must be at least 1")
     driver = Driver(args)
     driver.start()
     try:
         driver.loop()
+        driver.log("finish")
     finally:
         driver.report_metrics()
     return {"slug": driver.slug, "lead": driver.lead, "spawned": driver.spawned, "errors": driver.errors}
@@ -1783,6 +1939,17 @@ def main():
     sub.add_argument("--ci-seconds", type=int, default=600, help="Longest one wait-checks call blocks before the loop moves on")
     sub.add_argument("--wait-seconds", type=int, default=60, help="Longest one wait blocks before the plan is re-read")
     sub.add_argument("--idle-interval", type=float, default=30, help="Seconds to sleep after an iteration that made no progress")
+    sub = commands.add_parser("await", help="Print the next wake the Lead has not seen, or `finished -> <retro>`; waits for one")
+    sub.add_argument("plan")
+    sub.add_argument("--state-dir", default="~/.local/state/orchestrate", help="Holds <slug>.json and the <slug>/ run directory")
+    sub.add_argument("--poll-seconds", type=float, default=2, help="How often wakes.jsonl is read while waiting")
+    sub = commands.add_parser("decide", help="Answer a unit's open request with one action from its menu")
+    sub.add_argument("plan")
+    sub.add_argument("unit")
+    sub.add_argument("action", help="One of: " + ", ".join(contracts.ACTIONS))
+    sub.add_argument("--reason", required=True)
+    sub.add_argument("--answer", help="The text the worker is resumed with; required for the answer action")
+    sub.add_argument("--state-dir", default="~/.local/state/orchestrate", help="Holds <slug>.json and the <slug>/ run directory")
     sub = commands.add_parser("launch", help="Check the plan and start `run` in a Herdr terminal named orchestrate-<slug>")
     sub.add_argument("plan")
     sub.add_argument("--repo", help="Repository root; default the plan file's repository")
@@ -1793,6 +1960,10 @@ def main():
         return launch(args, extra)  # unknown options are forwarded to `run`, which validates them
     if args.command == "run":
         return drive(args)
+    if args.command == "await":
+        return await_wake(args)
+    if args.command == "decide":
+        return decide(args)
     if args.command == "inspect":
         return {**checkout_snapshot(args.checkout),
                 "executables": {c: shutil.which(c) for c in ("codex", "claude")},
@@ -1825,7 +1996,7 @@ def main():
 if __name__ == "__main__":
     try:
         output = main()
-        print(json.dumps(output, separators=(",", ":")))
+        print(output if isinstance(output, str) else json.dumps(output, separators=(",", ":")))
         sys.exit(1 if isinstance(output, dict) and output.get("errors") else 0)
     except PlanError as error:
         print(json.dumps({"error": str(error)}), file=sys.stderr)

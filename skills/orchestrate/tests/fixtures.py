@@ -159,7 +159,7 @@ def envelope(assignment_entry, kind, text=None):
             "recipient": "lead", "kind": kind, "text": text or "%s - see run directory" % kind.upper()}
 
 
-def wait_result(assignments=(), messages=(), write=(), replace=(), reason=None):
+def wait_result(assignments=(), messages=(), write=(), replace=(), run=(), reason=None):
     """What `wait(all)` answers, with `reason` derived the way the runtime does unless given."""
     assignments = [dict(a) for a in assignments]
     unfinished = [a["assignment_id"] for a in assignments if a["state"] != "complete"]
@@ -182,6 +182,8 @@ def wait_result(assignments=(), messages=(), write=(), replace=(), reason=None):
         step["write"] = [list(w) for w in write]
     if replace:
         step["replace"] = [list(r) for r in replace]
+    if run:
+        step["run"] = [list(r) for r in run]
     return step
 
 
@@ -269,10 +271,34 @@ class RunFixture:
         rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
         return [r for r in rows if tool in (None, r["tool"])]
 
+    def env(self):
+        return dict(os.environ, PATH=str(self.home) + os.pathsep + os.environ["PATH"],
+                    FAKE_RUNTIME_HOME=str(self.home), FAKE_PLAN=str(self.plan),
+                    FAKE_EVENTS=str(self.state_dir / "demo" / "events.jsonl"))
+
+    def cli(self, *args, timeout=60):
+        """A subcommand of the script run as the Lead would run it; the caller checks the exit code."""
+        return subprocess.run([sys.executable, "-B", str(SCRIPT), *args], capture_output=True, text=True,
+                              env=self.env(), timeout=timeout)
+
+    def decide_argv(self, unit, action, reason="because", answer=None):
+        return [sys.executable, "-B", str(SCRIPT), "decide", str(self.plan), unit, action, "--reason", reason,
+                "--state-dir", str(self.state_dir), *(["--answer", answer] if answer else [])]
+
+    def decide_step(self, unit, action, reason="because", answer=None, **extra):
+        """A wait step during which the Lead runs `decide`: the fake runtime runs it when the driver calls wait."""
+        return wait_result(run=[self.decide_argv(unit, action, reason, answer)], **extra)
+
+    def wakes(self):
+        path = self.state_dir / "demo" / "wakes.jsonl"
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
+        return rows
+
+    def wake_lines(self, kind=None):
+        return [w["text"] for w in self.wakes() if kind in (None, w["kind"])]
+
     def run_driver(self, *extra, plan=None, expect=0):
-        env = dict(os.environ, PATH=str(self.home) + os.pathsep + os.environ["PATH"],
-                   FAKE_RUNTIME_HOME=str(self.home), FAKE_PLAN=str(self.plan),
-                   FAKE_EVENTS=str(self.state_dir / "demo" / "events.jsonl"))
+        env = self.env()
         result = subprocess.run(
             [sys.executable, "-B", str(SCRIPT), "run", str(plan or self.plan), "--state-dir", str(self.state_dir),
              "--models-file", str(self.models), "--wait-seconds", "1", "--idle-interval", "0", *extra],

@@ -6,8 +6,10 @@
 
 Kinds the driver writes today: `start`, `import` (a run dir written by the previous version), `state` (a unit's gate or
 ledger status changed), `intent` and `agent` (an agent is about to be started / is bound), `stop`, `finding`,
-`round` (a failed gate), `escalation` (a decider is called), `attention` (a unit paused), `decision`, `usage`,
-`idle` (a loop iteration that made no progress), `error`."""
+`round` (a failed gate), `escalation` (a unit raised a request for the Lead), `attention` (a unit paused), `decision`, `usage`,
+`idle` (a loop iteration that made no progress), `error`, `wake` (a line for the Lead was written to `wakes.jsonl`),
+`held`, `held-acted` and `held-dropped` (a worker message that arrived while its unit had an open request), `finish`
+(the run ended; `orchestrate.py await` reads it)."""
 
 from datetime import datetime, timezone
 import json

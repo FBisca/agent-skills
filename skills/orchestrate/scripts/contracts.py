@@ -4,15 +4,17 @@ The driver reads these and nothing else from an agent: a missing or invalid file
 `report.json`   worker: the ledger checkpoint shape plus `head` (commit sha) and `pr` (URL or null).
 `review.json`   reviewer: `verdict` pass|block, `major[]`, `deferred[]`, `commit` reviewed; block iff `major` is not empty.
 `findings.json` driver -> fix round: `source`, `attempt` and the blocking `items` verbatim.
-`decision.json` decider: one `action` from the menu, a `reason`, and for `ask user` the `question`."""
+`request.json`  driver -> Lead: why a unit needs a decision, the evidence paths and the action menu; `status` open|resolved.
+`decision.json` Lead (through `orchestrate.py decide`): one `action` from the menu, a `reason`, and for `answer` the `answer`."""
 
+from datetime import datetime, timezone
 import json
 
 VERSION = 1
 LIMIT = 65536
 STATUSES = ("PARTIAL", "BLOCKED", "COMPLETE")
 SOURCES = ("converge", "review", "ci")
-ACTIONS = ("retry", "retry one class up", "fresh worker", "mark blocked", "skip", "ask user")
+ACTIONS = ("retry", "retry one class up", "fresh worker", "mark blocked", "skip", "answer")  # the menu of a request
 MAJOR_FIELDS = ("id", "file", "line", "problem", "fix")
 
 
@@ -100,8 +102,29 @@ def validate_decision(decision):
     versioned(decision, "decision")
     need(decision.get("action") in ACTIONS, "decision: action must be one of " + ", ".join(ACTIONS))
     need(text(decision.get("reason")), "decision: reason is required")
-    need(decision.get("question") is None or text(decision["question"]), "decision: question must be text when given")
+    need(text(decision.get("answer")) if decision["action"] == "answer" else decision.get("answer") is None,
+         "decision: answer is required for the answer action and for no other")
     return decision
+
+
+def validate_request(request):
+    versioned(request, "request")
+    for key in ("unit", "task", "event", "reason", "created_at"):
+        need(text(request.get(key)), "request: %s is required" % key)
+    need(isinstance(request.get("evidence"), list) and all(text(path) for path in request["evidence"]),
+         "request: evidence must be a list of paths")
+    need(isinstance(request.get("menu"), list) and request["menu"] and set(request["menu"]) <= set(ACTIONS),
+         "request: menu must list actions from " + ", ".join(ACTIONS))
+    need(request.get("status") in ("open", "resolved"), "request: status must be open or resolved")
+    need((request["status"] == "resolved") == text(request.get("decision")),
+         "request: a resolved request names its decision file, an open one has none")
+    return request
+
+
+def make_request(unit, task, event, reason, evidence, created_at=None):
+    return validate_request({"contract": VERSION, "unit": unit, "task": task, "event": event, "reason": reason,
+                             "evidence": list(evidence), "menu": list(ACTIONS), "status": "open", "decision": None,
+                             "created_at": created_at or datetime.now(timezone.utc).isoformat()})
 
 
 def make_findings(source, attempt, items):

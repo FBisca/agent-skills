@@ -125,11 +125,10 @@ class MergeTests(GateFixture, unittest.TestCase):
 
     def test_D5_a_review_of_another_commit_is_a_contract_error(self):
         """code-driven-orchestrator/S6a"""
-        self.waits([self.worker_done(tests=True), self.reviewer_done(self.review(commit="deadbee"))])
+        self.waits([self.worker_done(tests=True), self.reviewer_done(self.review(commit="deadbee")), self.skipped()])
         self.run_driver()
-        task = self.task()
-        self.assertEqual(task["gate"], "attention")
-        self.assertIn("deadbee", task["attention"][0]["reason"])
+        self.assertEqual(self.request()["event"], "review")
+        self.assertIn("deadbee", self.request()["reason"])
         self.assertEqual(self.wait_checks_log(), [])
 
     def test_a_blocking_review_never_reaches_wait_checks(self):

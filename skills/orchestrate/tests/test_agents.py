@@ -79,7 +79,7 @@ class EnsureAgentTests(RunFixture, unittest.TestCase):
         self.assertEqual([c["args"]["name"] for c in self.calls("spawn")], ["demo-t1", "demo-t1"])
         self.assertEqual(self.calls("resume"), [])
 
-    def test_S33_the_decider_and_fresh_worker_spawns_record_an_intent_first(self):
+    def test_S33_the_fresh_worker_spawn_after_a_decision_records_an_intent_first(self):
         """orchestrate-lean-loop/S33"""
         from test_decider import DeciderFixture
         fixture = type("F", (DeciderFixture, unittest.TestCase), {"runTest": lambda self: None})()
@@ -87,7 +87,7 @@ class EnsureAgentTests(RunFixture, unittest.TestCase):
         self.addCleanup(fixture.doCleanups)
         fixture.waits([fixture.blocked(), fixture.decided("fresh worker")])
         fixture.run_driver()
-        self.assertEqual([c["args"]["name"] for c in fixture.calls("spawn")], ["demo-t1", "demo-t1-decide", "demo-t1"])
+        self.assertEqual([c["args"]["name"] for c in fixture.calls("spawn")], ["demo-t1", "demo-t1"])
         fixture.assert_intents_precede_spawns()
 
 
