@@ -26,7 +26,7 @@ You are a launcher. A Python driver runs the build, so the loop costs no model t
 
 Do not run the loop, wait on workers, write `task.md`, review or gate tickets, merge, or archive. The driver does all of it through the `agent-runtime` tools: dispatch, converge, review, fix rounds, CI, unblocking once you merge, archive. It never merges a PR. For its options and behavior: `orchestrate.py run --help`.
 
-The pane is named `orchestrate-<slug>`: Herdr names allow only `a-z 0-9 - _`, so the hyphen replaces the colon.
+The pane is named `orchestrate-<slug>` and nests under the Lead's terminal when launched inside Herdr, falling back to top-level if nesting fails. Herdr names allow only `a-z 0-9 - _`, so the hyphen replaces the colon.
 
 ## What the user sees
 

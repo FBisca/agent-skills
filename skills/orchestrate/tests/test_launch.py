@@ -16,6 +16,9 @@ with open(os.path.join(home, "hc.log"), "a") as log:
 if sys.argv[1] == "ls":
     print(open(os.path.join(home, "live.json")).read())
 elif sys.argv[1] == "run":
+    if "--parent" in sys.argv and os.environ.get("FAKE_HC_BAD_PARENT"):
+        print("unknown parent", file=sys.stderr)
+        sys.exit(1)
     print(json.dumps({"name": sys.argv[sys.argv.index("--name") + 1], "id": "t9"}))
 """
 
@@ -38,12 +41,37 @@ class LaunchTests(RunFixture, unittest.TestCase):
         path = self.home / "hc.log"
         return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
 
-    def launch(self, plan=None, expect=0):
+    def launch(self, plan=None, expect=0, parent=None, bad_parent=False):
         env = dict(os.environ, PATH=str(self.home) + os.pathsep + os.environ["PATH"], FAKE_HC_HOME=str(self.home))
+        env.pop("HC_TERMINAL_ID", None)
+        if parent is not None:
+            env["HC_TERMINAL_ID"] = parent
+        if bad_parent:
+            env["FAKE_HC_BAD_PARENT"] = "1"
         result = subprocess.run([sys.executable, "-B", str(SCRIPT), "launch", str(plan or self.plan)],
                                 capture_output=True, text=True, env=env, timeout=60)
         self.assertEqual(result.returncode, expect, result.stderr)
         return result
+
+    def test_S49_starts_under_launcher_terminal(self):
+        self.launch(parent="t175")
+        argv = [c for c in self.hc_calls() if c[0] == "run"][0]
+        self.assertEqual(argv[argv.index("--parent") + 1], "t175")
+
+    def test_S50_starts_top_level_outside_terminal(self):
+        self.launch()
+        argv = [c for c in self.hc_calls() if c[0] == "run"][0]
+        self.assertNotIn("--parent", argv)
+
+    def test_bad_parent_falls_back_to_top_level(self):
+        out = json.loads(self.launch(parent="stale", bad_parent=True).stdout)
+        starts = [c for c in self.hc_calls() if c[0] == "run"]
+        self.assertEqual(len(starts), 2)
+        self.assertEqual(starts[0][starts[0].index("--parent") + 1], "stale")
+        self.assertNotIn("--parent", starts[1])
+        self.assertTrue(out["started"])
+        self.assertFalse(out["nested"])
+        self.assertIn("unknown parent", out["nesting_error"])
 
     def test_S17_starts_run_in_a_named_pane(self):
         """code-driven-orchestrator/S17"""
