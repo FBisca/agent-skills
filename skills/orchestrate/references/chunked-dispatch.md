@@ -4,7 +4,7 @@ A small model is a good **typist** and a poor planner. So a large **planner** de
 
 ## 1. Plan
 
-One fresh-context large-class planner reads the findings, the gap review, the Decisions, the scenarios and the code. It edits nothing. It writes to the scratchpad:
+One fresh-context large-class planner reads the findings, the gap review, the Decisions, the scenarios and the code. It edits nothing. It writes to `<run>/<unit>/chunks/`:
 - `Cnn.md`: one brief per chunk, each within the `small` size;
 - `README.md`: the index, holding:
   - the order and dependencies;
@@ -57,7 +57,7 @@ A test command compiles shared source, so chunks with disjoint files can still c
 
 **When the cutoff hits:**
 1. Stop the worker.
-2. Save its diff as `Cnn.timeout.patch`.
+2. Save its diff as `chunks/Cnn.timeout.patch`.
 3. Restore the last chunk commit.
 4. The planner re-splits the chunk once.
 5. A second cutoff goes to [escalation](routing.md#escalation).

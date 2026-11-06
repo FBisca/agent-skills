@@ -59,14 +59,23 @@ Check the worker's subsystem, checkout state, last result, and available context
 
 ## Prepare and dispatch
 
-Give each new worker a compact packet containing:
+Work passes through **files**, not context. Each plan has a **run directory**, `~/.local/state/orchestrate/<slug>/`, kept beside its ledger. It is created 0700, never tracked, and kept after archive for audit:
+
+- `contract.md`, written once per plan: the report shape (the checkpoint JSON in [the state helper](references/state.md)) and the rules every task shares.
+- `<task>/task.md`: the packet below. Spawn and resume text is one line: "Read `<run>/<task>/task.md` and follow it."
+- `<task>/report.json`: the worker's result, in the checkpoint shape. Prose goes in `report.md`. The worker's `report` call carries one line: its status and the path.
+- `<task>/review.md`: gate-2 findings. The reviewer returns one line: the count of blocking findings and the path.
+
+Files are write-once: a later attempt writes `report.2.json`, `review.2.md`, and so on. Run `checkpoint --report <run>/<task>/report.json` on the file itself. Open a file only when the helper rejects it, the worker is blocked, or a gate fails. The runtime store keeps the one-line reports, so the store plus the run directory form the audit trail.
+
+Write each new worker's `task.md` with:
 
 1. Ticket ID, purpose, and its scenarios verbatim, with the **red-first** rule: one test per scenario, named with its S-ID (`it('S3: …')`, `def test_S3_…`), seen failing before the code exists.
 2. Exact checkout, branch, the ticket's Paths as file ownership, and exclusions. Shared databases are read-only for workers; schema changes go through migrations in the worker's own branch.
 3. Relevant files and symbols, the plan's Decisions, and dependency evidence.
 4. The repo's full CI gate (types, lint, tests as CI runs them), assigned peers, and integration owner.
 
-Give a resumed worker only the new task, changed constraints, relevant peer updates, and changed checkout state. Do not repeat the full plan or broad discovery. The orchestrator maps scope; the worker reads implementation details.
+Give a resumed worker a new task directory holding only the new task, changed constraints, relevant peer updates, and changed checkout state. Do not repeat the full plan or broad discovery. The orchestrator maps scope; the worker reads implementation details.
 
 Use [the state helper](references/state.md) to reserve assignments before dispatch and bind returned runtime IDs afterward. Keep one worker ledger per active plan, outside tracked product files; share its absolute path across repositories. The worker ledger tracks agents; the plan tracks scope, decisions and ticket status. The helper validates records, not code behavior, and never spawns agents.
 
@@ -88,7 +97,7 @@ If spawn delivery is uncertain, inspect the runtime and reservation before retry
 When a worker reports a ticket done, run three gates in the implementation checkout. Any FAIL or blocking finding sends the failing lines back to the worker (return to step 1).
 
 1. **Converge:** call the Skill tool with `converge` for this ticket (`--ticket T<n>`). Its checks: every scenario has a test named with its S-ID, every changed test carries an ID, and the diff stays inside the ticket's Paths. Any FAIL blocks.
-2. **Review:** dispatch a fresh-context large-class reviewer subagent with only the ticket, its scenarios, the plan's Decisions, the diff, and the repo's AGENTS.md / CLAUDE.md. It checks correctness and the repo's conventions, plus a security lens when the diff touches auth, permissions or personal data. Its blocking findings go back to the worker.
+2. **Review:** dispatch a fresh-context large-class reviewer subagent with only the ticket, its scenarios, the plan's Decisions, the diff, and the repo's AGENTS.md / CLAUDE.md. It checks correctness and the repo's conventions, plus a security lens when the diff touches auth, permissions or personal data. It writes its findings to `<task>/review.md`. Blocking findings go back to the worker as that path.
 3. **Gaps (advice):** a fresh-context medium-class subagent compares the plan with the diff and classifies each gap as missing, partial, contradicts or unrequested. Each gap becomes a new ticket. It never blocks and never edits code.
 
 A ticket is COMPLETE when converge passes, the review has no blocking finding, and CI is green on its PR. Record the commands and results in its row.
