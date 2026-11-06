@@ -1552,6 +1552,13 @@ class Driver:
             known = (data.get("agents") or {}).get(name)
         return bool(known) and known.get("assignment_id") is None
 
+    def spawn_args(self, spawn):
+        """The spawn arguments, plus the run's role when the Lead named one.
+
+        Without a named role the spawn carries none and the runtime's default role (the implementer) stands."""
+        agent = getattr(self.args, "agent", None)
+        return dict(spawn, agent=agent) if agent else spawn
+
     def ensure_agent(self, name, role, unit, spawn, fresh=False):
         """Put one agent under `name` and return (address, assignment_id).
 
@@ -1574,7 +1581,7 @@ class Driver:
             if live:
                 result, how = runtime_call(self.lead, "resume", {"name": name, "task": spawn["task"]}), "attach"
             else:
-                result, how = runtime_call(self.lead, "spawn", spawn), "spawn"
+                result, how = runtime_call(self.lead, "spawn", self.spawn_args(spawn)), "spawn"
         except subprocess.TimeoutExpired:
             raise  # it may have started: the open intent stays, and a restart looks the name up
         except (ValueError, OSError):
@@ -2354,6 +2361,8 @@ def main():
     sub.add_argument("--context-reserve", type=int, default=40000,
                      help="Tokens an implementer or reviewer must have left before a resume; below it the driver swaps in a fresh agent")
     sub.add_argument("--cli", choices=("claude", "codex"), default="claude")
+    sub.add_argument("--agent", help="Role every worker runs under; 'none' runs them without one. "
+                                     "Default: the runtime's own role")
     sub.add_argument("--base", default="origin/main", help="Remote branch each worktree starts from")
     sub.add_argument("--repo", help="Repository root; default the plan file's repository")
     sub.add_argument("--gate", action="append", default=[], help="CI command a worker must pass (repeatable)")
