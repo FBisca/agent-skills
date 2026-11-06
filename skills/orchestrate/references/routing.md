@@ -27,27 +27,22 @@ Calibration, 2026-11-06:
 | **big** | chunked · large planner · high | chunked · large planner · high |
 
 - **straight**: one worker takes the whole unit.
-- **chunked**: a large planner splits the unit into small chunks ([chunked dispatch](chunked-dispatch.md)). Each chunk then routes through the **small** row on its own difficulty.
+- **chunked**: a large planner splits the unit into small chunks ([chunked dispatch](chunked-dispatch.md)). The driver does not run chunked units: it refuses a plan with a `big` ticket, so split it in the plan. Each chunk then routes through the **small** row on its own difficulty.
   - A chunk of a complex unit stays complex.
   - The planner marks a chunk simple only when the chunk touches nothing sensitive.
 - Implementers are small or medium. The large class plans, reviews and decides.
 
 ## Class to model
 
-Resolve a class to spawn arguments in this order:
-1. what the user said in this session;
-2. the "Model classes" map in the session's loaded instructions (`AGENTS.md` / `CLAUDE.md`);
-3. the session's own model.
-
-Pass the cell's effort as `effort`. The model is chosen at spawn, the cache boundary, so resume a worker only for a unit in the same cell.
+The driver parses the "Model classes" table in `~/.claude/CLAUDE.md` (`--models-file`) and passes the cell's effort as `effort`. A class missing from the table is an error, not a fallback. The model is chosen at spawn, the cache boundary, so a fix round for a live worker keeps its model; a dead pane gets a fresh worker in the same cell.
 
 ## Escalation
 
-A **unit** keeps one ID across every attempt at it: the first build, each fix round, each chunk. `show --unit <id>` sums its failed review rounds and cutoffs over all attempts. When it reports `escalate` (two of either), stop the worker and ask the user. Bring:
-- the evidence: findings, cutoffs, usage;
-- the options: one class up, re-plan with the large planner, or split the unit.
+A **unit** keeps one ID across every attempt at it: the first build and each fix round. The driver handles a known gate failure itself, up to two fix rounds. The unit's third failed gate, a worker that blocks or exits without a report, or conflicting reports go to a fresh large-class **decider**, which writes `decision.json` with one action from a fixed menu (the menu and schema live in `scripts/contracts.py`). The driver validates and applies it. A unit gets at most two decider calls; after that, and for any scope or product question, the ticket pauses for the user (`needs you: …` in its Status, and `attention.md`).
 
-The user picks. Release the attempt and reclaim the unit under a new task ID with the chosen route; the new packet's `escalation` field records the choice.
+The user picks among the options in `attention.md`: one class up, re-plan, or split the unit. They answer by editing the plan.
+
+`show --unit <id>` still sums a unit's failed review rounds and cutoffs for diagnosis.
 
 ## Changing a cell
 

@@ -2,6 +2,8 @@
 
 Use `scripts/orchestrate.py` with Python 3.9+ on macOS or Linux. It uses only the standard library. It does not call models, execute packet check commands, or write native runtime files.
 
+**The driver (`run`, started by `launch`) writes this ledger.** It claims, binds, checkpoints and releases for every worker, reviewer and decider, so nobody follows the steps below during a normal run. The manual commands stay for diagnosis and for a hand-driven run: `show` reads the ledger, `show --unit` sums a unit's failures, `release --stopped` frees a unit whose worker is confirmed stopped. Do not edit a ledger a live driver holds. Report and gate JSON schemas live in `scripts/contracts.py`; the examples below show the ledger's own checkpoint shape.
+
 Choose one private, durable, writable ledger path per active plan outside tracked product files: `~/.local/state/orchestrate/<slug>.json`, beside the plan's run directory `<slug>/`. Codex workers can shell-write the run directory only through the worker profile's `writable_roots`. Pass it with `--state`; record that absolute path in the active chat. All workers and orchestrators for this plan must use the same ledger. Separate ledgers cannot detect each other's assignments. Use a temporary directory only for a deliberately disposable run.
 
 `inspect --checkout <root>` reads Git HEAD, branch, status, and installed executable paths. These are observations, not proof of active model selection. The worktree status is a file inventory, not a content hash; re-read affected source after external edits.
@@ -45,7 +47,7 @@ The helper's dependency check only sees this ledger. The orchestrator must separ
 
 ## Checkpoint or complete
 
-The worker writes its result as `<run>/<task>/report.json` in this shape, and the orchestrator records it after reviewing evidence:
+The worker writes its result as `<run>/<task>/report.json`; the driver validates it with `contracts.py` and records it in this shape:
 
 ```json
 {

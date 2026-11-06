@@ -1545,6 +1545,35 @@ class Driver:
             ""])
 
 
+def live_terminals():
+    """Names of the live Herdr terminals. `hc ls --json` is {"terminals": [{"name"?, "state", …}], …}."""
+    result = subprocess.run(["hc", "ls", "--json"], capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        raise ValueError("hc ls failed (exit %d): %s" % (result.returncode, (result.stderr or result.stdout).strip()))
+    rows = json.loads(result.stdout or "{}").get("terminals", [])
+    return {row["name"] for row in rows if isinstance(row, dict) and row.get("name") and row.get("state") == "live"}
+
+
+def launch(args, run_args):
+    """Check the plan, then start `run` in a new Herdr terminal. A live driver of the same name is left alone.
+
+    hc names allow a-z 0-9 - _ (1-32), so the pane is `orchestrate-<slug>`, not `orchestrate:<slug>`."""
+    plan_path = Path(args.plan).resolve(strict=True)
+    plan = parse_plan(plan_path.read_text(encoding="utf-8"))
+    check_plan(plan)
+    repo = Path(args.repo).resolve() if args.repo else Path(
+        run(["git", "-C", str(plan_path.parent), "rev-parse", "--show-toplevel"])).resolve()
+    name = ("orchestrate-" + plan["slug"])[:32].rstrip("-")
+    if name in live_terminals():
+        return {"pane": name, "started": False}
+    argv = ["hc", "run", "--bg", "--name", name, "--cwd", str(repo), "--json", "--",
+            "python3", str(Path(__file__).resolve()), "run", str(plan_path), "--repo", str(repo), *run_args]
+    result = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+    if result.returncode != 0:
+        raise ValueError("hc run failed (exit %d): %s" % (result.returncode, (result.stderr or result.stdout).strip()))
+    return {"pane": name, "started": True}
+
+
 def drive(args):
     require(args.max_workers >= 1, "--max-workers must be at least 1")
     driver = Driver(args)
@@ -1597,7 +1626,14 @@ def main():
     sub.add_argument("--ci-seconds", type=int, default=600, help="Longest one wait-checks call blocks before the loop moves on")
     sub.add_argument("--wait-seconds", type=int, default=60, help="Longest one wait blocks before the plan is re-read")
     sub.add_argument("--idle-interval", type=float, default=30, help="Seconds to sleep after an iteration that made no progress")
-    args = parser.parse_args()
+    sub = commands.add_parser("launch", help="Check the plan and start `run` in a Herdr terminal named orchestrate-<slug>")
+    sub.add_argument("plan")
+    sub.add_argument("--repo", help="Repository root; default the plan file's repository")
+    args, extra = parser.parse_known_args()
+    if extra and args.command != "launch":
+        parser.error("unrecognized arguments: " + " ".join(extra))
+    if args.command == "launch":
+        return launch(args, extra)  # unknown options are forwarded to `run`, which validates them
     if args.command == "run":
         return drive(args)
     if args.command == "inspect":

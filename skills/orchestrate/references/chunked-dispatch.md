@@ -1,5 +1,7 @@
 # Chunked dispatch
 
+**The driver does not run chunked units.** `orchestrate.py run` refuses a plan with a `big` ticket: split it in the plan. This file describes a hand-driven run only; its wait, timer and checkpoint steps are manual commands, not driver behavior.
+
 A small model is a good **typist** and a poor planner. So a large **planner** designs once and writes one **brief** per chunk, and each chunk's worker types its brief with no reconnaissance. [Routing](routing.md) decides which units are chunked and routes each chunk. The planner is the cost to watch: on the calibration round it used ~339k tokens for 20 briefs.
 
 ## 1. Plan
