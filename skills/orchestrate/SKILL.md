@@ -63,12 +63,12 @@ Check the worker's subsystem, checkout state, last result, and available context
 
 Work passes through **files**, not context. Each plan has a **run directory**, `~/.local/state/orchestrate/<slug>/`, kept beside its ledger. It is created 0700, never tracked, and kept after archive for audit:
 
-- `contract.md`, written once per plan: the report shape (the checkpoint JSON in [the state helper](references/state.md)) and the rules every task shares.
-- `<task>/task.md`: the packet below. Spawn and resume text is one line: "Read `<run>/<task>/task.md` and follow it."
+- `contract.md`: the report shape (the checkpoint JSON in [the state helper](references/state.md)) and the rules every task shares. The lead creates the directory (0700) and writes this file before the first dispatch.
+- `<task>/task.md`: opens with the contract's absolute path and its own report path, then the packet below. Spawn and resume text is one line: "Read `<run>/<task>/task.md` and follow it."
 - `<task>/report.json`: the worker's result, in the checkpoint shape. Prose goes in `report.md`. The worker's `report` call carries one line: its status and the path.
 - `<task>/review.md`: gate-2 findings. The reviewer returns one line: the count of blocking findings and the path.
 
-Files are write-once: a later attempt writes `report.2.json`, `review.2.md`, and so on. Run `checkpoint --report <run>/<task>/report.json` on the file itself. Open a file only when the helper rejects it, the worker is blocked, or a gate fails. The runtime store keeps the one-line reports, so the store plus the run directory form the audit trail.
+Files are write-once: a later attempt writes `report.2.json`, `review.2.md`, and so on. Run `checkpoint --report <run>/<task>/report.json` on the file itself; a rejection is a reason to investigate. The runtime store keeps the one-line reports, so the store plus the run directory form the audit trail.
 
 Write each new worker's `task.md` with:
 
@@ -99,7 +99,7 @@ If spawn delivery is uncertain, inspect the runtime and reservation before retry
 When a worker reports a ticket done, run three gates in the implementation checkout. Any FAIL or blocking finding sends the failing lines back to the worker (return to step 1).
 
 1. **Converge:** call the Skill tool with `converge` for this ticket (`--ticket T<n>`). Its checks: every scenario has a test named with its S-ID, every changed test carries an ID, and the diff stays inside the ticket's Paths. Any FAIL blocks.
-2. **Review:** dispatch a fresh-context large-class reviewer subagent with paths only: `<task>/task.md`, the plan, the commit range to diff itself, and the repo's AGENTS.md / CLAUDE.md. It checks correctness and the repo's conventions, plus a security lens when the diff touches auth, permissions or personal data. It writes its findings to `<task>/review.md`. Blocking findings go back to the worker as that path.
+2. **Review:** dispatch a fresh-context large-class reviewer subagent with paths only: `<task>/task.md`, the plan, the commit range to diff itself, and the repo's AGENTS.md / CLAUDE.md. It checks correctness and the repo's conventions, plus a security lens when the diff touches auth, permissions or personal data. It writes its findings to `<task>/review.md`. Blocking findings go back to the worker as that path, and the lead checkpoints the task PARTIAL with `review_rounds` raised by one. A fix round for the unit keeps the same `unit`, so [escalation](references/routing.md#escalation) counts across attempts.
 3. **Gaps (advice):** a fresh-context medium-class subagent, given the plan's path and the commit range, compares the plan with the diff and classifies each gap as missing, partial, contradicts or unrequested. Each gap becomes a new ticket. It never blocks and never edits code.
 
 A ticket is COMPLETE when converge passes, the review has no blocking finding, and CI is green on its PR. Record the commands and results in its row.

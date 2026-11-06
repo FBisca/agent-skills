@@ -15,7 +15,7 @@ A review in your own context is not a cold read: you know too much. The reader m
 ## Steps
 
 1. Resolve `<doc>` to an absolute path. Stop and ask if it is missing or not a single file.
-2. Spawn one fresh medium-class subagent (no fork, no inherited context) whose prompt is [`reader.md`](reader.md) plus the absolute path, with tools limited to file reading where the runtime allows (Claude: a subagent type without write/web tools if one exists, else general-purpose with the only-this-file rule as a prompt rule; Codex: the equivalent).
+2. Spawn one fresh medium-class ([class](../orchestrate/references/routing.md#class-to-model)) subagent (no fork, no inherited context) whose prompt is [`reader.md`](reader.md) plus the absolute path, with tools limited to file reading where the runtime allows (Claude: a subagent type without write/web tools if one exists, else general-purpose with the only-this-file rule as a prompt rule; Codex: the equivalent).
 3. Show its report to the user verbatim, then a one-line count: sections, undefined terms, ambiguities, Blockers.
 4. Stop. Do not fix the doc, answer the reader's questions from your own context, or rerun unprompted. Every `CANNOT PARAPHRASE` is a Blocker: the doc is not ready until the user clears it.
 

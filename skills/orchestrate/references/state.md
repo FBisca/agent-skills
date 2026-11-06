@@ -25,7 +25,7 @@ Write a compact JSON packet with the available file-edit tool. Example shape:
 }
 ```
 
-These are example values, not paths or commands to run unchanged. A routed packet adds its [route](routing.md): `"size"` (`small`, `regular`, `big`), `"difficulty"` (`simple`, `complex`), `"class"` (`small`, `medium`, `large`), `"effort"` (`low` through `max`) and the resolved `"model"`. `claim` rejects a route missing any of them. `owns` accepts literal relative files/directories, including `.` for exclusive ownership of the checkout. It rejects globs and paths that escape the checkout. Add focused context, peers, exclusions, or plan excerpts to the packet when useful. `worker` is a logical worker key; `runtime_id` is bound after native dispatch.
+These are example values, not paths or commands to run unchanged. A routed packet adds its [route](routing.md): `"size"` (`small`, `regular`, `big`), `"difficulty"` (`simple`, `complex`), `"class"` (`small`, `medium`, `large`), `"effort"` (`low` through `max`) and the resolved `"model"`. plus `"unit"`, the logical unit's ID shared by every attempt at it (first build, fix rounds, chunks). `claim` rejects a route missing any of them. A packet with only `model` or `effort` stays unrouted metadata. `owns` accepts literal relative files/directories, including `.` for exclusive ownership of the checkout. It rejects globs and paths that escape the checkout. Add focused context, peers, exclusions, or plan excerpts to the packet when useful. `worker` is a logical worker key; `runtime_id` is bound after native dispatch.
 
 ```sh
 python3 <skill-dir>/scripts/orchestrate.py claim --state <ledger> --packet <packet.json>
@@ -66,7 +66,7 @@ The worker writes its result as `<run>/<task>/report.json` in this shape, and th
 python3 <skill-dir>/scripts/orchestrate.py checkpoint --state <ledger> --task <task-id> --report <report.json>
 ```
 
-`COMPLETE` requires a runtime ID, confirmed acceptance, no remaining work, and passing evidence for every required check. A routed task also requires `review_rounds` (a whole number, 0 when the first review passed) and `usage` (the runtime's metric line for the worker, or `unknown`): the evidence for changing a routing cell. This validates the report contract; it does not independently prove the report true. `PARTIAL` keeps ownership. `BLOCKED` also requires `blocker` and a next action in `remaining`. A failed or omitted check needs a `reason`. Store short decisions, not transcripts. Optional `context` and `presentation` objects can preserve observed telemetry and verified runtime IDs.
+`COMPLETE` requires a runtime ID, confirmed acceptance, no remaining work, and passing evidence for every required check. A routed task also requires `review_rounds` (the failed review rounds so far, 0 when the first review passed; a PARTIAL checkpoint may carry it too) and `usage` (the runtime's metric line for the worker, or `unknown`): the evidence for changing a routing cell. This validates the report contract; it does not independently prove the report true. `PARTIAL` keeps ownership. `BLOCKED` also requires `blocker` and a next action in `remaining`. A failed or omitted check needs a `reason`. Store short decisions, not transcripts. Optional `context` and `presentation` objects can preserve observed telemetry and verified runtime IDs.
 
 If replacing a worker for an unfinished task, first stop or confirm it stopped using native tools. Then:
 
@@ -74,7 +74,7 @@ If replacing a worker for an unfinished task, first stop or confirm it stopped u
 python3 <skill-dir>/scripts/orchestrate.py release --state <ledger> --task <task-id> --stopped --reason <reason>
 ```
 
-This releases ledger ownership only; it does not stop an agent or remove a pane/worktree. Keep the old handoff and use a new task ID for the replacement attempt. Never pass `--stopped` based on a timeout or an idle-looking pane alone. There is no automatic stale-reservation expiry.
+Add `--cutoff` when the worker was stopped at its cutoff. `show --unit <id>` sums failed review rounds and cutoffs over the unit's attempts and reports `escalate` at two of either. Release only releases ledger ownership; it does not stop an agent or remove a pane/worktree. Keep the old handoff and use a new task ID for the replacement attempt. Never pass `--stopped` based on a timeout or an idle-looking pane alone. There is no automatic stale-reservation expiry.
 
 `show --state <ledger>` returns a short task index. Add `--task <task-id>` for the full packet and latest handoff. Writes are locked and atomic. A lock conflict returns an error; retry after the other update. No full ledger is injected on each task.
 
@@ -85,7 +85,7 @@ Obtain telemetry from the **child** runtime. When available, normalize it as:
 ```json
 {
   "kind": "current_context",
-  "model": "gpt-5.6-terra",
+  "model": "<resolved model>",
   "context_tokens": 40000,
   "effective_window": 200000,
   "observed_at": "2026-09-07T12:00:00+00:00",
@@ -93,7 +93,7 @@ Obtain telemetry from the **child** runtime. When available, normalize it as:
 }
 ```
 
-The numbers are illustrative, not Terra defaults. Use the effective window exposed by the running child. Never substitute cumulative usage or the model's advertised maximum. Update the timestamp only when collecting a new observation; do not relabel stale data as fresh.
+The numbers are illustrative. Use the effective window exposed by the running child. Never substitute cumulative usage or the model's advertised maximum. Update the timestamp only when collecting a new observation; do not relabel stale data as fresh.
 
 ```sh
 python3 <skill-dir>/scripts/orchestrate.py context --sample <sample.json> --reserve-tokens <estimate>

@@ -43,11 +43,11 @@ Pass the cell's effort as `effort`. The model is chosen at spawn, the cache boun
 
 ## Escalation
 
-When a unit fails two review rounds or two cutoffs in its cell, stop its worker and ask the user. Bring:
+A **unit** keeps one ID across every attempt at it: the first build, each fix round, each chunk. `show --unit <id>` sums its failed review rounds and cutoffs over all attempts. When it reports `escalate` (two of either), stop the worker and ask the user. Bring:
 - the evidence: findings, cutoffs, usage;
 - the options: one class up, re-plan with the large planner, or split the unit.
 
-The user picks. Record the choice in the ledger packet.
+The user picks. Release the attempt and reclaim the unit under a new task ID with the chosen route; the new packet's `escalation` field records the choice.
 
 ## Changing a cell
 

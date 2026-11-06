@@ -105,7 +105,12 @@ ROUTE = {"size": ("small", "regular", "big"), "difficulty": ("simple", "complex"
 
 
 def routed(packet):
-    return any(key in packet for key in (*ROUTE, "model"))
+    """A packet opts into routing with a cell key; model or effort alone stay legacy metadata."""
+    return any(key in packet for key in ("size", "difficulty", "class"))
+
+
+def whole(value):
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
 def claim(data, packet):
@@ -123,6 +128,7 @@ def claim(data, packet):
         for key, allowed in ROUTE.items():
             require(packet.get(key) in allowed, key + " must be one of " + ", ".join(allowed))
         require(isinstance(packet.get("model"), str) and packet["model"].strip(), "a routed packet needs its model")
+        require(isinstance(packet.get("unit"), str) and packet["unit"].strip(), "a routed packet needs its unit")
     snapshot = checkout_snapshot(packet["checkout"])
     packet = dict(packet, checkout=snapshot["checkout"])
     paths = owned_paths(packet)
@@ -174,6 +180,7 @@ def checkpoint(data, task_id, report):
         require(isinstance(check, dict) and isinstance(check.get("command"), str), "invalid check")
         require(check.get("outcome") in ("passed", "failed", "not_run"), "invalid check outcome")
         require(check.get("outcome") == "passed" or check.get("reason"), "failed or omitted check needs a reason")
+    require("review_rounds" not in report or whole(report["review_rounds"]), "review_rounds must be a whole number")
     if status == "COMPLETE":
         require(task["runtime_id"], "bind the runtime agent before completion")
         require(report.get("acceptance_met") is True, "acceptance criteria are not confirmed")
@@ -182,9 +189,7 @@ def checkpoint(data, task_id, report):
         passed = {c["command"] for c in checks if c["outcome"] == "passed"}
         require(set(task["packet"]["checks"]).issubset(passed), "required checks are missing")
         if routed(task["packet"]):
-            rounds = report.get("review_rounds")
-            require(isinstance(rounds, int) and not isinstance(rounds, bool) and rounds >= 0,
-                    "a routed task needs review_rounds")
+            require("review_rounds" in report, "a routed task needs review_rounds")
             require(isinstance(report.get("usage"), str) and report["usage"].strip(),
                     "a routed task needs usage (the runtime's metric line, or unknown)")
         task["finished_at"] = now()
@@ -195,10 +200,28 @@ def checkpoint(data, task_id, report):
     return task
 
 
+def release(data, task_id, reason, cutoff=False):
+    task = data["tasks"][task_id]
+    require(reason.strip(), "release requires a reason")
+    require(task["status"] != "COMPLETE", "completed task cannot be released")
+    task.update(status="RELEASED", release_reason=reason, cutoff=cutoff, updated_at=now())
+    return task
+
+
+def unit_summary(data, unit):
+    """Failed reviews and cutoffs summed over every attempt at one logical unit."""
+    attempts = [t for t in data["tasks"].values() if t["packet"].get("unit") == unit]
+    require(attempts, "no attempts for unit " + unit)
+    failed = sum((t.get("report") or {}).get("review_rounds", 0) for t in attempts)
+    cutoffs = sum(1 for t in attempts if t.get("cutoff"))
+    return {"unit": unit, "attempts": [task_summary(t) for t in attempts], "failed_reviews": failed,
+            "cutoffs": cutoffs, "escalate": failed >= 2 or cutoffs >= 2}
+
+
 def task_summary(task):
     summary = {"task_id": task["packet"]["task_id"], "worker": task["packet"]["worker"],
                "status": task["status"], "runtime_id": task["runtime_id"]}
-    for key in (*ROUTE, "model"):
+    for key in ("unit", *ROUTE, "model"):
         if key in task["packet"]:
             summary[key] = task["packet"][key]
     return summary
@@ -288,6 +311,7 @@ def main():
             sub.add_argument("--task", required=True)
         if name == "show":
             sub.add_argument("--task", help="Show the full record for one task; otherwise show a compact index")
+            sub.add_argument("--unit", help="Sum failed reviews and cutoffs over a unit's attempts")
         if name == "claim":
             sub.add_argument("--packet", required=True)
         if name == "bind":
@@ -297,6 +321,7 @@ def main():
         if name == "release":
             sub.add_argument("--reason", required=True)
             sub.add_argument("--stopped", action="store_true", help="Assert runtime confirms the worker stopped")
+            sub.add_argument("--cutoff", action="store_true", help="The worker was stopped at its cutoff")
     sub = commands.add_parser("context")
     sub.add_argument("--sample", required=True)
     sub.add_argument("--reserve-tokens", type=int, required=True)
@@ -322,11 +347,10 @@ def main():
         if args.command == "checkpoint":
             return task_summary(checkpoint(data, args.task, read_json(args.report)))
         if args.command == "release":
-            require(args.stopped and args.reason.strip(), "release requires --stopped and a reason")
-            task = data["tasks"][args.task]
-            require(task["status"] != "COMPLETE", "completed task cannot be released")
-            task.update(status="RELEASED", release_reason=args.reason, updated_at=now())
-            return task_summary(task)
+            require(args.stopped, "release requires --stopped")
+            return task_summary(release(data, args.task, args.reason, args.cutoff))
+        if args.unit:
+            return unit_summary(data, args.unit)
         return data["tasks"][args.task] if args.task else [task_summary(t) for t in data["tasks"].values()]
 
 

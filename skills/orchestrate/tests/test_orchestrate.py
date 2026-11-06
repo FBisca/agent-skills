@@ -108,11 +108,14 @@ class WorkflowTests(unittest.TestCase):
                 app.checkpoint(self.data, "validation", report)
         self.assertEqual(self.data["tasks"]["validation"]["status"], "ACTIVE")
 
+    def routed(self, task_id="validation", worker="api", unit="T1"):
+        return dict(self.packet, task_id=task_id, worker=worker, unit=unit, size="small",
+                    difficulty="simple", effort="low", model="any-small-model", **{"class": "small"})
+
     def test_routed_packet_records_its_cell_and_completion_records_usage(self):
-        routed = dict(self.packet, size="small", difficulty="simple", **{"class": "small"},
-                      effort="low", model="any-small-model")
+        routed = self.routed()
         for bad in (dict(routed, size="huge"), dict(routed, difficulty="hard"), dict(routed, **{"class": "tiny"}),
-                    dict(routed, effort="huge"), dict(routed, model=""),
+                    dict(routed, effort="huge"), dict(routed, model=""), dict(routed, unit=""),
                     {k: v for k, v in routed.items() if k != "difficulty"}):
             with self.assertRaises(ValueError):
                 app.claim(self.data, bad)
@@ -125,6 +128,30 @@ class WorkflowTests(unittest.TestCase):
         done = app.checkpoint(self.data, "validation", dict(self.report(), review_rounds=1, usage="unknown"))
         self.assertEqual(done["status"], "COMPLETE")
         self.assertEqual(app.task_summary(done)["class"], "small")
+
+    def test_legacy_model_metadata_stays_unrouted(self):
+        legacy = dict(self.packet, model="any-model", effort="high")
+        app.claim(self.data, legacy)
+        app.bind(self.data, "validation", "child")
+        self.assertEqual(app.checkpoint(self.data, "validation", self.report())["status"], "COMPLETE")
+
+    def test_unit_counts_failed_reviews_and_cutoffs_across_attempts(self):
+        app.claim(self.data, self.routed("t1-a1", "w1"))
+        app.bind(self.data, "t1-a1", "child-1")
+        with self.assertRaises(ValueError):
+            app.checkpoint(self.data, "t1-a1", dict(self.report("PARTIAL"), task_id="t1-a1", review_rounds="one",
+                                                   remaining=["fix review"]))
+        app.checkpoint(self.data, "t1-a1", dict(self.report("PARTIAL"), task_id="t1-a1", review_rounds=1,
+                                               remaining=["fix review"]))
+        app.release(self.data, "t1-a1", "cutoff at 10 minutes", cutoff=True)
+        self.assertFalse(app.unit_summary(self.data, "T1")["escalate"])
+        app.claim(self.data, self.routed("t1-a2", "w2"))
+        app.bind(self.data, "t1-a2", "child-2")
+        app.checkpoint(self.data, "t1-a2", dict(self.report("PARTIAL"), task_id="t1-a2", review_rounds=1,
+                                               remaining=["fix review"]))
+        unit = app.unit_summary(self.data, "T1")
+        self.assertEqual((unit["failed_reviews"], unit["cutoffs"], unit["escalate"]), (2, 1, True))
+        self.assertEqual([a["task_id"] for a in unit["attempts"]], ["t1-a1", "t1-a2"])
 
     def test_blocked_retains_ownership_and_release_requires_stopped(self):
         app.claim(self.data, self.packet)
@@ -183,7 +210,7 @@ class ContextAndTransportTests(unittest.TestCase):
             self.assertEqual(app.context_verdict(sample, 20)["status"], "unknown")
 
     def test_metrics_preserve_unknowns_and_reject_duplicate_usage(self):
-        sample = {"kind": "request", "id": "1", "source": "trace", "backend": "codex", "model": "terra",
+        sample = {"kind": "request", "id": "1", "source": "trace", "backend": "codex", "model": "any-model",
                   "strategy": "reuse", "actor": "worker", "input_tokens": 100, "output_tokens": 10}
         result = app.metrics([sample, dict(sample, id="2", input_tokens=200, cost_usd=0.2)])
         group = result["groups"][0]
