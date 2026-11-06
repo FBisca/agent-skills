@@ -13,6 +13,8 @@ Arguments: `[plan-path-or-active-plan] [T<n>|next]`.
 
 Own ticket selection, dependencies, worker assignments, and integration. Delegate code changes to `implementer`. Implement locally only when delegation is unavailable; report that fallback.
 
+The lead **delegates**. It reads the plan, the ledger, gate verdicts and one-line reports. It opens code, diffs, reports and reviews only to **investigate**: a rejected checkpoint, a blocked worker, a failed gate, or reports that conflict. Everything else is passed by path, for an agent to read.
+
 ## Gate
 
 - When the plan is missing, unapproved, or lacks any Input field, refuse: name what is missing and point the user to `/start-planning`. Plan nothing and build nothing yourself. A PRD, Linear issue or vault note is a source, not a plan.
@@ -25,7 +27,7 @@ Own ticket selection, dependencies, worker assignments, and integration. Delegat
 - A ticket owned by a person (prod data apply, sign-off, deploy) is theirs: tell them what it needs and wait for their confirmation before marking it COMPLETE.
 - Execute only the requested scope. Within that scope, select independent tickets without another confirmation. Ask only when the plan, scope, or a material decision is unresolved.
 - Use the assigned checkout. A blocked ticket branches from `main` after its blockers merge; stacked branches break under squash merge. Use isolated worktrees for concurrent tickets. Preserve existing user changes.
-- Verify predecessor behavior in the **actual implementation checkout**. A completion message or commit in another checkout is insufficient.
+- Confirm each predecessor's merge commit is in the **actual implementation checkout** (`git merge-base --is-ancestor <sha> HEAD`). A completion message or commit in another checkout is insufficient.
 - Set file or directory ownership per worker. Serialize overlapping edits in one checkout. Assign an integration owner for changes across branches or repositories.
 
 ## Route each unit
@@ -72,7 +74,7 @@ Write each new worker's `task.md` with:
 
 1. Ticket ID, purpose, and its scenarios verbatim, with the **red-first** rule: one test per scenario, named with its S-ID (`it('S3: …')`, `def test_S3_…`), seen failing before the code exists.
 2. Exact checkout, branch, the ticket's Paths as file ownership, and exclusions. Shared databases are read-only for workers; schema changes go through migrations in the worker's own branch.
-3. Relevant files and symbols, the plan's Decisions, and dependency evidence.
+3. The pointers the plan already holds: the ticket's Seams, the plan's Decisions, and predecessor commits. The worker finds the code.
 4. The repo's full CI gate (types, lint, tests as CI runs them), assigned peers, and integration owner.
 
 Give a resumed worker a new task directory holding only the new task, changed constraints, relevant peer updates, and changed checkout state. Do not repeat the full plan or broad discovery. The orchestrator maps scope; the worker reads implementation details.
@@ -88,7 +90,7 @@ If spawn delivery is uncertain, inspect the runtime and reservation before retry
 - Let workers ask focused questions. The orchestrator owns scope changes and resolves incompatible interface decisions.
 - Prefer one blocking `wait(all)` per work period over native notifications. Avoid repeated status polling and repeated unchanged reports.
 - Wait for PR checks with `~/bin/wait-checks <owner>/<repo>#<pr> ...` (full path: shells started before `~/bin` existed don't have it on PATH), run in the background: one PASS/FAIL line per PR, plus the failed log on FAIL. Do not write ad-hoc watch loops.
-- Workers run relevant checks and return commands, outcomes, and omissions. Inspect their diff and evidence. Rerun checks only for changed inputs, integration, failures, or unresolved risk.
+- Workers run relevant checks and return commands, outcomes, and omissions in `report.json`. The gates are the evidence; investigate a diff only when a gate fails. Rerun checks only for changed inputs, integration, failures, or unresolved risk.
 - Require verification on the combined result when repositories or branches interact. A pane state of `idle` or `done` is not evidence of task completion.
 - Record the result and handoff. The ledger packet carries the route: `size`, `difficulty`, `class`, `effort` and the resolved `model`; the completing report carries `review_rounds` and `usage`, the runtime's metric line for that worker from `wait` or `status`, or `unknown` when the runtime has none. Include parent and worker costs, cache use, time and correctness in comparisons. Never claim measured savings without measurements.
 
@@ -97,8 +99,8 @@ If spawn delivery is uncertain, inspect the runtime and reservation before retry
 When a worker reports a ticket done, run three gates in the implementation checkout. Any FAIL or blocking finding sends the failing lines back to the worker (return to step 1).
 
 1. **Converge:** call the Skill tool with `converge` for this ticket (`--ticket T<n>`). Its checks: every scenario has a test named with its S-ID, every changed test carries an ID, and the diff stays inside the ticket's Paths. Any FAIL blocks.
-2. **Review:** dispatch a fresh-context large-class reviewer subagent with only the ticket, its scenarios, the plan's Decisions, the diff, and the repo's AGENTS.md / CLAUDE.md. It checks correctness and the repo's conventions, plus a security lens when the diff touches auth, permissions or personal data. It writes its findings to `<task>/review.md`. Blocking findings go back to the worker as that path.
-3. **Gaps (advice):** a fresh-context medium-class subagent compares the plan with the diff and classifies each gap as missing, partial, contradicts or unrequested. Each gap becomes a new ticket. It never blocks and never edits code.
+2. **Review:** dispatch a fresh-context large-class reviewer subagent with paths only: `<task>/task.md`, the plan, the commit range to diff itself, and the repo's AGENTS.md / CLAUDE.md. It checks correctness and the repo's conventions, plus a security lens when the diff touches auth, permissions or personal data. It writes its findings to `<task>/review.md`. Blocking findings go back to the worker as that path.
+3. **Gaps (advice):** a fresh-context medium-class subagent, given the plan's path and the commit range, compares the plan with the diff and classifies each gap as missing, partial, contradicts or unrequested. Each gap becomes a new ticket. It never blocks and never edits code.
 
 A ticket is COMPLETE when converge passes, the review has no blocking finding, and CI is green on its PR. Record the commands and results in its row.
 
