@@ -7,10 +7,11 @@ One of --ticket / --final is required. --base defaults to the ref origin/HEAD po
 1. coverage: every scenario in scope has a test named with its ID.
 2. tagged:   every test added/changed since base carries a plan S-ID or a qualified spec ID.
 3. scope:    every changed file matches a Paths entry in scope. The plan file and living-spec files
-             (`<specs>/*.md`) are exempt.
+             (`<specs>/*.md`) are exempt; under --final so is `docs/plans/<plan file name>` even when the
+             plan was passed from outside the repo.
 4. spec:     if files under a living-spec area's `Paths:` changed, that spec file changed too.
              Runs only with --final; with --ticket it prints SKIPPED.
-Exit 0 only if no check FAILs, else 1. A plan that is not `Status: APPROVED` (the word may sit anywhere on a
+Exit 0 only if no check FAILs, else 1. A plan that is not `Status: APPROVED` (or, under --final only, ARCHIVED; the word may sit anywhere on a
 line), or has no `- **S<n>**` scenario lines, or no `## Tickets` table is refused before any check: the
 missing part goes to stderr, exit 2.
 
@@ -205,13 +206,13 @@ def specs_in(repo, specs):
     return out
 
 
-def refusal(text):
-    """What is missing from the plan, or []."""
+def refusal(text, final=False):
+    """What is missing from the plan, or []. --final also accepts ARCHIVED: the archive branch sets it."""
     miss = []
     m = re.search(r"\bStatus:\s*\**\s*([A-Za-z-]+)", text)
     if not m:
         miss.append("no `Status:` line")
-    elif m.group(1).upper() != "APPROVED":
+    elif m.group(1).upper() not in ("APPROVED", "ARCHIVED" if final else "APPROVED"):
         miss.append(f"Status is {m.group(1)}, not APPROVED")
     if not re.search(r"^\s*-\s+\*\*S\d+[a-z]?\*\*", text, re.M):
         miss.append("no `- **S<n>**` scenario lines")
@@ -254,7 +255,7 @@ def main(argv=None):
     repo = Path(a.repo or git(".", "rev-parse", "--show-toplevel").strip()).resolve()
     plan = Path(a.plan).resolve()
     text = plan.read_text()
-    miss = refusal(text)
+    miss = refusal(text, a.final)
     if miss:
         print(f"REFUSED {plan.name}: {'; '.join(miss)}", file=sys.stderr)
         return 2
@@ -275,6 +276,9 @@ def main(argv=None):
         plan_rel = plan.relative_to(repo).as_posix()
     except ValueError:
         plan_rel = None
+    # The archive commits the plan file itself (Status ARCHIVED); under --final that one file, wherever the
+    # driver's copy lives, is exempt by its repo path.
+    exempt = {plan_rel, f"docs/plans/{plan.name}" if a.final else None} - {None}
 
     new_names = {n for ls in added.values() for n in names_in(ls)} | rust_names
     all_names = []  # (name, counts as bare S-ID evidence)
@@ -293,7 +297,7 @@ def main(argv=None):
                 if not any(has_id(n, i) for i in ids)
                 and not any(has_id(n, s) for s in spec_ids)]
     spec_files = set(specs)
-    code_files = [f for f in files if f != plan_rel and f not in spec_files]
+    code_files = [f for f in files if f not in exempt and f not in spec_files]
     outside = [f for f in code_files if not matches(f, ticket_paths)]
     stale = [Path(s).stem for s, (_, globs) in specs.items()
              if s not in files and any(matches(f, globs) for f in code_files)]
