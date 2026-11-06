@@ -20,6 +20,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import contracts  # noqa: E402
+import events  # noqa: E402
 
 
 def now():
@@ -553,41 +554,27 @@ ARCHIVE_ACCEPTANCE = [
 ]
 
 
-def sum_usage(values):
-    """One ticket's usage from the runtime's per-assignment values: numeric fields summed, else the values as listed;
-    `unknown` when the runtime reported none."""
-    if not values:
-        return "unknown"
-    if all(isinstance(v, dict) and all(type(x) in (int, float) for x in v.values()) for v in values):
-        total = {}
-        for value in values:
-            for key, number in value.items():
-                total[key] = total.get(key, 0) + number
-        return total
-    return values if len(values) > 1 else values[0]
+sum_usage = events.sum_usage
 
 
-def run_metrics(data, slug):
-    """Per unit: route, failed review rounds, escalations (events sent to a decider plus pauses for the user), decider
-    calls, worker usage; the lead's own model turns are 0 by construction (the driver is code)."""
+def legacy_imports(data):
+    """What a ledger written before `events.jsonl` knew about each unit, as `import` events: its route, failed
+    rounds, escalations (events sent to a decider plus pauses for the user), decider calls and the runtime's usage per
+    assignment. The new driver writes them once, when it takes over such a run dir."""
     units = {}
     for task in data["tasks"].values():
-        unit = task["packet"].get("unit") or task["packet"]["task_id"]
-        entry = units.setdefault(unit, {"tasks": []})
-        entry["tasks"].append(task)
-    tickets = {}
-    for unit, entry in units.items():
-        tasks = entry["tasks"]
-        route = {key: tasks[0]["packet"].get(key) for key in ("size", "difficulty", "class", "model")}
+        units.setdefault(task["packet"].get("unit") or task["packet"]["task_id"], []).append(task)
+    rows = []
+    for unit, tasks in units.items():
         ids = {a.get("assignment_id") for t in tasks for a in (t, t.get("review") or {}, t.get("decision") or {})} - {None}
-        usage = [data.get("usage", {})[i] for i in sorted(ids) if i in data.get("usage", {})]
-        tickets[unit] = {
-            "route": route,
-            "review_rounds": sum((t.get("report") or {}).get("review_rounds", 0) for t in tasks),
-            "escalations": sum(1 for t in tasks if t.get("event")) + sum(len(t.get("attention") or []) for t in tasks),
-            "decider_calls": sum(1 for t in tasks if t.get("decision")),
-            "usage": sum_usage(usage)}
-    return {"slug": slug, "lead": {"model_turns": 0}, "tickets": tickets}
+        usage = data.get("usage", {})
+        rows.append({"unit": unit,
+                     "route": {key: tasks[0]["packet"].get(key) for key in ("size", "difficulty", "class", "model")},
+                     "review_rounds": sum((t.get("report") or {}).get("review_rounds", 0) for t in tasks),
+                     "escalations": sum(1 for t in tasks if t.get("event")) + sum(len(t.get("attention") or []) for t in tasks),
+                     "decider_calls": sum(1 for t in tasks if t.get("decision")),
+                     "assignments": {i: usage[i] for i in sorted(ids) if i in usage}})
+    return rows
 
 
 def metrics_table(metrics):
@@ -618,6 +605,27 @@ class Driver:
         self.received = False
         self.sleep = time.sleep  # injectable so tests do not really sleep
 
+    # ---- the event log: every state change is on disk before the next step -----------------------------------
+
+    def log(self, kind, **fields):
+        events.append(self.run_dir / "events.jsonl", kind, **fields)
+
+    @contextmanager
+    def book(self):
+        """The ledger, plus one `state` event for every task whose gate or status the block changed. The line is
+        appended before the ledger is written, so the log is never behind the state it describes."""
+        with ledger(self.ledger_path) as data:
+            before = {task_id: (task.get("gate"), task["status"]) for task_id, task in data["tasks"].items()}
+            yield data
+            for task_id, task in data["tasks"].items():
+                old, new = before.get(task_id, (None, None)), (task.get("gate"), task["status"])
+                if old == new:
+                    continue
+                packet = task["packet"]
+                route = {k: packet[k] for k in ("size", "difficulty", "class", "model") if k in packet}
+                self.log("state", unit=packet.get("unit") or task_id, task=task_id, gate=[old[0], new[0]],
+                         status=[old[1], new[1]], route=route if task_id not in before and route else None)
+
     def read_plan(self):
         plan = parse_plan(self.plan_path.read_text(encoding="utf-8"))
         check_plan(plan)
@@ -637,6 +645,10 @@ class Driver:
             contract.write_text(CONTRACT, encoding="utf-8")
         with ledger(self.ledger_path) as data:
             self.lead = data.setdefault("lead", "orchestrate:" + self.slug)
+            legacy = legacy_imports(data) if not (self.run_dir / "events.jsonl").exists() else []
+        for row in legacy:  # a run dir written before events.jsonl: its history enters the log once
+            self.log("import", **row)
+        self.log("start", pid=os.getpid(), cli=self.args.cli, max_workers=self.args.max_workers)
 
     def loop(self):
         idle = False
@@ -666,6 +678,7 @@ class Driver:
     def idle(self):
         """Back off after an iteration that dispatched, advanced and handled nothing: the runtime's wait returns
         at once when nothing is unfinished, so a PR awaiting merge or a parked gate would otherwise spin."""
+        self.log("idle", interval=self.args.idle_interval)
         self.sleep(self.args.idle_interval)
 
     # ---- gates: a worker's report -> converge -> one review -> fix rounds -----------------------------------
@@ -687,7 +700,7 @@ class Driver:
             if kind != "complete":
                 self.on_agent_attention(assignment_id, "exited" if kind == "failed" else kind, message.get("text") or "")
                 continue
-            with ledger(self.ledger_path) as data:
+            with self.book() as data:
                 if (data.get("gaps") or {}).get("assignment_id") == assignment_id:
                     data["gaps"]["ended"] = True  # advisory: nothing waits on it any more
                     continue
@@ -724,7 +737,7 @@ class Driver:
 
     def parked_assignments(self):
         """Assignment ids that belong to a parked unit (paused, blocked or skipped): open in the runtime, not work."""
-        with ledger(self.ledger_path) as data:
+        with self.book() as data:
             gaps = data.get("gaps") or {}
             return {agent.get("assignment_id") for task in data["tasks"].values() if task.get("gate") in PARKED
                     for agent in (task, task.get("review") or {}, task.get("decision") or {})} - {None} | (
@@ -735,7 +748,7 @@ class Driver:
         handled once: a unit that already has a gate (deciding, paused, reviewing, ...) ignores it. A reviewer or
         decider that ends silently moves its gate on, so the missing file is reported as a contract error."""
         hit = None
-        with ledger(self.ledger_path) as data:
+        with self.book() as data:
             for task_id, task in data["tasks"].items():
                 gate = task.get("gate")
                 if task["status"] in ("COMPLETE", "RELEASED"):
@@ -747,7 +760,7 @@ class Driver:
                 elif not gate and task.get("assignment_id") == assignment_id:
                     hit = (task_id, "worker", task["packet"]["worker"])
         if not hit:
-            with ledger(self.ledger_path) as data:
+            with self.book() as data:
                 if (data.get("gaps") or {}).get("assignment_id") == assignment_id:
                     data["gaps"]["ended"] = True  # the gaps review is advisory: it never blocks or pauses anything
                     return event("gaps reviewer %s: %s" % (ATTENTION[kind], text or "no gaps.md"))
@@ -768,7 +781,7 @@ class Driver:
                  "reviewed": self.step_reviewed, "fix-pending": self.step_fix, "decide": self.step_decide,
                  "decided": self.step_decided, "redo-pending": self.step_redo,
                  "ready-for-ci": self.step_ci, "awaiting-merge": self.step_merge, "cleanup": self.step_cleanup}
-        with ledger(self.ledger_path) as data:
+        with self.book() as data:
             ids = [task_id for task_id, task in data["tasks"].items() if task.get("gate") in steps]
         acted = 0
         for task_id in ids:
@@ -782,6 +795,7 @@ class Driver:
                 except (ValueError, OSError, subprocess.TimeoutExpired) as error:
                     self.stuck.add((task_id, gate))
                     self.errors.append("%s: %s" % (task_id, error))
+                    self.log("error", unit=self.unit_of(task_id), task=task_id, gate=gate, error=str(error)[:500])
                     event("%s gate %s failed: %s" % (task_id, gate, error))
                     break
                 acted += 1
@@ -789,26 +803,32 @@ class Driver:
 
     def awaiting(self):
         """Tickets whose PR is not merged yet: the run stays up and re-polls them."""
-        with ledger(self.ledger_path) as data:
+        with self.book() as data:
             return any(t.get("gate") in ("ready-for-ci", "awaiting-merge") for t in data["tasks"].values())
 
     def task(self, task_id):
-        with ledger(self.ledger_path) as data:
+        with self.book() as data:
             return json.loads(json.dumps(data["tasks"][task_id]))
 
+    def unit_of(self, task_id):
+        with self.book() as data:
+            task = data["tasks"].get(task_id)
+        return (task["packet"].get("unit") or task_id) if task else task_id
+
     def mark(self, task_id, **fields):
-        with ledger(self.ledger_path) as data:
+        with self.book() as data:
             data["tasks"][task_id].update(fields, updated_at=now())
 
     def attention(self, task_id, kind, reason):
         """Pause the unit: a gate cannot advance and no decider can settle it. The ticket's Status reads
         `needs you`, `attention.md` gets an entry, and the other tickets keep running."""
-        with ledger(self.ledger_path) as data:
+        with self.book() as data:
             task = data["tasks"][task_id]
             task.setdefault("attention", []).append({"at": now(), "kind": kind, "reason": reason})
             task["gate"] = "attention"
             unit = task["packet"]["unit"].upper()
         event("%s needs attention (%s): %s" % (task_id, kind, reason))
+        self.log("attention", unit=unit.lower(), task=task_id, cause=kind, reason=reason[:500])
         self.note_attention(unit, kind, reason)
         self.write_status(unit, "IN PROGRESS · needs you: " + cell(reason))
 
@@ -831,7 +851,7 @@ class Driver:
 
     def raise_event(self, task_id, kind, reason, fix=None):
         """An event only a decider can settle. It gets a fresh decider, `MAX_DECIDERS` times per unit; then the user."""
-        with ledger(self.ledger_path) as data:
+        with self.book() as data:
             unit = data["tasks"][task_id]["packet"]["unit"]
             used = sum(1 for t in data["tasks"].values() if t["packet"].get("unit") == unit and t.get("decision"))
             if used < MAX_DECIDERS:
@@ -842,6 +862,7 @@ class Driver:
         if used >= MAX_DECIDERS:
             return self.attention(task_id, kind, "%s (%d decider calls on %s already)" % (reason, used, unit))
         event("%s needs a decision (%s): %s" % (task_id, kind, reason))
+        self.log("escalation", unit=unit, task=task_id, cause=kind, reason=reason[:500])
 
     def escalate(self, task_id, reason, fix):
         """A unit failed its gates a 3rd time: a decider settles it. `fix` is the round a `retry` would run."""
@@ -850,7 +871,7 @@ class Driver:
     def record_report(self, task_id, report, **changes):
         """Checkpoint the worker's report as PARTIAL: the unit is not COMPLETE until CI and the merge."""
         path = self.run_dir / task_id / "report.json"
-        with ledger(self.ledger_path) as data:
+        with self.book() as data:
             # review_rounds is the driver's own count: the worker's value is never trusted.
             checkpoint(data, task_id, dict(report, status="PARTIAL", **dict({"review_rounds": 0}, **changes)))
             data["tasks"][task_id]["report_path"] = str(path)
@@ -898,13 +919,23 @@ class Driver:
         """A gate failed: raise review_rounds, then a fix round, or the escalation hook on the 3rd failure."""
         remaining = [describe(item) for item in items]
         self.record_report(task_id, report, review_rounds=1, remaining=remaining)
-        with ledger(self.ledger_path) as data:
+        with self.book() as data:
             unit = data["tasks"][task_id]["packet"]["unit"]
             failures = unit_summary(data, unit)["failed_reviews"]
         fix = {"source": source, "items": items, "attempt": failures}
+        self.log("round", unit=unit, task=task_id, source=source, attempt=failures)
+        for item in items:
+            self.log_finding(unit, task_id, source, "blocking", item)
         if failures > MAX_FIX_ROUNDS:
             return self.escalate(task_id, "%s failed its gates %d times; last: %s" % (unit, failures, "; ".join(remaining)), fix)
         self.mark(task_id, gate="fix-pending", fix=fix)
+
+    def log_finding(self, unit, task_id, source, kind, item):
+        """One `finding` event: a blocking item that goes to a fix round, or a deferred one that goes to deferred.md."""
+        found = item.get("id") if isinstance(item, dict) else None
+        text = item.get("note") or item.get("problem") if isinstance(item, dict) else item
+        self.log("finding", unit=unit, task=task_id, source=source, finding_kind=kind, id=found,
+                 summary=cell(text or "", 200))
 
     def step_converged(self, task_id):
         task = self.task(task_id)
@@ -920,10 +951,10 @@ class Driver:
         task_md = review_dir / "task.md"
         if not task_md.exists():
             task_md.write_text(self.review_text(packet, review["path"]), encoding="utf-8")
-        spawned = runtime_call(self.lead, "spawn", {
+        _, assignment_id = self.ensure_agent(name, "reviewer", unit, {
             "kind": "worker", "name": name, "task": "Read %s and follow it." % task_md, "cwd": packet["checkout"],
             "cli": self.args.cli, "model": self.models["large"], "effort": "high"})
-        self.mark(task_id, gate="reviewing", review=dict(review, assignment_id=assignment_of(spawned)))
+        self.mark(task_id, gate="reviewing", review=dict(review, assignment_id=assignment_id))
         event("spawned %s (large, %s, high)" % (name, self.models["large"]))
 
     def review_text(self, packet, review_path):
@@ -959,17 +990,20 @@ class Driver:
         if not (review["commit"].startswith(report["head"]) or report["head"].startswith(review["commit"])):
             return self.attention(task_id, "review", "review.json reviewed commit %s but the report's head is %s"
                                   % (review["commit"], report["head"]))
-        if review["deferred"]:
+        blocking, deferred_items = contracts.review_items(review)
+        for item in deferred_items:
+            self.log_finding(task["packet"]["unit"], task_id, "review", "deferred", item)
+        if deferred_items:
             deferred = self.run_dir / "deferred.md"
             if not deferred.exists():
                 deferred.write_text("# Deferred findings: %s (for the major review after the driver ships)\n\n" % self.slug,
                                     encoding="utf-8")
             with deferred.open("a", encoding="utf-8") as stream:
-                for item in review["deferred"]:
+                for item in deferred_items:
                     stream.write("- %s %s: %s (%s)\n" % (task["packet"]["unit"].upper(), item["id"], item["note"],
                                                          task["review"]["path"]))
         if review["verdict"] == "block":
-            return self.fail_gate(task_id, report, "review", review["major"])
+            return self.fail_gate(task_id, report, "review", blocking)
         self.mark(task_id, gate="ready-for-ci")
 
     # ---- CI, merge, cleanup ------------------------------------------------------------------------------
@@ -979,7 +1013,7 @@ class Driver:
         """The unit's pull request: a fix round opens none, so fall back to an earlier attempt's report."""
         task = self.task(task_id)
         reports = [contracts.load(task["report_path"], contracts.validate_report)]
-        with ledger(self.ledger_path) as data:
+        with self.book() as data:
             reports += [t["report"] for t in data["tasks"].values()
                         if t["packet"].get("unit") == task["packet"]["unit"] and t.get("report")]
         url = next((r["pr"] for r in reports if r.get("pr")), None)
@@ -1032,7 +1066,7 @@ class Driver:
         if state.get("state") != "MERGED":
             return False
         try:
-            with ledger(self.ledger_path) as data:
+            with self.book() as data:
                 task = data["tasks"][task_id]
                 checkpoint(data, task_id, dict(task["report"], status="COMPLETE", remaining=[], acceptance_met=True,
                                                review_rounds=task["report"].get("review_rounds", 0)))
@@ -1047,7 +1081,7 @@ class Driver:
         """Stop a finished worker and remove its worktree, only when nothing would be lost; else leave it and say why."""
         task = self.task(task_id)
         packet = task["packet"]
-        with ledger(self.ledger_path) as data:
+        with self.book() as data:
             busy = [t["packet"]["task_id"] for t in data["tasks"].values()
                     if t["packet"]["worker"] == packet["worker"] and t["status"] not in ("COMPLETE", "RELEASED")]
         if busy:
@@ -1061,7 +1095,7 @@ class Driver:
                                 text=True, timeout=30).stdout.split()
         if not pushed:
             return self.keep(task_id, "branch %s has commits that are neither pushed nor merged" % branch)
-        runtime_call(self.lead, "stop", {"name": packet["worker"]})
+        self.stop_agent(packet["worker"], packet["unit"], "merged")
         run(["git", "-C", str(self.repo), "worktree", "remove", str(path)], timeout=60)
         run(["git", "-C", str(self.repo), "worktree", "prune"], timeout=60)
         self.mark(task_id, gate="done", cleanup="worker stopped, worktree removed")
@@ -1070,6 +1104,62 @@ class Driver:
     def keep(self, task_id, reason):
         self.mark(task_id, gate="done", cleanup="kept: " + reason)
         event("%s worktree kept: %s" % (task_id, reason))
+
+    # ---- agents: one door for every spawn ---------------------------------------------------------------------
+    # `ensure_agent` records the intent in the ledger (`agents[name]`) and the log, starts the agent under its stable
+    # name, then binds the runtime's answer. An intent without a binding means the driver died in between; the next
+    # `ensure_agent` for that name looks it up and re-attaches to it, and spawns only when no such agent exists.
+
+    def agent_live(self, name):
+        """True when the runtime knows a live agent of this name. A lookup that fails is an error, not `absent`: the
+        caller must not spawn on a guess."""
+        return runtime_call(self.lead, "status", {"name": name}).get("state") not in (None, "exited", "unknown")
+
+    def open_intent(self, name):
+        with self.book() as data:
+            known = (data.get("agents") or {}).get(name)
+        return bool(known) and known.get("assignment_id") is None
+
+    def ensure_agent(self, name, role, unit, spawn, fresh=False):
+        """Put one agent under `name` and return (address, assignment_id).
+
+        `spawn` is the runtime's spawn arguments. A name the ledger already knows is looked up first and, when live,
+        resumed with the same task instead of spawned (that is how a restart re-attaches). `fresh` says the caller
+        already stopped the old agent of this name, so a bound record needs no lookup; an open intent is always
+        looked up."""
+        with self.book() as data:
+            agents = data.setdefault("agents", {})
+            known = agents.get(name)
+            recovering = bool(known) and known.get("assignment_id") is None
+            if not recovering:
+                agents[name] = {"role": role, "unit": unit, "intent_at": now(), "assignment_id": None}
+        self.log("intent", name=name, role=role, unit=unit, recovering=True if recovering else None)
+        live = self.agent_live(name) if known and (recovering or not fresh) else False
+        try:
+            if live:
+                result, how = runtime_call(self.lead, "resume", {"name": name, "task": spawn["task"]}), "attach"
+            else:
+                result, how = runtime_call(self.lead, "spawn", spawn), "spawn"
+        except subprocess.TimeoutExpired:
+            raise  # it may have started: the open intent stays, and a restart looks the name up
+        except (ValueError, OSError):
+            if not recovering:  # the runtime refused: nothing started, so nothing is left to find
+                with self.book() as data:
+                    if known:
+                        data["agents"][name] = known
+                    else:
+                        data["agents"].pop(name, None)
+            raise
+        assignment_id = assignment_of(result)
+        address = result.get("address") or result.get("assignment_id") or name
+        with self.book() as data:
+            data["agents"][name].update(assignment_id=assignment_id, address=address, bound_at=now(), how=how)
+        self.log("agent", name=name, role=role, unit=unit, how=how, assignment_id=assignment_id)
+        return address, assignment_id
+
+    def stop_agent(self, name, unit, why):
+        runtime_call(self.lead, "stop", {"name": name})
+        self.log("stop", name=name, unit=unit, why=why)
 
     def pane_alive(self, name):
         try:
@@ -1110,33 +1200,37 @@ class Driver:
         """Close the unit's open task, claim its successor and put a worker on it: the live pane is resumed, a gone
         pane (or a `fresh` round) gets a new worker from `text`."""
         task_id, new_id = task["packet"]["task_id"], successor["task_id"]
-        with ledger(self.ledger_path) as data:
+        with self.book() as data:
             if data["tasks"][task_id]["status"] != "RELEASED":
                 release(data, task_id, "superseded by " + new_id)
             claim(data, successor)
             bound = data["tasks"][new_id]["runtime_id"]
         if not bound:
             runtime_id, assignment_id = self.hand_over(task, successor, task_md, text, fresh)
-            with ledger(self.ledger_path) as data:
+            with self.book() as data:
                 bind(data, new_id, str(runtime_id))
                 data["tasks"][new_id]["assignment_id"] = assignment_id
 
     def hand_over(self, task, successor, task_md, text, fresh=False):
-        name = successor["worker"]
+        name, unit = successor["worker"], successor["unit"]
+        spawn = {"kind": "worker", "name": name, "cwd": successor["checkout"], "cli": successor["backend"],
+                 "model": successor["model"], "effort": successor["effort"], "task": text}
+        if self.open_intent(name):  # the driver died while starting this worker: find it, do not start another
+            return self.ensure_agent(name, "worker", unit, spawn, fresh=True)
         alive = self.pane_alive(name)
         if alive and not fresh:
             resumed = runtime_call(self.lead, "resume", {"name": name, "task": "Read %s and follow it." % task_md})
-            return resumed.get("address") or task["runtime_id"], assignment_of(resumed)
+            assignment_id = assignment_of(resumed)
+            self.log("agent", name=name, role="worker", unit=unit, how="resume", assignment_id=assignment_id)
+            return resumed.get("address") or task["runtime_id"], assignment_id
         if alive:
             try:
-                runtime_call(self.lead, "stop", {"name": name})
+                self.stop_agent(name, unit, "replaced")
             except (ValueError, OSError, subprocess.TimeoutExpired) as error:
                 event("could not stop %s before replacing it: %s" % (name, error))
-        spawned = runtime_call(self.lead, "spawn", {
-            "kind": "worker", "name": name, "cwd": successor["checkout"], "cli": successor["backend"],
-            "model": successor["model"], "effort": successor["effort"], "task": text})
+        address, assignment_id = self.ensure_agent(name, "worker", unit, spawn, fresh=True)
         event("%s: spawned a fresh worker for %s (%s)" % (name, successor["task_id"], "replacing the pane" if alive else "pane is gone"))
-        return spawned.get("address") or spawned.get("assignment_id") or name, assignment_of(spawned)
+        return address, assignment_id
 
     def class_up(self, packet):
         """The packet fields that move a retry one model class up; at the top class the effort goes up a notch."""
@@ -1163,10 +1257,10 @@ class Driver:
         if not task_md.exists():
             task_md.write_text(self.decide_text(task_id, task, decision["path"]), encoding="utf-8")
         try:
-            spawned = runtime_call(self.lead, "spawn", {
+            _, assignment_id = self.ensure_agent(decision["name"], "decider", unit, {
                 "kind": "worker", "name": decision["name"], "task": "Read %s and follow it." % task_md, "cwd": packet["checkout"],
                 "cli": self.args.cli, "model": self.models["large"], "effort": "high"})
-            decision = dict(decision, assignment_id=assignment_of(spawned))
+            decision = dict(decision, assignment_id=assignment_id)
         except (ValueError, OSError, subprocess.TimeoutExpired) as error:
             return self.attention(task_id, "decider", "could not start the decider %s: %s" % (decision["name"], error))
         self.mark(task_id, gate="deciding", decision=decision)
@@ -1174,7 +1268,7 @@ class Driver:
 
     def decide_text(self, task_id, task, decision_path):
         packet, unit = task["packet"], task["packet"]["unit"]
-        with ledger(self.ledger_path) as data:
+        with self.book() as data:
             summary = unit_summary(data, unit)
         slice_ = {"unit": unit, "task": task_id, "attempts": summary["attempts"], "failed_reviews": summary["failed_reviews"],
                   "cutoffs": summary["cutoffs"], "last_report": (task.get("report") or {}).get("summary"),
@@ -1216,11 +1310,12 @@ class Driver:
             return self.attention(task_id, "decision", str(error))
         action, reason, unit = decision["action"], decision["reason"], task["packet"]["unit"]
         event("%s decided %r: %s" % (task_id, action, reason))
+        self.log("decision", unit=unit, task=task_id, action=action, reason=reason[:500])
         if action == "ask user":
             return self.attention(task_id, "ask-user", decision.get("question") or reason)
         if action in ("mark blocked", "skip"):
             blocked = action == "mark blocked"
-            with ledger(self.ledger_path) as data:
+            with self.book() as data:
                 if blocked:
                     data["tasks"][task_id].update(status="BLOCKED", blocker=reason)
                 else:
@@ -1236,7 +1331,7 @@ class Driver:
         """Hand the unit back to a worker after a decider's `retry`: a new task directory with the event and the reason."""
         task = self.task(task_id)
         packet, redo, unit = task["packet"], task["redo"], task["packet"]["unit"]
-        with ledger(self.ledger_path) as data:
+        with self.book() as data:
             taken = set(data["tasks"])
         number = next(n for n in range(1, 1000) if "%sd%d" % (unit, n) not in taken or "%sd%d" % (unit, n) == task.get("redo_task"))
         new_id = "%sd%d" % (unit, number)
@@ -1308,7 +1403,7 @@ class Driver:
         agents = [t for t in plan["tickets"] if is_agent(t)]
         if not agents or not all(is_done(t) for t in agents) or ARCHIVE in self.failed:
             return 0
-        with ledger(self.ledger_path) as data:
+        with self.book() as data:
             held = data["tasks"].get(ARCHIVE)
         if held and held["runtime_id"]:
             return 0
@@ -1334,19 +1429,19 @@ class Driver:
                   "owns": owns, "acceptance": ARCHIVE_ACCEPTANCE, "checks": list(self.args.gate), "depends_on": [],
                   "unit": ARCHIVE, "size": "small", "difficulty": "simple", "class": klass, "effort": effort,
                   "model": self.models[klass]}
-        with ledger(self.ledger_path) as data:
+        with self.book() as data:
             claim(data, packet)
         task_dir = self.run_dir / ARCHIVE
         task_dir.mkdir(exist_ok=True, mode=0o700)
         task_md = task_dir / "task.md"
         if not task_md.exists():
             task_md.write_text(self.archive_text(plan, packet, task_dir), encoding="utf-8")
-        spawned = runtime_call(self.lead, "spawn", {
+        address, assignment_id = self.ensure_agent(name, "worker", ARCHIVE, {
             "kind": "worker", "name": name, "task": "Read %s and follow it." % task_md, "cwd": str(checkout),
             "cli": self.args.cli, "model": packet["model"], "effort": effort})
-        with ledger(self.ledger_path) as data:
-            bind(data, ARCHIVE, str(spawned.get("address") or spawned.get("assignment_id") or name))
-            data["tasks"][ARCHIVE]["assignment_id"] = assignment_of(spawned)
+        with self.book() as data:
+            bind(data, ARCHIVE, str(address))
+            data["tasks"][ARCHIVE]["assignment_id"] = assignment_id
         self.spawned.append(name)
         event("spawned %s (%s, %s, %s)" % (name, klass, packet["model"], effort))
 
@@ -1385,7 +1480,7 @@ class Driver:
 
     def start_gaps(self, plan):
         """Spawn the advisory gaps reviewer once. Its failure never blocks anything."""
-        with ledger(self.ledger_path) as data:
+        with self.book() as data:
             if data.get("gaps"):
                 return
             merges = [(tid, t.get("pr"), t.get("merge_commit")) for tid, t in data["tasks"].items() if t.get("merge_commit")]
@@ -1408,16 +1503,16 @@ class Driver:
             "Then call the agent-runtime `report` tool with kind=complete and one line: `<n> gaps - %s`." % path,
             ""]), encoding="utf-8")
         try:
-            spawned = runtime_call(self.lead, "spawn", {
+            _, assignment_id = self.ensure_agent(name, "gaps", "gaps", {
                 "kind": "worker", "name": name, "task": "Read %s and follow it." % task_md, "cwd": str(self.repo),
                 "cli": self.args.cli, "model": self.models["medium"], "effort": "medium"})
         except (ValueError, OSError, subprocess.TimeoutExpired) as error:
             event("gaps reviewer not started: %s" % error)
             gaps = {"name": name, "path": str(path), "ended": True, "error": str(error)}
         else:
-            gaps = {"name": name, "path": str(path), "assignment_id": assignment_of(spawned), "ended": False}
+            gaps = {"name": name, "path": str(path), "assignment_id": assignment_id, "ended": False}
             event("spawned %s (medium, %s, medium)" % (name, self.models["medium"]))
-        with ledger(self.ledger_path) as data:
+        with self.book() as data:
             data["gaps"] = gaps
 
     # ---- metrics: what a run cost, from the ledger and the runtime's own usage numbers ----------------------
@@ -1426,19 +1521,24 @@ class Driver:
         """Keep the `usage` the runtime attaches to an assignment; nothing is ever estimated."""
         seen = {a["assignment_id"]: a["usage"] for a in assignments if a.get("assignment_id") and a.get("usage") is not None}
         if seen:
-            with ledger(self.ledger_path) as data:
+            with self.book() as data:
+                changed = {i: u for i, u in seen.items() if data.get("usage", {}).get(i) != u}
                 data.setdefault("usage", {}).update(seen)
+                owners = {}
+                for task_id, task in data["tasks"].items():
+                    for agent in (task, task.get("review") or {}, task.get("decision") or {}):
+                        owners[agent.get("assignment_id")] = task["packet"].get("unit") or task_id
+            for assignment_id, usage in changed.items():
+                self.log("usage", unit=owners.get(assignment_id), assignment_id=assignment_id, usage=usage)
 
     def report_metrics(self):
-        with ledger(self.ledger_path) as data:
-            data = json.loads(json.dumps(data))
-        metrics = run_metrics(data, self.slug)
+        metrics = events.rollup(events.read(self.run_dir / "events.jsonl"), self.slug)
         (self.run_dir / "metrics.json").write_text(json.dumps(metrics, indent=2) + "\n", encoding="utf-8")
         print(metrics_table(metrics), file=sys.stderr, flush=True)
         return metrics
 
     def dispatch_ready(self, plan):
-        with ledger(self.ledger_path) as data:
+        with self.book() as data:
             tasks = data["tasks"]
             unfinished = sum(1 for t in tasks.values()
                              if t["status"] not in ("COMPLETE", "RELEASED") and t.get("gate") not in PARKED)
@@ -1484,7 +1584,7 @@ class Driver:
         attempt of the same unit; one now COMPLETE (done by hand) is released so its dependents and the archive
         proceed. Any other Status leaves it parked. The held worker is stopped first, when its pane is live."""
         by_id = {t["#"].lower(): t for t in plan["tickets"]}
-        with ledger(self.ledger_path) as data:
+        with self.book() as data:
             parked = [(task_id, json.loads(json.dumps(task))) for task_id, task in data["tasks"].items()
                       if task.get("gate") in PARKED and task["status"] not in ("COMPLETE", "RELEASED")]
         count = 0
@@ -1497,13 +1597,13 @@ class Driver:
                 continue
             again = status.startswith("TO-DO")
             if self.pane_alive(task["packet"]["worker"]):
-                runtime_call(self.lead, "stop", {"name": task["packet"]["worker"]})
-            with ledger(self.ledger_path) as data:
+                self.stop_agent(task["packet"]["worker"], task["packet"]["unit"], "reopened")
+            with self.book() as data:
                 release(data, task_id, "the user set %s to %s" % (ticket["#"], "TO-DO: retry" if again else "COMPLETE: done by hand"))
             event("%s %s" % (ticket["#"], "reopened by the user: fresh attempt" if again else "completed by hand"))
             if not again:
                 continue
-            with ledger(self.ledger_path) as data:
+            with self.book() as data:
                 taken = set(data["tasks"])
             attempt = next(n for n in range(1, 1000) if "%sp%d" % (task["packet"]["unit"], n) not in taken)
             try:
@@ -1529,20 +1629,19 @@ class Driver:
                   "acceptance": [re.sub(r"^- \*\*(S\d+[a-z]?)\*\*", r"\1:", s) for s in scenarios],
                   "checks": list(self.args.gate), "depends_on": [], "unit": "t" + number, "size": size,
                   "difficulty": difficulty, "class": klass, "effort": effort, "model": self.models[klass]}
-        with ledger(self.ledger_path) as data:
+        with self.book() as data:
             claim(data, packet)
         task_dir = self.run_dir / task_id
         task_dir.mkdir(exist_ok=True, mode=0o700)
         task_md = task_dir / "task.md"
         if not task_md.exists():
             task_md.write_text(self.task_text(plan, ticket, packet, scenarios, task_dir), encoding="utf-8")
-        spawned = runtime_call(self.lead, "spawn", {
+        runtime_id, assignment_id = self.ensure_agent(name, "worker", packet["unit"], {
             "kind": "worker", "name": name, "task": "Read %s and follow it." % task_md, "cwd": str(checkout),
             "cli": self.args.cli, "model": packet["model"], "effort": effort})
-        runtime_id = spawned.get("address") or spawned.get("assignment_id") or name
-        with ledger(self.ledger_path) as data:
+        with self.book() as data:
             bind(data, task_id, str(runtime_id))
-            data["tasks"][task_id]["assignment_id"] = assignment_of(spawned)
+            data["tasks"][task_id]["assignment_id"] = assignment_id
         set_status(self.plan_path, ticket["#"], "IN PROGRESS")
         self.spawned.append(name)
         event("spawned %s (%s, %s, %s)" % (name, klass, packet["model"], effort))
@@ -1611,6 +1710,24 @@ def launch(args, run_args):
     return {"pane": name, "started": True}
 
 
+def rebuild_metrics(args):
+    """`metrics <plan>`: metrics.json rebuilt from the run's events.jsonl, which survives a crash. A run dir written
+    before the log existed is read from its ledger instead."""
+    plan = parse_plan(Path(args.plan).resolve(strict=True).read_text(encoding="utf-8"))  # a plan mid-edit still names its slug
+    state_dir = Path(args.state_dir).expanduser()
+    run_dir = state_dir / plan["slug"]
+    rows = events.read(run_dir / "events.jsonl")
+    if not rows:
+        ledger_path = state_dir / (plan["slug"] + ".json")
+        require(ledger_path.exists(), "no events.jsonl or ledger for %s under %s" % (plan["slug"], state_dir))
+        with ledger(ledger_path) as data:
+            rows = [dict(row, kind="import") for row in legacy_imports(data)]
+    result = events.rollup(rows, plan["slug"])
+    run_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    (run_dir / "metrics.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    return result
+
+
 def drive(args):
     require(args.max_workers >= 1, "--max-workers must be at least 1")
     driver = Driver(args)
@@ -1649,7 +1766,10 @@ def main():
     sub.add_argument("--sample", required=True)
     sub.add_argument("--reserve-tokens", type=int, required=True)
     sub.add_argument("--max-age-seconds", type=int, default=300)
-    commands.add_parser("metrics").add_argument("--samples", required=True)
+    sub = commands.add_parser("metrics", help="Rebuild a run's metrics.json from its events.jsonl, or normalize --samples")
+    sub.add_argument("plan", nargs="?", help="Plan file of the run to rebuild")
+    sub.add_argument("--samples", help="A file of per-request usage records to normalize")
+    sub.add_argument("--state-dir", default="~/.local/state/orchestrate", help="Holds <slug>.json and the <slug>/ run directory")
     sub = commands.add_parser("run", help="Dispatch an approved plan's ready agent tickets and wait for them")
     sub.add_argument("plan")
     sub.add_argument("--max-workers", type=int, default=3)
@@ -1682,6 +1802,9 @@ def main():
     if args.command == "context":
         return context_verdict(read_json(args.sample), args.reserve_tokens, args.max_age_seconds)
     if args.command == "metrics":
+        if args.plan:
+            return rebuild_metrics(args)
+        require(args.samples, "metrics needs a plan file (rebuild its metrics.json) or --samples")
         return metrics(read_json(args.samples))
     with ledger(args.state) as data:
         if args.command == "claim":

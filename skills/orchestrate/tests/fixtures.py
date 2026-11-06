@@ -20,8 +20,10 @@ argv = sys.argv[1:]
 tool = argv[1]
 lead = argv[argv.index("--lead") + 1] if "--lead" in argv else None
 args = json.loads(argv[argv.index("--json") + 1]) if "--json" in argv else {}
+events_path = os.environ.get("FAKE_EVENTS", "")
+seen = open(events_path).read().splitlines() if events_path and os.path.exists(events_path) else []
 with open(os.path.join(home, "calls.jsonl"), "a") as log:
-    log.write(json.dumps({"tool": tool, "lead": lead, "args": args}) + "\\n")
+    log.write(json.dumps({"tool": tool, "lead": lead, "args": args, "events": seen}) + "\\n")
 rows = [json.loads(line) for line in open(os.path.join(home, "calls.jsonl"))]
 nth = sum(1 for r in rows if r["tool"] == tool and r["args"].get("name") == args.get("name"))
 if tool == "spawn":
@@ -52,6 +54,9 @@ elif tool == "status":
         sys.exit(1)
     print(json.dumps({"name": args["name"], "state": state}))
 elif tool == "stop":
+    states = json.load(open(os.path.join(home, "states.json")))
+    states[args["name"]] = "exited"
+    json.dump(states, open(os.path.join(home, "states.json"), "w"))
     print(json.dumps({"name": args["name"], "state": "exited"}))
 elif tool == "resume":
     print(json.dumps({"worker_id": "w-" + args["name"], "assignment_id": "r%d-%s" % (nth, args["name"]),
@@ -266,7 +271,8 @@ class RunFixture:
 
     def run_driver(self, *extra, plan=None, expect=0):
         env = dict(os.environ, PATH=str(self.home) + os.pathsep + os.environ["PATH"],
-                   FAKE_RUNTIME_HOME=str(self.home), FAKE_PLAN=str(self.plan))
+                   FAKE_RUNTIME_HOME=str(self.home), FAKE_PLAN=str(self.plan),
+                   FAKE_EVENTS=str(self.state_dir / "demo" / "events.jsonl"))
         result = subprocess.run(
             [sys.executable, "-B", str(SCRIPT), "run", str(plan or self.plan), "--state-dir", str(self.state_dir),
              "--models-file", str(self.models), "--wait-seconds", "1", "--idle-interval", "0", *extra],
@@ -276,6 +282,21 @@ class RunFixture:
 
     def ledger(self):
         return json.loads((self.state_dir / "demo.json").read_text(encoding="utf-8"))
+
+    def events(self, *kinds):
+        """The run's events.jsonl as dicts, optionally only the given kinds."""
+        path = self.state_dir / "demo" / "events.jsonl"
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
+        return [r for r in rows if not kinds or r["kind"] in kinds]
+
+    def assert_intents_precede_spawns(self):
+        """D11: every spawn call went through ensure_agent, so its intent was already in events.jsonl."""
+        spawns = self.calls("spawn")
+        self.assertTrue(spawns)
+        for call in spawns:
+            logged = [json.loads(line) for line in call["events"]]
+            self.assertIn(call["args"]["name"], [e.get("name") for e in logged if e["kind"] == "intent"],
+                          "no intent event before the spawn of %s" % call["args"]["name"])
 
 
 def load_script():

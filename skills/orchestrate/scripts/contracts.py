@@ -76,6 +76,12 @@ def validate_review(review):
     return review
 
 
+def review_items(review):
+    """A validated review as (blocking items, deferred items), whatever contract wrote it. In contract 1 `major[]` are
+    the blocking items and `deferred[]` the deferred ones, so a run dir left by the previous version reads the same."""
+    return list(review["major"]), list(review["deferred"])
+
+
 def validate_findings(findings):
     versioned(findings, "findings")
     need(findings.get("source") in SOURCES, "findings: source must be one of " + ", ".join(SOURCES))
