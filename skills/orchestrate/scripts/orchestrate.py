@@ -1754,10 +1754,19 @@ def launch(args, run_args):
         return {"pane": name, "started": False}
     argv = ["hc", "run", "--bg", "--name", name, "--cwd", str(repo), "--json", "--",
             "python3", str(Path(__file__).resolve()), "run", str(plan_path), "--repo", str(repo), *run_args]
-    result = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+    parent = os.environ.get("HC_TERMINAL_ID")
+    result = subprocess.run(argv[:3] + ["--parent", parent] + argv[3:] if parent else argv,
+                            capture_output=True, text=True, timeout=60)
+    nesting_error = None
+    if parent and result.returncode != 0:
+        nesting_error = "hc run failed (exit %d): %s" % (result.returncode, (result.stderr or result.stdout).strip())
+        result = subprocess.run(argv, capture_output=True, text=True, timeout=60)
     if result.returncode != 0:
         raise ValueError("hc run failed (exit %d): %s" % (result.returncode, (result.stderr or result.stdout).strip()))
-    return {"pane": name, "started": True}
+    out = {"pane": name, "started": True}
+    if nesting_error is not None:
+        out.update(nested=False, nesting_error=nesting_error)
+    return out
 
 
 def rebuild_metrics(args):
