@@ -8,6 +8,22 @@ from fixtures import ROWS, RunFixture, assignment, load_script, plan_text, wait_
 
 
 class RunTests(RunFixture, unittest.TestCase):
+    def test_named_agent_reaches_every_spawn(self):
+        """The role the run names reaches every worker it spawns."""
+        self.run_driver("--agent", "none")
+        spawns = self.calls("spawn")
+        self.assertTrue(spawns)
+        for spawn in spawns:
+            self.assertEqual(spawn["args"]["agent"], "none")
+
+    def test_default_run_names_no_role(self):
+        """Without a named role, no spawn names one: the runtime's default role stands."""
+        self.run_driver()
+        spawns = self.calls("spawn")
+        self.assertTrue(spawns)
+        for spawn in spawns:
+            self.assertNotIn("agent", spawn["args"])
+
     def test_S1_dispatches_ready_agent_tickets_up_to_the_cap(self):
         """code-driven-orchestrator/S1"""
         self.run_driver("--max-workers", "2")
