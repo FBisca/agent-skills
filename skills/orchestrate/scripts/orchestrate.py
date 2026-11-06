@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import contracts  # noqa: E402
@@ -495,7 +496,7 @@ def event(message):
     print("[orchestrate] " + message, file=sys.stderr, flush=True)
 
 
-GATES = ("reported", "converged", "reviewed", "fix-pending")  # ledger `gate` stages the loop acts on
+GATES = ("reported", "converged", "reviewed", "fix-pending", "ready-for-ci", "awaiting-merge", "cleanup")  # ledger `gate` stages the loop acts on
 MAX_FIX_ROUNDS = 2  # a unit's 3rd failed gate goes to Driver.escalate
 FIX_ROUND = re.compile(r"r\d+$")
 CONVERGE = Path(__file__).resolve().parents[2] / "converge" / "scripts" / "converge.py"
@@ -530,6 +531,8 @@ class Driver:
         self.failed = set()
         self.stuck = set()
         self.receipt = None
+        self.received = False
+        self.sleep = time.sleep  # injectable so tests do not really sleep
 
     def read_plan(self):
         plan = parse_plan(self.plan_path.read_text(encoding="utf-8"))
@@ -561,7 +564,7 @@ class Driver:
                 plan = None
             acted = self.advance()
             dispatched = self.dispatch_ready(plan) if plan else 0
-            if idle and not dispatched and not acted:
+            if idle and not dispatched and not acted and not self.awaiting():
                 return
             wait = {"target": "all", "timeout": self.args.wait_seconds}
             if self.receipt:
@@ -570,6 +573,13 @@ class Driver:
             self.receipt = result.get("receipt")
             self.receive(result)
             idle = not result.get("unfinished")
+            if not (dispatched or acted or self.received):
+                self.idle()
+
+    def idle(self):
+        """Back off after an iteration that dispatched, advanced and handled nothing: the runtime's wait returns
+        at once when nothing is unfinished, so a PR awaiting merge or a parked gate would otherwise spin."""
+        self.sleep(self.args.idle_interval)
 
     # ---- gates: a worker's report -> converge -> one review -> fix rounds -----------------------------------
     # The ledger task's `gate` field is the whole state: reported -> converged -> reviewing -> reviewed ->
@@ -578,6 +588,7 @@ class Driver:
 
     def receive(self, result):
         """Turn the runtime's `complete` messages into gate stages. Only names and kinds are read here."""
+        self.received = bool(result.get("messages"))
         names = {a.get("assignment_id"): a.get("name") for a in result.get("assignments") or []}
         for message in result.get("messages") or []:
             name = message.get("name") or names.get(message.get("assignment_id"))
@@ -606,7 +617,8 @@ class Driver:
     def advance(self):
         """Run every pending gate stage once; each step changes the task's gate or raises. Returns the steps run."""
         steps = {"reported": self.step_reported, "converged": self.step_converged,
-                 "reviewed": self.step_reviewed, "fix-pending": self.step_fix}
+                 "reviewed": self.step_reviewed, "fix-pending": self.step_fix,
+                 "ready-for-ci": self.step_ci, "awaiting-merge": self.step_merge, "cleanup": self.step_cleanup}
         with ledger(self.ledger_path) as data:
             ids = [task_id for task_id, task in data["tasks"].items() if task.get("gate") in steps]
         acted = 0
@@ -616,7 +628,8 @@ class Driver:
                 if gate not in steps or (task_id, gate) in self.stuck:
                     break
                 try:
-                    steps[gate](task_id)
+                    if steps[gate](task_id) is False:  # nothing to act on yet: poll again next iteration
+                        break
                 except (ValueError, OSError, subprocess.TimeoutExpired) as error:
                     self.stuck.add((task_id, gate))
                     self.errors.append("%s: %s" % (task_id, error))
@@ -624,6 +637,11 @@ class Driver:
                     break
                 acted += 1
         return acted
+
+    def awaiting(self):
+        """Tickets whose PR is not merged yet: the run stays up and re-polls them."""
+        with ledger(self.ledger_path) as data:
+            return any(t.get("gate") in ("ready-for-ci", "awaiting-merge") for t in data["tasks"].values())
 
     def task(self, task_id):
         with ledger(self.ledger_path) as data:
@@ -650,7 +668,8 @@ class Driver:
         """Checkpoint the worker's report as PARTIAL: the unit is not COMPLETE until CI and the merge."""
         path = self.run_dir / task_id / "report.json"
         with ledger(self.ledger_path) as data:
-            checkpoint(data, task_id, dict(report, status="PARTIAL", **changes))
+            # review_rounds is the driver's own count: the worker's value is never trusted.
+            checkpoint(data, task_id, dict(report, status="PARTIAL", **dict({"review_rounds": 0}, **changes)))
             data["tasks"][task_id]["report_path"] = str(path)
 
     def step_reported(self, task_id):
@@ -689,7 +708,7 @@ class Driver:
     def fail_gate(self, task_id, report, source, items):
         """A gate failed: raise review_rounds, then a fix round, or the escalation hook on the 3rd failure."""
         remaining = [describe(item) for item in items]
-        self.record_report(task_id, report, review_rounds=report.get("review_rounds", 0) + 1, remaining=remaining)
+        self.record_report(task_id, report, review_rounds=1, remaining=remaining)
         with ledger(self.ledger_path) as data:
             unit = data["tasks"][task_id]["packet"]["unit"]
             failures = unit_summary(data, unit)["failed_reviews"]
@@ -747,6 +766,9 @@ class Driver:
             report = contracts.load(task["report_path"], contracts.validate_report)
         except contracts.ContractError as error:
             return self.attention(task_id, "review", str(error))
+        if not (review["commit"].startswith(report["head"]) or report["head"].startswith(review["commit"])):
+            return self.attention(task_id, "review", "review.json reviewed commit %s but the report's head is %s"
+                                  % (review["commit"], report["head"]))
         if review["deferred"]:
             deferred = self.run_dir / "deferred.md"
             if not deferred.exists():
@@ -759,6 +781,101 @@ class Driver:
         if review["verdict"] == "block":
             return self.fail_gate(task_id, report, "review", review["major"])
         self.mark(task_id, gate="ready-for-ci")
+
+    # ---- CI, merge, cleanup ------------------------------------------------------------------------------
+    # ready-for-ci -> awaiting-merge -> cleanup -> done. The driver never merges: it polls `gh` for the merge.
+
+    def pr_url(self, task_id):
+        """The unit's pull request: a fix round opens none, so fall back to an earlier attempt's report."""
+        task = self.task(task_id)
+        reports = [contracts.load(task["report_path"], contracts.validate_report)]
+        with ledger(self.ledger_path) as data:
+            reports += [t["report"] for t in data["tasks"].values()
+                        if t["packet"].get("unit") == task["packet"]["unit"] and t.get("report")]
+        url = next((r["pr"] for r in reports if r.get("pr")), None)
+        match = re.fullmatch(r"https?://[^/]+/([^/]+/[^/]+)/pull/(\d+)/?", url or "")
+        require(match, "report.json names no pull request URL to check (pr: %r)" % url)
+        return url, "%s#%s" % match.groups()
+
+    def step_ci(self, task_id):
+        try:
+            url, ref = self.pr_url(task_id)
+        except (contracts.ContractError, ValueError) as error:
+            return self.attention(task_id, "ci", str(error))
+        try:
+            result = subprocess.run(["wait-checks", ref], capture_output=True, text=True, timeout=self.args.ci_seconds)
+        except subprocess.TimeoutExpired:
+            event("%s checks of %s still running; polling again" % (task_id, ref))
+            return False
+        if result.returncode == 0:
+            set_status(self.plan_path, self.ticket_name(task_id), "IN PROGRESS · awaiting merge (%s)" % url)
+            self.mark(task_id, gate="awaiting-merge", pr=url)
+            return None
+        lines = [line for line in result.stdout.splitlines() if line.strip()]
+        if result.returncode != 1 or not lines:
+            return self.attention(task_id, "ci", (result.stderr.strip() or result.stdout.strip()
+                                                  or "wait-checks exited %d" % result.returncode)[:500])
+        report = contracts.load(self.task(task_id)["report_path"], contracts.validate_report)
+        self.fail_gate(task_id, report, "ci", lines[:60])
+
+    def ticket_name(self, task_id):
+        return self.task(task_id)["packet"]["unit"].upper()
+
+    def step_merge(self, task_id):
+        url = self.task(task_id)["pr"]
+        result = subprocess.run(["gh", "pr", "view", url, "--json", "state,mergeCommit"],
+                                capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            event("%s gh pr view failed (exit %d); polling again" % (task_id, result.returncode))
+            return False
+        try:
+            state = json.loads(result.stdout)
+        except ValueError:
+            return False
+        if state.get("state") == "CLOSED":
+            return self.attention(task_id, "merge", "%s was closed without a merge" % url)
+        if state.get("state") != "MERGED":
+            return False
+        try:
+            with ledger(self.ledger_path) as data:
+                task = data["tasks"][task_id]
+                checkpoint(data, task_id, dict(task["report"], status="COMPLETE", remaining=[], acceptance_met=True,
+                                               review_rounds=task["report"].get("review_rounds", 0)))
+        except ValueError as error:
+            return self.attention(task_id, "merge", "merged, but the ledger rejected COMPLETE: %s" % error)
+        commit = (state.get("mergeCommit") or {}).get("oid", "")
+        set_status(self.plan_path, self.ticket_name(task_id),
+                   "COMPLETE %s · merged %s%s" % (now()[:10], url, " (%s)" % commit[:7] if commit else ""))
+        self.mark(task_id, gate="cleanup", merge_commit=commit)
+        event("%s merged: %s" % (task_id, url))
+
+    def step_cleanup(self, task_id):
+        """Stop a finished worker and remove its worktree, only when nothing would be lost; else leave it and say why."""
+        task = self.task(task_id)
+        packet = task["packet"]
+        with ledger(self.ledger_path) as data:
+            busy = [t["packet"]["task_id"] for t in data["tasks"].values()
+                    if t["packet"]["worker"] == packet["worker"] and t["status"] not in ("COMPLETE", "RELEASED")]
+        if busy:
+            return self.mark(task_id, gate="done", cleanup="kept: worker still holds %s" % ", ".join(busy))
+        path, branch = Path(packet["checkout"]), task["checkout_at_claim"]["branch"]
+        dirty = subprocess.run(["git", "-C", str(path), "status", "--porcelain"], capture_output=True, text=True, timeout=30)
+        if dirty.returncode != 0 or dirty.stdout.strip():
+            return self.keep(task_id, "the checkout has uncommitted or untracked files")
+        head = subprocess.run(["git", "-C", str(path), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=30).stdout.strip()
+        pushed = subprocess.run(["git", "-C", str(path), "branch", "-r", "--contains", head], capture_output=True,
+                                text=True, timeout=30).stdout.split()
+        if not pushed:
+            return self.keep(task_id, "branch %s has commits that are neither pushed nor merged" % branch)
+        runtime_call(self.lead, "stop", {"name": packet["worker"]})
+        run(["git", "-C", str(self.repo), "worktree", "remove", str(path)], timeout=60)
+        run(["git", "-C", str(self.repo), "worktree", "prune"], timeout=60)
+        self.mark(task_id, gate="done", cleanup="worker stopped, worktree removed")
+        event("%s worker stopped and worktree removed" % task_id)
+
+    def keep(self, task_id, reason):
+        self.mark(task_id, gate="done", cleanup="kept: " + reason)
+        event("%s worktree kept: %s" % (task_id, reason))
 
     def pane_alive(self, name):
         try:
@@ -974,7 +1091,9 @@ def main():
     sub.add_argument("--state-dir", default="~/.local/state/orchestrate", help="Holds <slug>.json and the <slug>/ run directory")
     sub.add_argument("--models-file", default="~/.claude/CLAUDE.md", help="File holding the 'Model classes' table")
     sub.add_argument("--converge", default=str(CONVERGE), help="converge.py used to gate each report")
+    sub.add_argument("--ci-seconds", type=int, default=600, help="Longest one wait-checks call blocks before the loop moves on")
     sub.add_argument("--wait-seconds", type=int, default=60, help="Longest one wait blocks before the plan is re-read")
+    sub.add_argument("--idle-interval", type=float, default=30, help="Seconds to sleep after an iteration that made no progress")
     args = parser.parse_args()
     if args.command == "run":
         return drive(args)

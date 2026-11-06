@@ -11,7 +11,10 @@ MAJOR = {"id": "M1", "file": "src/a/x.py", "line": 7, "problem": "drops the last
 DEFERRED = {"id": "D1", "note": "rename the helper someday"}
 
 
-class GateTests(RunFixture, unittest.TestCase):
+class GateFixture(RunFixture):
+    """One ticket, scripted worker and reviewer steps; shared by the gate and merge tests."""
+
+
     def setUp(self):
         super().setUp()
         self.plan.write_text(plan_text(rows=("T1",)), encoding="utf-8")
@@ -23,7 +26,7 @@ class GateTests(RunFixture, unittest.TestCase):
         return json.dumps(dict({"contract": 1, "task_id": task_id, "status": "COMPLETE", "summary": "done",
                                 "acceptance_met": True, "files": [], "decisions": [], "interfaces": [],
                                 "remaining": [], "checks": [], "review_rounds": 0, "usage": "unknown",
-                                "head": "abc1234", "pr": None}, **over))
+                                "head": "abc1234", "pr": "https://github.com/o/r/pull/7"}, **over))
 
     def message(self, name, kind="complete"):
         self.sent += 1
@@ -57,6 +60,8 @@ class GateTests(RunFixture, unittest.TestCase):
     def spawned(self):
         return [c["args"]["name"] for c in self.calls("spawn")]
 
+
+class GateTests(GateFixture, unittest.TestCase):
     def test_S5_failing_converge_resumes_the_worker_in_a_new_task_directory(self):
         """code-driven-orchestrator/S5"""
         self.waits([self.worker_done()])
@@ -89,7 +94,7 @@ class GateTests(RunFixture, unittest.TestCase):
         self.run_driver()
         self.assertEqual(len(self.calls("resume")), 1)
         self.assertEqual(self.spawned(), ["demo-t1"])
-        self.assertEqual(self.task("t1r1")["gate"], "ready-for-ci")
+        self.assertEqual(self.task("t1r1")["gate"], "done")
 
     def test_S5_a_third_failure_stops_at_the_escalation_hook(self):
         """code-driven-orchestrator/S5"""
@@ -133,16 +138,16 @@ class GateTests(RunFixture, unittest.TestCase):
         self.assertEqual(self.task()["report"]["review_rounds"], 1)
         self.assertEqual(self.task("t1r1")["status"], "ACTIVE")
 
-    def test_S6_a_passing_review_leaves_the_ticket_for_the_ci_gate(self):
+    def test_S6_a_passing_review_hands_the_ticket_to_the_ci_gate(self):
         """code-driven-orchestrator/S6"""
         self.waits([self.worker_done(tests=True), self.reviewer_done()])
         self.run_driver()
         self.assertEqual(self.calls("resume"), [])
         self.assertEqual(self.spawned(), ["demo-t1", "demo-t1-review"])
         task = self.task()
-        self.assertEqual((task["status"], task["gate"]), ("PARTIAL", "ready-for-ci"))
+        self.assertEqual((task["status"], task["gate"]), ("COMPLETE", "done"))
         self.assertEqual(task["report_path"], str(self.run_dir / "t1" / "report.json"))
-        self.assertIn("| IN PROGRESS |", self.plan.read_text(encoding="utf-8"))
+        self.assertIn("| COMPLETE ", self.plan.read_text(encoding="utf-8"))
 
     def test_S7_a_fix_round_for_a_dead_pane_spawns_a_fresh_worker_with_the_original_task(self):
         """code-driven-orchestrator/S7"""
