@@ -5,13 +5,15 @@ description: Build an approved plan's tickets with implementer agents, gate each
 
 # Orchestrate
 
-**Input:** an approved plan (`docs/plans/*.plan.md`) with these fields: `Slug: <slug>`; `Living spec: docs/specs/<area>.md`; `Status: APPROVED`; a Decisions table; scenario lines `- **S<n>** WHEN …, THEN …`; a `## Tickets` table whose IDs are `T<n>` with the columns Satisfies, Blocked by, Paths, Owner and Status.
+**Input:** an approved plan (`docs/plans/*.plan.md`) with these fields: `Slug: <slug>`; `Living spec: docs/specs/<area>.md`; `Status: APPROVED`; a Decisions table; scenario lines `- **S<n>** WHEN …, THEN …`; a `## Tickets` table whose IDs are `T<n>` with the columns Satisfies, Blocked by, Paths, Owner and Status, plus Size and Difficulty (a plan without them reads every ticket as regular · simple).
 **Output:** each ticket merged and COMPLETE, the scenarios archived into the living spec, and the plan set to `Status: ARCHIVED`.
 **Hand-off:** new scope goes back to `/start-planning`.
 
 Arguments: `[plan-path-or-active-plan] [T<n>|next]`.
 
 Own ticket selection, dependencies, worker assignments, and integration. Delegate code changes to `implementer`. Implement locally only when delegation is unavailable; report that fallback.
+
+The lead **delegates**. It reads the plan, the ledger, gate verdicts and one-line reports. It opens code, diffs, reports and reviews only to **investigate**: a rejected checkpoint, a blocked worker, a failed gate, or reports that conflict. Everything else is passed by path, for an agent to read.
 
 ## Gate
 
@@ -25,9 +27,12 @@ Own ticket selection, dependencies, worker assignments, and integration. Delegat
 - A ticket owned by a person (prod data apply, sign-off, deploy) is theirs: tell them what it needs and wait for their confirmation before marking it COMPLETE.
 - Execute only the requested scope. Within that scope, select independent tickets without another confirmation. Ask only when the plan, scope, or a material decision is unresolved.
 - Use the assigned checkout. A blocked ticket branches from `main` after its blockers merge; stacked branches break under squash merge. Use isolated worktrees for concurrent tickets. Preserve existing user changes.
-- Verify predecessor behavior in the **actual implementation checkout**. A completion message or commit in another checkout is insufficient.
+- Confirm each predecessor's merge commit is in the **actual implementation checkout** (`git merge-base --is-ancestor <sha> HEAD`). A completion message or commit in another checkout is insufficient.
 - Set file or directory ownership per worker. Serialize overlapping edits in one checkout. Assign an integration owner for changes across branches or repositories.
-- Existing authorization persists. Starting a worker does not authorize commits, PRs, merges, cleanup, or work beyond the selected scope.
+
+## Route each unit
+
+Route each ticket, and each review fix round, through [routing](references/routing.md): its size and difficulty give the mode, class and effort. Tickets take them from the plan's Size and Difficulty columns. A fix round is sized from its findings' files and lines, and its difficulty comes from the findings. `chunked` units run through [chunked dispatch](references/chunked-dispatch.md).
 
 ## Select the execution mode
 
@@ -56,14 +61,23 @@ Check the worker's subsystem, checkout state, last result, and available context
 
 ## Prepare and dispatch
 
-Give each new worker a compact packet containing:
+Work passes through **files**, not context. Each plan has a **run directory**, `~/.local/state/orchestrate/<slug>/`, kept beside its ledger. It is created 0700, never tracked, and kept after archive for audit:
+
+- `contract.md`: the report shape (the checkpoint JSON in [the state helper](references/state.md)) and the rules every task shares. The lead creates the directory (0700) and writes this file before the first dispatch.
+- `<task>/task.md`: opens with the contract's absolute path and its own report path, then the packet below. Spawn and resume text is one line: "Read `<run>/<task>/task.md` and follow it."
+- `<task>/report.json`: the worker's result, in the checkpoint shape. Prose goes in `report.md`. The worker's `report` call carries one line: its status and the path.
+- `<task>/review.md`: gate-2 findings. The reviewer returns one line: the count of blocking findings and the path.
+
+Files are write-once: a later attempt writes `report.2.json`, `review.2.md`, and so on. Run `checkpoint --report <run>/<task>/report.json` on the file itself; a rejection is a reason to investigate. The runtime store keeps the one-line reports, so the store plus the run directory form the audit trail.
+
+Write each new worker's `task.md` with:
 
 1. Ticket ID, purpose, and its scenarios verbatim, with the **red-first** rule: one test per scenario, named with its S-ID (`it('S3: …')`, `def test_S3_…`), seen failing before the code exists.
 2. Exact checkout, branch, the ticket's Paths as file ownership, and exclusions. Shared databases are read-only for workers; schema changes go through migrations in the worker's own branch.
-3. Relevant files and symbols, the plan's Decisions, and dependency evidence.
+3. The pointers the plan already holds: the ticket's Seams, the plan's Decisions, and predecessor commits. The worker finds the code.
 4. The repo's full CI gate (types, lint, tests as CI runs them), assigned peers, and integration owner.
 
-Give a resumed worker only the new task, changed constraints, relevant peer updates, and changed checkout state. Do not repeat the full plan or broad discovery. The orchestrator maps scope; the worker reads implementation details.
+Give a resumed worker a new task directory holding only the new task, changed constraints, relevant peer updates, and changed checkout state. Do not repeat the full plan or broad discovery. The orchestrator maps scope; the worker reads implementation details.
 
 Use [the state helper](references/state.md) to reserve assignments before dispatch and bind returned runtime IDs afterward. Keep one worker ledger per active plan, outside tracked product files; share its absolute path across repositories. The worker ledger tracks agents; the plan tracks scope, decisions and ticket status. The helper validates records, not code behavior, and never spawns agents.
 
@@ -76,17 +90,17 @@ If spawn delivery is uncertain, inspect the runtime and reservation before retry
 - Let workers ask focused questions. The orchestrator owns scope changes and resolves incompatible interface decisions.
 - Prefer one blocking `wait(all)` per work period over native notifications. Avoid repeated status polling and repeated unchanged reports.
 - Wait for PR checks with `~/bin/wait-checks <owner>/<repo>#<pr> ...` (full path: shells started before `~/bin` existed don't have it on PATH), run in the background: one PASS/FAIL line per PR, plus the failed log on FAIL. Do not write ad-hoc watch loops.
-- Workers run relevant checks and return commands, outcomes, and omissions. Inspect their diff and evidence. Rerun checks only for changed inputs, integration, failures, or unresolved risk.
+- Workers run relevant checks and return commands, outcomes, and omissions in `report.json`. The gates are the evidence; investigate a diff only when a gate fails. Rerun checks only for changed inputs, integration, failures, or unresolved risk.
 - Require verification on the combined result when repositories or branches interact. A pane state of `idle` or `done` is not evidence of task completion.
-- Record the result and handoff. Use available runtime usage data for comparisons; include parent and worker costs, cache use, time, and correctness. Never claim measured savings without measurements.
+- Record the result and handoff. The ledger packet carries the route: `size`, `difficulty`, `class`, `effort` and the resolved `model`; the completing report carries `review_rounds` and `usage`, the runtime's metric line for that worker from `wait` or `status`, or `unknown` when the runtime has none. Include parent and worker costs, cache use, time and correctness in comparisons. Never claim measured savings without measurements.
 
 ## 2. Gate each ticket
 
 When a worker reports a ticket done, run three gates in the implementation checkout. Any FAIL or blocking finding sends the failing lines back to the worker (return to step 1).
 
 1. **Converge:** call the Skill tool with `converge` for this ticket (`--ticket T<n>`). Its checks: every scenario has a test named with its S-ID, every changed test carries an ID, and the diff stays inside the ticket's Paths. Any FAIL blocks.
-2. **Review:** dispatch a fresh-context reviewer subagent (Opus) with only the ticket, its scenarios, the plan's Decisions, the diff, and the repo's AGENTS.md / CLAUDE.md. It checks correctness and the repo's conventions, plus a security lens when the diff touches auth, permissions or personal data. Its blocking findings go back to the worker.
-3. **Gaps (advice):** a fresh-context subagent compares the plan with the diff and classifies each gap as missing, partial, contradicts or unrequested. Each gap becomes a new ticket. It never blocks and never edits code.
+2. **Review:** dispatch a fresh-context large-class reviewer subagent with paths only: `<task>/task.md`, the plan, the commit range to diff itself, and the repo's AGENTS.md / CLAUDE.md. It checks correctness and the repo's conventions, plus a security lens when the diff touches auth, permissions or personal data. It writes its findings to `<task>/review.md`. Blocking findings go back to the worker as that path, and the lead checkpoints the task PARTIAL with `review_rounds` raised by one. A fix round for the unit keeps the same `unit`, so [escalation](references/routing.md#escalation) counts across attempts.
+3. **Gaps (advice):** a fresh-context medium-class subagent, given the plan's path and the commit range, compares the plan with the diff and classifies each gap as missing, partial, contradicts or unrequested. Each gap becomes a new ticket. It never blocks and never edits code.
 
 A ticket is COMPLETE when converge passes, the review has no blocking finding, and CI is green on its PR. Record the commands and results in its row.
 
