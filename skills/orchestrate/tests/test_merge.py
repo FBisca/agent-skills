@@ -39,7 +39,7 @@ class MergeTests(GateFixture, unittest.TestCase):
         self.run_driver()
         findings = json.loads((self.run_dir / "t1r1" / "findings.json").read_text(encoding="utf-8"))
         self.assertEqual((findings["source"], findings["attempt"]), ("ci", 1))
-        self.assertIn("unit tests: boom at line 3", findings["items"])
+        self.assertEqual([(i["check"], i["excerpt"]) for i in findings["items"]], [("ci", "unit tests: boom at line 3")])
         self.assertIn("boom at line 3", (self.run_dir / "t1r1" / "task.md").read_text(encoding="utf-8"))
         self.assertEqual([r["args"]["name"] for r in self.calls("resume")], ["demo-t1"])
         self.assertEqual(self.wait_checks_log(), ["o/r#7", "o/r#7"])
@@ -69,7 +69,7 @@ class MergeTests(GateFixture, unittest.TestCase):
         self.waits([self.worker_done(tests=True), self.reviewer_done()])
         spec = load_script()
         env = dict(os.environ, PATH=str(self.home) + os.pathsep + os.environ["PATH"],
-                   FAKE_RUNTIME_HOME=str(self.home), FAKE_PLAN=str(self.plan))
+                   FAKE_RUNTIME_HOME=str(self.home), FAKE_PLAN=str(self.plan), FAKE_CHECKOUT=str(self.worktree))
         argv = ["orchestrate", "run", str(self.plan), "--state-dir", str(self.state_dir),
                 "--models-file", str(self.models), "--wait-seconds", "1", "--idle-interval", "30"]
         with mock.patch.dict(os.environ, env), mock.patch.object(sys, "argv", argv), \

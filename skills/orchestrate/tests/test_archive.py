@@ -86,7 +86,7 @@ class ArchiveTests(ArchiveFixture, unittest.TestCase):
         self.run_driver()
         findings = json.loads((self.run_dir / "archiver1" / "findings.json").read_text(encoding="utf-8"))
         self.assertEqual((findings["source"], findings["attempt"]), ("converge", 1))
-        self.assertTrue(any(i.startswith("FAIL") for i in findings["items"]))
+        self.assertTrue(any(i["excerpt"].startswith("FAIL") for i in findings["items"]))
         self.assertEqual([r["args"]["name"] for r in self.calls("resume")], [ARCHIVE])
         self.assertEqual(self.task("archiver1")["status"], "COMPLETE")
 

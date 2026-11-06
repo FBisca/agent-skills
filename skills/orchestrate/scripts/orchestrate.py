@@ -12,6 +12,7 @@ import math
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -560,11 +561,50 @@ def cell(text, limit=160):
     return flat if len(flat) <= limit else flat[:limit - 1].rstrip() + "…"
 
 
+def item_text(item):
+    """What a finding says, whichever contract wrote it: a contract 2 `summary`, a contract 1 `problem` or deferred
+    `note`, a converge or CI `excerpt`."""
+    return next((str(item[k]) for k in ("summary", "problem", "note", "excerpt") if item.get(k)), "")
+
+
 def describe(item):
-    """One line for a findings item: converge and CI items are lines already; a review item is an object."""
-    if isinstance(item, dict):
-        return "%s: %s:%s %s. Fix: %s" % (item["id"], item["file"], item["line"], item["problem"], item["fix"])
-    return str(item)
+    """The lines a fix round shows for one findings item (text lines of contract 1 are shown as they are)."""
+    if not isinstance(item, dict):
+        return str(item)
+    if item.get("source") in ("converge", "ci"):
+        return "%s %s: %s (exit %s of `%s`; full log %s)" % (item["source"], item["check"], item["excerpt"], item["exit"],
+                                                            item["command"], item["log_path"])
+    where = "%s:%s " % (item["file"], item["line"]) if item.get("file") else ""
+    line = "%s%s%s: %s%s" % (item["id"], " (%s)" % item["kind"] if item.get("kind") else "", ", answer required" if item.get("answer_required") else "",
+                             where, item_text(item))
+    if item.get("fix"):
+        line += ". Fix: %s" % item["fix"]
+    evidence = item.get("evidence")
+    if isinstance(evidence, dict):
+        line += ". Evidence: `%s` exited %s (log %s): %s" % (evidence["command"], evidence["exit"], evidence["log_path"],
+                                                          cell(evidence["excerpt"], 300))
+    return line
+
+
+def short(item):
+    """A finding in a few words, for a request's reason and a ledger `remaining` line."""
+    if not isinstance(item, dict):
+        return str(item)
+    if item.get("source") in ("converge", "ci"):
+        return item["excerpt"].splitlines()[0] if item["excerpt"] else "%s %s failed" % (item["source"], item["check"])
+    return "%s: %s" % (item.get("id"), item_text(item))
+
+
+def head_of(checkout):
+    """The checkout's HEAD sha."""
+    return run(["git", "-C", str(checkout), "rev-parse", "HEAD"])
+
+
+def check_commit(claimed, head, what="review.json"):
+    """A claimed commit is at least 7 hex characters and is the checkout's HEAD (or an abbreviation of it)."""
+    contracts.need(re.fullmatch(r"[0-9a-f]{7,40}", claimed or "") is not None,
+                   "%s: commit %r is not a sha of at least 7 hex characters" % (what, claimed))
+    contracts.need(head.startswith(claimed), "%s: commit %s is not the checkout's HEAD (%s)" % (what, claimed, head[:12]))
 
 
 ARCHIVE_ACCEPTANCE = [
@@ -741,6 +781,10 @@ class Driver:
                     if task["status"] in ("COMPLETE", "RELEASED"):
                         continue
                     gate = task.get("gate")
+                    answers = task.get("answers") or {}
+                    if answers.get("state") == "working" and answers.get("assignment_id") == assignment_id:
+                        task["answers"] = dict(answers, state="reported")
+                        break
                     if gate == "reviewing" and task["review"].get("assignment_id") == assignment_id:
                         task["gate"] = "reviewed"
                         break
@@ -789,7 +833,10 @@ class Driver:
                 gate = task.get("gate")
                 if task["status"] in ("COMPLETE", "RELEASED"):
                     continue
-                if gate == "requested" and task.get("assignment_id") == assignment_id:
+                answers = task.get("answers") or {}
+                if answers.get("state") == "working" and answers.get("assignment_id") == assignment_id:
+                    hit = (task_id, "answerer", task["packet"]["worker"])
+                elif gate == "requested" and task.get("assignment_id") == assignment_id:
                     hit = (task_id, "held", task["packet"]["worker"])
                 elif gate == "reviewing" and task["review"].get("assignment_id") == assignment_id:
                     hit = (task_id, "reviewer", task["review"]["name"])
@@ -809,6 +856,9 @@ class Driver:
             return self.hold(task_id, assignment_id, kind, reason) if kind in ("blocked", "decision") else None
         if role == "worker":
             return self.request(task_id, kind, reason)
+        if role == "answerer":
+            self.mark(task_id, answers=dict(self.task(task_id)["answers"], state="failed"))
+            return self.request(task_id, "answers", reason)
         if kind == "exited":
             return self.mark(task_id, gate="reviewed")
         self.request(task_id, role, reason)
@@ -819,9 +869,21 @@ class Driver:
                  "reviewed": self.step_reviewed, "fix-pending": self.step_fix, "requested": self.step_requested,
                  "decided": self.step_decided, "redo-pending": self.step_redo,
                  "ready-for-ci": self.step_ci, "awaiting-merge": self.step_merge, "cleanup": self.step_cleanup}
+        acted = 0
+        with self.book() as data:
+            answered = [task_id for task_id, task in data["tasks"].items()
+                        if (task.get("answers") or {}).get("state") == "reported" and task["status"] not in ("COMPLETE", "RELEASED")]
+        for task_id in answered:
+            try:
+                self.step_answers(task_id)
+                acted += 1
+            except (ValueError, OSError, subprocess.TimeoutExpired) as error:
+                self.mark(task_id, answers=dict(self.task(task_id)["answers"], state="failed"))
+                self.errors.append("%s: %s" % (task_id, error))
+                self.log("error", unit=self.unit_of(task_id), task=task_id, gate="answers", error=str(error)[:500])
+                event("%s answers failed: %s" % (task_id, error))
         with self.book() as data:
             ids = [task_id for task_id, task in data["tasks"].items() if task.get("gate") in steps]
-        acted = 0
         for task_id in ids:
             while True:
                 gate = self.task(task_id).get("gate")
@@ -958,22 +1020,67 @@ class Driver:
 
     def record_report(self, task_id, report, **changes):
         """Checkpoint the worker's report as PARTIAL: the unit is not COMPLETE until CI and the merge."""
-        path = self.run_dir / task_id / "report.json"
+        path = self.report_file(task_id)
         with self.book() as data:
             # review_rounds is the driver's own count: the worker's value is never trusted.
             checkpoint(data, task_id, dict(report, status="PARTIAL", **dict({"review_rounds": 0}, **changes)))
             data["tasks"][task_id]["report_path"] = str(path)
 
+    def report_file(self, task_id):
+        """The newest report in a task directory. Files are write-once: a later attempt writes report.2.json."""
+        directory, newest = self.run_dir / task_id, "report.json"
+        for index in range(2, 1000):
+            if not (directory / ("report.%d.json" % index)).exists():
+                break
+            newest = "report.%d.json" % index
+        return directory / newest
+
+    def contract_error(self, task_id, where, error):
+        """A handoff file broke its contract: log it, and the Lead decides."""
+        self.log("contract-error", unit=self.unit_of(task_id), task=task_id, where=where, error=str(error)[:500])
+        return self.request(task_id, where, str(error))
+
+    def log_clarifications(self, task_id, source, document, path):
+        """One `clarification` event per entry the agent listed; a file is read once, however often its step runs."""
+        key = str(path)
+        if key in (self.task(task_id).get("clarified") or []):
+            return
+        for entry in document.get("clarifications") or []:
+            self.log("clarification", unit=self.unit_of(task_id), task=task_id, source=source, finding=entry["finding"],
+                     asked_by=entry["asked_by"], note=cell(entry["note"], 300))
+        with self.book() as data:
+            data["tasks"][task_id].setdefault("clarified", []).append(key)
+
+    def resume_for_responses(self, task, directory_id, report_path, missing):
+        """Resume the task's worker once with the ids it left unanswered; the new report goes to the next report file."""
+        directory = self.run_dir / directory_id
+        brief = next_path(directory, "missing", ".md")[0]
+        brief.write_text("\n".join([
+            "# Missing responses for %s" % directory_id,
+            "",
+            "Your report %s has no response for the answer_required finding(s): %s." % (report_path, ", ".join(missing)),
+            "Write %s: a full report (same shape, task_id `%s`) whose `responses` answer them, each "
+            "`{\"id\", \"status\": \"fixed|disputed\", \"commit\", \"note\", \"changes_code\"?}`." % (
+                next_path(directory, "report", ".json")[0], directory_id),
+            "Change nothing else.", ""]), encoding="utf-8")
+        text = "Read %s and follow it." % brief
+        return self.hand_over(task, dict(task["packet"], task_id=directory_id), brief, text)[1]
+
     def step_reported(self, task_id):
         task = self.task(task_id)
+        path = self.report_file(task_id)
         try:
-            report = contracts.load(self.run_dir / task_id / "report.json", contracts.validate_report)
+            report = contracts.load(path, contracts.validate_report)
             contracts.need(report["task_id"] == task_id, "report task_id %r is not %s" % (report["task_id"], task_id))
             contracts.need(report["status"] == "COMPLETE" and report["acceptance_met"],
                            "the worker said complete but report.json says %s" % report["status"])
         except contracts.ContractError as error:
-            return self.request(task_id, "report", str(error))
-        verdict, lines = self.converge(task["packet"])
+            return self.contract_error(task_id, "report", error)
+        self.log_clarifications(task_id, "report", report, path)
+        missing = contracts.missing_responses(report, task.get("answer_ids") or [])
+        if missing:
+            return self.chase_responses(task_id, path, missing)
+        verdict, lines = self.converge(task_id, task["packet"])
         if verdict == "error":
             return self.request(task_id, "converge", lines[0])
         try:
@@ -985,8 +1092,20 @@ class Driver:
         # A fix round is gated by converge alone, and so is the archive (converge --final); a first build gets one review.
         self.mark(task_id, gate="ready-for-ci" if FIX_ROUND.search(task_id) or task["packet"]["unit"] == ARCHIVE else "converged")
 
-    def converge(self, packet):
-        """Run converge for the unit's ticket: ("PASS" | "FAIL" | "error", FAIL lines or the reason)."""
+    def chase_responses(self, task_id, path, missing):
+        """A fix-round report lacks a response the reviewer asked for. The first time, resume the worker with the
+        missing ids at no round cost; the next report that still lacks them is a request."""
+        task = self.task(task_id)
+        message = "%s has no response for answer_required finding(s) %s" % (path, ", ".join(missing))
+        if task.get("chased"):
+            return self.contract_error(task_id, "responses", "the next report still lacks it: " + message)
+        self.log("contract-error", unit=self.unit_of(task_id), task=task_id, where="responses", error=message[:500],
+                 missing=missing)
+        assignment_id = self.resume_for_responses(task, task_id, path, missing)
+        self.mark(task_id, gate=None, assignment_id=assignment_id, chased=missing)
+
+    def converge(self, task_id, packet):
+        """Run converge for the unit's ticket: ("PASS" | "FAIL" | "error", evidence items or the reason)."""
         if packet["unit"] == ARCHIVE:
             # The archive branch holds the plan with Status ARCHIVED; fall back to the driver's copy if it is untracked.
             copy = Path(packet["checkout"]) / self.plan_rel()
@@ -1000,20 +1119,27 @@ class Driver:
         if result.returncode == 0:
             return "PASS", []
         if result.returncode == 1 and lines:
-            return "FAIL", lines
+            log = next_path(self.run_dir / task_id, "converge", ".log")[0]
+            log.write_text(result.stdout, encoding="utf-8")
+            command = " ".join(shlex.quote(part) for part in argv)
+            return "FAIL", [{"id": "C%d" % number, "kind": "blocking", "source": "converge",
+                             "check": (re.match(r"FAIL ([^:]+):", line) or [None, "converge"])[1].strip(), "command": command,
+                             "exit": result.returncode, "excerpt": line, "log_path": str(log)}
+                            for number, line in enumerate(lines, 1)]
         return "error", [(result.stderr.strip() or result.stdout.strip() or "converge exited %d" % result.returncode)[:500]]
 
-    def fail_gate(self, task_id, report, source, items):
+    def fail_gate(self, task_id, report, source, items, checks_run=(), answer_ids=()):
         """A gate failed: raise review_rounds, then a fix round, or the escalation hook on the 3rd failure."""
-        remaining = [describe(item) for item in items]
+        remaining = [short(item) for item in items]
         self.record_report(task_id, report, review_rounds=1, remaining=remaining)
         with self.book() as data:
             unit = data["tasks"][task_id]["packet"]["unit"]
             failures = unit_summary(data, unit)["failed_reviews"]
-        fix = {"source": source, "items": items, "attempt": failures}
+        fix = {"source": source, "items": items, "attempt": failures, "checks_run": list(checks_run),
+               "answer_ids": list(answer_ids)}
         self.log("round", unit=unit, task=task_id, source=source, attempt=failures)
         for item in items:
-            self.log_finding(unit, task_id, source, "blocking", item)
+            self.log_finding(unit, task_id, source, item.get("kind", "blocking") if isinstance(item, dict) else "blocking", item)
         if failures > MAX_FIX_ROUNDS:
             return self.escalate(task_id, "%s failed its gates %d times; last: %s" % (unit, failures, "; ".join(remaining)), fix)
         self.mark(task_id, gate="fix-pending", fix=fix)
@@ -1021,7 +1147,7 @@ class Driver:
     def log_finding(self, unit, task_id, source, kind, item):
         """One `finding` event: a blocking item that goes to a fix round, or a deferred one that goes to deferred.md."""
         found = item.get("id") if isinstance(item, dict) else None
-        text = item.get("note") or item.get("problem") if isinstance(item, dict) else item
+        text = item_text(item) if isinstance(item, dict) else item
         self.log("finding", unit=unit, task=task_id, source=source, finding_kind=kind, id=found,
                  summary=cell(text or "", 200))
 
@@ -1038,14 +1164,14 @@ class Driver:
         review_dir.mkdir(exist_ok=True, mode=0o700)
         task_md = review_dir / "task.md"
         if not task_md.exists():
-            task_md.write_text(self.review_text(packet, review["path"]), encoding="utf-8")
+            task_md.write_text(self.review_text(packet, review["path"], task.get("delta")), encoding="utf-8")
         _, assignment_id = self.ensure_agent(name, "reviewer", unit, {
             "kind": "worker", "name": name, "task": "Read %s and follow it." % task_md, "cwd": packet["checkout"],
             "cli": self.args.cli, "model": self.models["large"], "effort": "high"})
         self.mark(task_id, gate="reviewing", review=dict(review, assignment_id=assignment_id))
         event("spawned %s (large, %s, high)" % (name, self.models["large"]))
 
-    def review_text(self, packet, review_path):
+    def review_text(self, packet, review_path, delta=None):
         checkout = Path(packet["checkout"])
         rules = [str(checkout / n) for n in ("AGENTS.md", "CLAUDE.md") if (checkout / n).exists()]
         return "\n".join([
@@ -1054,45 +1180,142 @@ class Driver:
             "Read these yourself; nothing is pasted here.",
             "- Task: %s" % (self.run_dir / packet["unit"] / "task.md"),
             "- Plan: %s (its Decisions, Scenarios and Seams)" % self.plan_path,
-            "- Commit range: run `git -C %s diff %s...HEAD`" % (checkout, self.args.base),
+            *(["- Commit range: run `git -C %s diff %s...HEAD`" % (checkout, self.args.base)] if not delta else [
+                "- This is a re-review. Only `git -C %s diff %s..HEAD` is new; the whole change is `%s...HEAD`." % (
+                    checkout, delta["from"], self.args.base),
+                "- The earlier findings and the implementer's answers: %s. Check each one (resolved or not, with evidence) "
+                "and raise new blocking items only inside the delta." % delta["findings"]]),
             "- Repo rules: %s" % (", ".join(rules) or "none found; follow the code's own conventions"),
             "",
             "Block only on MAJOR defects: wrong behaviour, data loss, or a scenario that is not really tested. "
-            "Everything else goes in `deferred`; it never blocks.",
+            "Everything else is a `concern`, `question`, `nit` or `deferred` item; it never blocks.",
             "Touch nothing in the repository.",
             "",
-            "Write %s as JSON, exactly this shape:" % review_path,
-            '{"contract":1,"verdict":"pass|block","major":[{"id","file","line","problem","fix"}],'
-            '"deferred":[{"id","note"}],"commit":"<sha you reviewed>"}',
-            'The verdict is "block" exactly when `major` is not empty. Prose for people may go in review.md beside it.',
-            "Then call the agent-runtime `report` tool with kind=complete and one line: `<n> major - %s`." % review_path,
+            "Write %s as JSON, contract 2:" % review_path,
+            '{"contract":2,"verdict":"pass|block","items":[...],"checks_run":[{"command","exit","at_commit"}],'
+            '"clarifications":[{"finding","asked_by":"reviewer","note"}],"commit":"<git rev-parse HEAD of the checkout>"}',
+            "Every item has `id`, `kind` (blocking|concern|question|nit|deferred), `summary` and `answer_required` "
+            "(true only when the implementer must reply). A blocking item also needs `file`, `line`, `fix` and "
+            "`evidence` {command, exit, excerpt, log_path}: the command that shows the defect, its exit code, an excerpt "
+            "and the path of the full output you saved. `scenario`, `why` and `verify` are optional; any other field you "
+            "add is passed on verbatim.",
+            'The verdict is "block" exactly when an item has kind blocking. Prose for people may go in review.md beside it.',
+            "List in `checks_run` every check you ran, so the implementer does not repeat them. List in `clarifications` "
+            "each question you asked the implementer directly.",
+            "Then call the agent-runtime `report` tool with kind=complete and one line: `<n> blocking - %s`." % review_path,
             ""])
+
+    def defer(self, task_id, items, source_path):
+        """Items that go to deferred.md and the retro only: logged as findings, appended with their source file."""
+        unit = self.unit_of(task_id)
+        for item in items:
+            self.log_finding(unit, task_id, "review", item.get("kind", "deferred"), item)
+        if not items:
+            return
+        deferred = self.run_dir / "deferred.md"
+        if not deferred.exists():
+            deferred.write_text("# Deferred findings: %s (for the major review after the driver ships)\n\n" % self.slug,
+                                encoding="utf-8")
+        with deferred.open("a", encoding="utf-8") as stream:
+            for item in items:
+                stream.write("- %s %s%s: %s (%s)\n" % (unit.upper(), item["id"], " [%s]" % item["kind"] if item.get("kind") else "",
+                                                       item_text(item), source_path))
 
     def step_reviewed(self, task_id):
         task = self.task(task_id)
+        packet = task["packet"]
         try:
             review = contracts.load(task["review"]["path"], contracts.validate_review)
             report = contracts.load(task["report_path"], contracts.validate_report)
+            head = head_of(packet["checkout"])
+            check_commit(review["commit"], head, task["review"]["path"])
         except contracts.ContractError as error:
-            return self.request(task_id, "review", str(error))
-        if not (review["commit"].startswith(report["head"]) or report["head"].startswith(review["commit"])):
-            return self.request(task_id, "review", "review.json reviewed commit %s but the report's head is %s"
-                                  % (review["commit"], report["head"]))
-        blocking, deferred_items = contracts.review_items(review)
-        for item in deferred_items:
-            self.log_finding(task["packet"]["unit"], task_id, "review", "deferred", item)
-        if deferred_items:
-            deferred = self.run_dir / "deferred.md"
-            if not deferred.exists():
-                deferred.write_text("# Deferred findings: %s (for the major review after the driver ships)\n\n" % self.slug,
-                                    encoding="utf-8")
-            with deferred.open("a", encoding="utf-8") as stream:
-                for item in deferred_items:
-                    stream.write("- %s %s: %s (%s)\n" % (task["packet"]["unit"].upper(), item["id"], item["note"],
-                                                         task["review"]["path"]))
+            return self.contract_error(task_id, "review", error)
+        self.log_clarifications(task_id, "review", review, task["review"]["path"])
+        blocking, rest = contracts.review_items(review)
+        asks = [i for i in blocking + rest if i.get("answer_required") is True]
+        self.defer(task_id, [i for i in rest if i not in asks], task["review"]["path"])
         if review["verdict"] == "block":
-            return self.fail_gate(task_id, report, "review", blocking)
+            # a fix round holds only blocking and answer_required items, and the reviewer's checks
+            return self.fail_gate(task_id, report, "review", blocking + [i for i in rest if i in asks],
+                                  checks_run=review.get("checks_run") or [], answer_ids=[i["id"] for i in asks])
+        self.mark(task_id, reviewed_commit=head)
+        if asks:  # a question costs no round: CI goes on while the implementer answers
+            self.start_answers(task_id, asks, review)
         self.mark(task_id, gate="ready-for-ci")
+
+    # ---- answers: a passing review's answer_required items, answered while CI runs ---------------------------
+    # The task keeps one `answers` record: {id, dir, assignment_id, ids, state working|reported|done|failed, tries}.
+    # The implementer is resumed for answers only; the unit does not wait on it for CI but is not pr-ready until the
+    # answers are in. A response `disputed` with `changes_code: true` sends the new commits to a delta re-review.
+
+    def start_answers(self, task_id, asks, review):
+        task = self.task(task_id)
+        packet, unit = task["packet"], task["packet"]["unit"]
+        if (task.get("answers") or {}).get("review") == task["review"]["path"]:
+            return  # the driver died after starting them
+        number = next(n for n in range(1, 1000) if not (self.run_dir / ("%sa%d" % (unit, n))).exists())
+        answer_id = "%sa%d" % (unit, number)
+        directory = self.run_dir / answer_id
+        directory.mkdir(exist_ok=True, mode=0o700)
+        findings_path = directory / "findings.json"
+        write_atomic(findings_path, json.dumps(contracts.make_findings("review", number, asks, review.get("checks_run") or []), indent=2) + "\n")
+        task_md = directory / "task.md"
+        task_md.write_text("\n".join([
+            "Contract: %s" % (self.run_dir / "contract.md"),
+            "Report: %s" % (directory / "report.json"),
+            "",
+            "# Answers only for %s (task %s)" % (unit.upper(), answer_id),
+            "",
+            "The review passed. These findings need your answer, nothing else (also in %s):" % findings_path,
+            "",
+            *["- " + describe(item) for item in asks],
+            "",
+            "Change no code unless an answer needs it. Report with task_id `%s`; `responses` holds one "
+            "`{\"id\", \"status\": \"fixed|disputed\", \"commit\", \"note\", \"changes_code\"?}` per finding above. "
+            "A `disputed` answer that needs a code change sets `changes_code` true and names the commit: the reviewer sees it." % answer_id,
+            "Same checkout and branch: %s on %s. Edit only: %s." % (packet["checkout"], task["checkout_at_claim"]["branch"],
+                                                                    ", ".join(packet["owns"])),
+            "Re-run only what a change touches, then the final gate if you changed code. Open no new pull request.", ""]),
+            encoding="utf-8")
+        text = "Read %s and follow it. Answers only: the review passed; nothing else changes." % task_md
+        _, assignment_id = self.hand_over(task, dict(packet, task_id=answer_id), task_md, text)
+        self.log("answers", unit=unit, task=task_id, answer_task=answer_id, ids=[i["id"] for i in asks])
+        self.mark(task_id, answers={"id": answer_id, "dir": str(directory), "assignment_id": assignment_id,
+                                    "ids": [i["id"] for i in asks], "state": "working", "tries": 0,
+                                    "review": task["review"]["path"], "findings": str(findings_path)})
+
+    def step_answers(self, task_id):
+        task = self.task(task_id)
+        answers = task["answers"]
+        path = self.report_file(answers["id"])
+        try:
+            report = contracts.load(path, contracts.validate_report)
+            contracts.need(report["task_id"] == answers["id"], "report task_id %r is not %s" % (report["task_id"], answers["id"]))
+        except contracts.ContractError as error:
+            self.mark(task_id, answers=dict(answers, state="failed"))
+            return self.contract_error(task_id, "answers", error)
+        self.log_clarifications(task_id, "report", report, path)
+        missing = contracts.missing_responses(report, answers["ids"])
+        unit = task["packet"]["unit"]
+        if missing and answers["tries"] >= 1:
+            self.mark(task_id, answers=dict(answers, state="failed"))
+            return self.contract_error(task_id, "responses", "%s still has no response for %s" % (path, ", ".join(missing)))
+        if missing:
+            self.log("contract-error", unit=unit, task=task_id, where="responses", missing=missing,
+                     error="%s has no response for answer_required finding(s) %s" % (path, ", ".join(missing)))
+            assignment_id = self.resume_for_responses(task, answers["id"], path, missing)
+            return self.mark(task_id, answers=dict(answers, state="working", tries=1, assignment_id=assignment_id))
+        for response in report["responses"]:
+            self.log("response", unit=unit, task=task_id, finding=response["id"], status=response["status"],
+                     changes_code=response.get("changes_code"), commit=response.get("commit"))
+        changing = [r["id"] for r in report["responses"] if r["status"] == "disputed" and r.get("changes_code") is True]
+        if changing and task.get("gate") in ("ready-for-ci", "awaiting-merge"):
+            # the new commits go to a delta re-review before the unit goes on to CI again
+            self.mark(task_id, answers=dict(answers, state="done"), gate="converged", review=None, ci_green=None,
+                      delta={"from": task["reviewed_commit"], "findings": answers["findings"]})
+            return event("%s: %s disputed with changes_code; delta re-review from %s" % (task_id, ", ".join(changing), task["reviewed_commit"][:7]))
+        self.mark(task_id, answers=dict(answers, state="done"))
 
     # ---- CI, merge, cleanup ------------------------------------------------------------------------------
     # ready-for-ci -> awaiting-merge -> cleanup -> done. The driver never merges: it polls `gh` for the merge.
@@ -1110,28 +1333,46 @@ class Driver:
         return url, "%s#%s" % match.groups()
 
     def step_ci(self, task_id):
+        task = self.task(task_id)
         try:
             url, ref = self.pr_url(task_id)
         except (contracts.ContractError, ValueError) as error:
             return self.request(task_id, "ci", str(error))
-        try:
-            result = subprocess.run(["wait-checks", ref], capture_output=True, text=True, timeout=self.args.ci_seconds)
-        except subprocess.TimeoutExpired:
-            event("%s checks of %s still running; polling again" % (task_id, ref))
+        waiting = (task.get("answers") or {}).get("state") in ("working", "reported")
+        if not task.get("ci_green"):
+            try:
+                result = subprocess.run(["wait-checks", ref], capture_output=True, text=True, timeout=self.args.ci_seconds)
+            except subprocess.TimeoutExpired:
+                event("%s checks of %s still running; polling again" % (task_id, ref))
+                return False
+            if result.returncode != 0:
+                lines = [line for line in result.stdout.splitlines() if line.strip()]
+                if result.returncode != 1 or not lines:
+                    return self.request(task_id, "ci", (result.stderr.strip() or result.stdout.strip()
+                                                          or "wait-checks exited %d" % result.returncode)[:500])
+                report = contracts.load(self.task(task_id)["report_path"], contracts.validate_report)
+                return self.fail_gate(task_id, report, "ci", self.ci_items(task_id, ref, result))
+            self.mark(task_id, ci_green=True)
+        if waiting:  # green, but the implementer's answers may still change the code: pr-ready waits for them
             return False
-        if result.returncode == 0:
-            unit = self.unit_of(task_id)
-            head = contracts.load(self.task(task_id)["report_path"], contracts.validate_report)["head"]
-            self.wake("pr-ready", unit, "pr-ready %s: %s" % (unit, url), key="%s:%s" % (unit, head))
-            self.put_status(task_id, "IN PROGRESS · awaiting merge (%s)" % url)
-            self.mark(task_id, gate="awaiting-merge", pr=url)
-            return None
+        unit = self.unit_of(task_id)
+        head = contracts.load(self.task(task_id)["report_path"], contracts.validate_report)["head"]
+        self.wake("pr-ready", unit, "pr-ready %s: %s" % (unit, url), key="%s:%s" % (unit, head))
+        self.put_status(task_id, "IN PROGRESS · awaiting merge (%s)" % url)
+        self.mark(task_id, gate="awaiting-merge", pr=url)
+
+    def ci_items(self, task_id, ref, result):
+        """The failing CI checks as evidence items. `wait-checks` prints `FAIL <pr>`, one `  <check>: fail <link>` line per
+        failing check, then the tail of the failed log; the whole output is saved as the items' log."""
+        log = next_path(self.run_dir / task_id, "ci", ".log")[0]
+        log.write_text(result.stdout, encoding="utf-8")
         lines = [line for line in result.stdout.splitlines() if line.strip()]
-        if result.returncode != 1 or not lines:
-            return self.request(task_id, "ci", (result.stderr.strip() or result.stdout.strip()
-                                                  or "wait-checks exited %d" % result.returncode)[:500])
-        report = contracts.load(self.task(task_id)["report_path"], contracts.validate_report)
-        self.fail_gate(task_id, report, "ci", lines[:60])
+        checks = [m.group(1).strip() for m in (re.match(r"\s+(.+?): (?:fail|cancel) \S+\s*$", line) for line in lines) if m]
+        tail = [line.strip() for line in lines[1:] if not re.match(r"\s+.+?: (?:fail|cancel) \S+\s*$", line)]
+        excerpt = "\n".join(tail)[-1500:] or lines[0]
+        return [{"id": "CI%d" % number, "kind": "blocking", "source": "ci", "check": check, "command": "wait-checks " + ref,
+                 "exit": result.returncode, "excerpt": excerpt, "log_path": str(log)}
+                for number, check in enumerate(checks or ["ci"], 1)]
 
     def put_status(self, task_id, status):
         """The ticket's Status cell; the archive unit has no row."""
@@ -1268,12 +1509,13 @@ class Driver:
         new_dir.mkdir(exist_ok=True, mode=0o700)
         findings_path = new_dir / "findings.json"
         try:
-            findings = contracts.make_findings(fix["source"], attempt, fix["items"])
+            findings = contracts.make_findings(fix["source"], attempt, fix["items"], fix.get("checks_run"),
+                                               version=1 if contracts.legacy_items(fix["items"]) else contracts.VERSION)
             if not findings_path.exists():
                 findings_path.write_text(json.dumps(findings, indent=2) + "\n", encoding="utf-8")
             contracts.load(findings_path, contracts.validate_findings)
         except contracts.ContractError as error:
-            return self.request(task_id, "findings", str(error))
+            return self.contract_error(task_id, "findings", error)
         task_md = new_dir / "task.md"
         if not task_md.exists():
             task_md.write_text(self.fix_text(task, new_id, new_dir, findings), encoding="utf-8")
@@ -1284,6 +1526,7 @@ class Driver:
                 "and the round's brief at %s, then fix only what the findings name." % (
                     self.run_dir / unit / "task.md", findings_path, task_md))
         self.hand_round(task, successor, task_md, text, fresh=fix.get("fresh") or fix.get("up"), answer=fix.get("answer"))
+        self.mark(new_id, answer_ids=list(fix.get("answer_ids") or []))
         self.mark(task_id, gate="superseded", fix_task=new_id, held=[])
         self.replay_held(task, new_id)
         event("fix round %s for %s from %s findings" % (new_id, packet["worker"], fix["source"]))
@@ -1369,7 +1612,7 @@ class Driver:
 
     def report_is_valid(self, task_id):
         try:
-            report = contracts.load(self.run_dir / task_id / "report.json", contracts.validate_report)
+            report = contracts.load(self.report_file(task_id), contracts.validate_report)
         except contracts.ContractError:
             return False
         return report["task_id"] == task_id
@@ -1432,6 +1675,13 @@ class Driver:
             "",
             *["- " + describe(item) for item in findings["items"]],
             "",
+            *(["The reviewer already ran these; re-run only what your fix touches, then the final gate:",
+               *["- `%s` exit %s at %s" % (c["command"], c["exit"], c["at_commit"]) for c in findings["checks_run"]], ""]
+              if findings.get("checks_run") else []),
+            *(["Items marked answer_required need an answer: add `responses` to your report, one "
+               "`{\"id\", \"status\": \"fixed|disputed\", \"commit\", \"note\", \"changes_code\"?}` each. "
+               "Without them the driver asks you once more.", ""]
+              if any(i.get("answer_required") is True for i in findings["items"] if isinstance(i, dict)) else []),
             *(["The Lead's answer: %s" % task["fix"]["answer"], ""] if task["fix"].get("answer") else []),
             "Commit and push to the same branch; open no new pull request. Run before you report COMPLETE: %s." % (
                 "; ".join(packet["checks"]) or "the repository's full CI gate"),

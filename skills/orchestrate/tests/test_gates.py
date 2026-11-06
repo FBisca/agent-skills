@@ -9,6 +9,12 @@ from fixtures import RunFixture, plan_text, report_wait, resume_id, spawn_id
 
 MAJOR = {"id": "M1", "file": "src/a/x.py", "line": 7, "problem": "drops the last row", "fix": "include the final row"}
 DEFERRED = {"id": "D1", "note": "rename the helper someday"}
+EVIDENCE = {"command": "pytest -k last", "exit": 1, "excerpt": "AssertionError: 3 != 4", "log_path": "/run/t1/pytest.log"}
+BLOCKING = {"id": "B1", "kind": "blocking", "summary": "drops the last row", "answer_required": False,
+            "file": "src/a/x.py", "line": 7, "fix": "include the final row", "evidence": EVIDENCE}
+QUESTION = {"id": "Q1", "kind": "question", "summary": "should empty input raise?", "answer_required": True}
+NIT = {"id": "N1", "kind": "nit", "summary": "rename the helper", "answer_required": False}
+CONCERN = {"id": "K1", "kind": "concern", "summary": "the cache is never cleared", "answer_required": False}
 
 
 class GateFixture(RunFixture):
@@ -40,7 +46,11 @@ class GateFixture(RunFixture):
         return step
 
     def review(self, **over):
-        return json.dumps(dict({"contract": 1, "verdict": "pass", "major": [], "deferred": [], "commit": "abc1234"}, **over))
+        return json.dumps(dict({"contract": 1, "verdict": "pass", "major": [], "deferred": [], "commit": "@HEAD"}, **over))
+
+    def review2(self, **over):
+        """A contract 2 review.json: pass with no items unless told otherwise."""
+        return json.dumps(dict({"contract": 2, "verdict": "pass", "items": [], "checks_run": [], "commit": "@HEAD"}, **over))
 
     def reviewer_done(self, review=None):
         step = report_wait("demo-t1-review", "complete")
@@ -72,8 +82,8 @@ class GateTests(GateFixture, unittest.TestCase):
         self.assertEqual(resumes[0]["args"]["name"], "demo-t1")
         self.assertEqual(resumes[0]["args"]["task"], "Read %s and follow it." % (self.run_dir / "t1r1" / "task.md"))
         findings = json.loads((self.run_dir / "t1r1" / "findings.json").read_text(encoding="utf-8"))
-        self.assertEqual((findings["contract"], findings["source"], findings["attempt"]), (1, "converge", 1))
-        self.assertEqual(findings["items"], ["FAIL coverage: S1"])
+        self.assertEqual((findings["contract"], findings["source"], findings["attempt"]), (2, "converge", 1))
+        self.assertEqual([(i["source"], i["check"], i["excerpt"]) for i in findings["items"]], [("converge", "coverage", "FAIL coverage: S1")])
         task_md = (self.run_dir / "t1r1" / "task.md").read_text(encoding="utf-8")
         for needle in ("FAIL coverage: S1", str(self.run_dir / "t1r1" / "report.json"), "t1r1", "findings.json"):
             self.assertIn(needle, task_md)
@@ -190,7 +200,7 @@ class GateTests(GateFixture, unittest.TestCase):
 
     def test_S6a_an_invalid_report_does_not_advance_the_ticket(self):
         """code-driven-orchestrator/S6a"""
-        self.waits([self.worker_done(report=self.report("t1", contract=2)), self.skipped()])
+        self.waits([self.worker_done(report=self.report("t1", contract=3)), self.skipped()])
         self.run_driver()
         self.assertEqual(self.spawned(), ["demo-t1"])
         self.assertEqual(self.request()["event"], "report")
