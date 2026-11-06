@@ -53,7 +53,7 @@ class ReopenTests(DeciderFixture, unittest.TestCase):
         self.waits([])
         self.run_driver()
         self.assertEqual(self.spawned(), ["demo-t1"])
-        self.assertEqual(self.stops(), [])
+        self.assertEqual(self.stops(), ["demo-t1"])  # stopped when the unit paused, not again by the edit
         self.assertEqual(self.task()["gate"], "blocked")
 
 
