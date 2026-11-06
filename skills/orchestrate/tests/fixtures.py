@@ -12,7 +12,7 @@ SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "orchestrate.py"
 
 FAKE_RUNTIME = '''#!/usr/bin/env python3
 """Records every call; spawn answers a canned worker, wait pops the next scripted answer."""
-import json, os, sys
+import json, os, subprocess, sys
 home = os.environ["FAKE_RUNTIME_HOME"]
 argv = sys.argv[1:]
 tool = argv[1]
@@ -38,6 +38,8 @@ elif tool == "wait":
         text = open(path).read()
         assert old in text, old
         open(path, "w").write(text.replace(old, new, 1))
+    for argv in step.pop("run", []):
+        subprocess.run(argv, check=True, capture_output=True)
     print(json.dumps(dict({"reason": "empty", "reports": [], "unfinished": []}, **step)))
 elif tool == "status":
     states = json.load(open(os.path.join(home, "states.json")))
@@ -45,11 +47,38 @@ elif tool == "status":
     if state == "error":
         sys.exit(1)
     print(json.dumps({"name": args["name"], "state": state}))
+elif tool == "stop":
+    print(json.dumps({"name": args["name"], "state": "exited"}))
 elif tool == "resume":
     print(json.dumps({"name": args["name"], "address": "term-" + args["name"], "parent": "driver",
                       "assignment_id": "r-" + args["name"]}))
 else:
     print(json.dumps({}))
+'''
+
+FAKE_WAIT_CHECKS = '''#!/usr/bin/env python3
+"""Logs its argument; answers from checks.json: a list of [exit code, stdout], popped per call (last one repeats)."""
+import json, os, sys
+home = os.environ["FAKE_RUNTIME_HOME"]
+with open(os.path.join(home, "wait-checks.log"), "a") as log:
+    log.write(sys.argv[1] + "\\n")
+queue = json.load(open(os.path.join(home, "checks.json")))
+code, out = queue.pop(0) if len(queue) > 1 else queue[0]
+json.dump(queue, open(os.path.join(home, "checks.json"), "w"))
+print(out)
+sys.exit(code)
+'''
+
+FAKE_GH = '''#!/usr/bin/env python3
+"""`gh pr view`: logs the plan as it stands at each call, answers the next PR state from prs.json (last repeats)."""
+import json, os, sys
+home = os.environ["FAKE_RUNTIME_HOME"]
+with open(os.path.join(home, "gh.log"), "a") as log:
+    log.write(json.dumps({"argv": sys.argv[1:], "plan": open(os.environ["FAKE_PLAN"]).read()}) + "\\n")
+queue = json.load(open(os.path.join(home, "prs.json")))
+state = queue.pop(0) if len(queue) > 1 else queue[0]
+json.dump(queue, open(os.path.join(home, "prs.json"), "w"))
+print(json.dumps({"state": state, "mergeCommit": {"oid": "f" * 40} if state == "MERGED" else None}))
 '''
 
 HEADER = """# Plan: demo
@@ -117,6 +146,12 @@ class RunFixture:
         fake = self.home / "agent-runtime"
         fake.write_text(FAKE_RUNTIME, encoding="utf-8")
         fake.chmod(0o755)
+        for name, body in (("wait-checks", FAKE_WAIT_CHECKS), ("gh", FAKE_GH)):
+            tool = self.home / name
+            tool.write_text(body, encoding="utf-8")
+            tool.chmod(0o755)
+        self.checks([[0, "PASS o/r#7"]])
+        self.prs(["MERGED"])
         self.refuse([])
         self.waits([])
         self.states({})
@@ -134,6 +169,20 @@ class RunFixture:
     def refuse(self, names):
         (self.home / "refuse.json").write_text(json.dumps(names), encoding="utf-8")
 
+    def checks(self, answers):
+        (self.home / "checks.json").write_text(json.dumps(answers), encoding="utf-8")
+
+    def prs(self, states):
+        (self.home / "prs.json").write_text(json.dumps(states), encoding="utf-8")
+
+    def gh_log(self):
+        path = self.home / "gh.log"
+        return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
+
+    def wait_checks_log(self):
+        path = self.home / "wait-checks.log"
+        return path.read_text(encoding="utf-8").split() if path.exists() else []
+
     def states(self, mapping):
         (self.home / "states.json").write_text(json.dumps(mapping), encoding="utf-8")
 
@@ -147,7 +196,7 @@ class RunFixture:
 
     def run_driver(self, *extra, plan=None, expect=0):
         env = dict(os.environ, PATH=str(self.home) + os.pathsep + os.environ["PATH"],
-                   FAKE_RUNTIME_HOME=str(self.home))
+                   FAKE_RUNTIME_HOME=str(self.home), FAKE_PLAN=str(self.plan))
         result = subprocess.run(
             [sys.executable, "-B", str(SCRIPT), "run", str(plan or self.plan), "--state-dir", str(self.state_dir),
              "--models-file", str(self.models), "--wait-seconds", "1", *extra],
