@@ -46,13 +46,13 @@ Delegate only through the `agent-runtime` tools: `spawn` (kind `lookup` is rejec
 
 Check the worker's subsystem, checkout state, last result, and available context telemetry at each task boundary. Read worker state from the latest `wait` result, or the `status` tool (or `list`) as a fallback, and the assignment `state`/`runtime_state` fields first, before deciding resume versus fresh; a worker's self-reported `unknown` is not a reading. Record `unknown` only when that read fails.
 
-- Resume when retained knowledge helps the next task and there is room for its expected reads, results, and reasoning.
+- Resume only when all three hold: retained knowledge helps the next task; current occupancy is under ~200k tokens; and measured context plus the next task's estimated reserve (reads, results, reasoning) fits the effective window. Every worker turn re-reads its whole context, so cost tracks occupied tokens, not the share of a large window.
 - Use the **child's effective context window**. Current context occupancy, cumulative token use, and cached input are different measurements.
 - Record unavailable measurements as `unknown`. Do not estimate occupancy from transcript bytes, task count, or an agent's unsupported percentage claim.
 - Before compaction or replacement, save the objective, ownership, decisions, interface revisions, files, checks, and unresolved work.
 - Prefer a new worker when the subsystem changes, assumptions are stale, or repeated errors show lost context. Compaction alone does not require replacement; verify what survived.
 - After compaction or external edits, recheck affected files and constraints. A Git HEAD alone does not identify uncommitted changes.
-- Do not apply a universal task-count or percentage cutoff. When measured context plus the estimated next-task reserve exceeds the effective window, checkpoint and compact through a supported runtime operation or use a fresh worker.
+- Do not apply a task-count or percentage-of-window cutoff. When a worker fails the occupancy or reserve limit, checkpoint, then compact through a supported runtime operation or use a fresh worker with a compact packet.
 
 ## Prepare and dispatch
 
