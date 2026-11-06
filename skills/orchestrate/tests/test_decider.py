@@ -6,7 +6,8 @@ import sys
 import unittest
 from unittest import mock
 
-from fixtures import ROWS, RunFixture, assignment, load_script, plan_text, report_wait, resume_id, spawn_id, wait_result
+from fixtures import (ROWS, RunFixture, assignment, load_script, plan_text, recorded_idles, report_wait, resume_id,
+                      spawn_id, wait_result)
 
 
 class DeciderFixture(RunFixture):
@@ -319,10 +320,10 @@ class PauseTests(DeciderFixture, unittest.TestCase):
         env = dict(os.environ, PATH=str(self.home) + os.pathsep + os.environ["PATH"], FAKE_RUNTIME_HOME=str(self.home))
         argv = ["orchestrate", "run", str(self.plan), "--state-dir", str(self.state_dir), "--models-file", str(self.models),
                 "--wait-seconds", "1", "--idle-interval", "30"]
-        with mock.patch.dict(os.environ, env), mock.patch.object(sys, "argv", argv), mock.patch.object(spec.time, "sleep") as sleep:
+        with mock.patch.dict(os.environ, env), mock.patch.object(sys, "argv", argv), recorded_idles(spec) as idles:
             spec.main()
-        self.assertGreaterEqual(sleep.call_count, 4)
-        self.assertEqual({c.args[0] for c in sleep.call_args_list}, {30})
+        self.assertGreaterEqual(len(idles), 4)
+        self.assertEqual(set(idles), {30})
         self.assertEqual(self.spawned(), ["demo-t1", "demo-t3", "demo-t1-decide"])
 
     def test_S12_another_units_open_assignment_still_counts_as_work(self):

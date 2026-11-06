@@ -1,11 +1,13 @@
 """Shared fixtures for the driver tests: a fake agent-runtime, a temp git repo with an origin, a temp plan."""
 
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from unittest import mock
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "orchestrate.py"
@@ -282,3 +284,12 @@ def load_script():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+@contextmanager
+def recorded_idles(spec):
+    """Replace `Driver.idle` with a recorder of its interval. Patching `time.sleep` itself would also hit
+    `subprocess` (its timeout loop sleeps ~1 ms), which makes the count and the interval flaky."""
+    intervals = []
+    with mock.patch.object(spec.Driver, "idle", lambda driver: intervals.append(driver.args.idle_interval)):
+        yield intervals

@@ -6,7 +6,7 @@ import sys
 import unittest
 from unittest import mock
 
-from fixtures import load_script, plan_text
+from fixtures import load_script, plan_text, recorded_idles
 from test_gates import GateFixture, MAJOR
 
 PR = "https://github.com/o/r/pull/7"
@@ -73,13 +73,13 @@ class MergeTests(GateFixture, unittest.TestCase):
         argv = ["orchestrate", "run", str(self.plan), "--state-dir", str(self.state_dir),
                 "--models-file", str(self.models), "--wait-seconds", "1", "--idle-interval", "30"]
         with mock.patch.dict(os.environ, env), mock.patch.object(sys, "argv", argv), \
-                mock.patch.object(spec.time, "sleep") as sleep:
+                recorded_idles(spec) as idles:
             spec.main()
         polls = len([c for c in self.gh_log() if c["argv"][:2] == ["pr", "view"]])
         self.assertEqual(polls, 7)
         # the fake wait returns at once, so every no-progress poll must be followed by the idle sleep
-        self.assertGreaterEqual(sleep.call_count, 5)
-        self.assertEqual({c.args[0] for c in sleep.call_args_list}, {30})
+        self.assertGreaterEqual(len(idles), 5)
+        self.assertEqual(set(idles), {30})
         self.assertEqual(self.task()["status"], "COMPLETE")
 
     def test_S9_a_merged_ticket_makes_its_dependents_dispatchable(self):
