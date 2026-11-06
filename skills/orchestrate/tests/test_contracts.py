@@ -89,5 +89,19 @@ class ContractTests(unittest.TestCase):
             self.rejects(lambda p: contracts.load(p, contracts.validate_review), path, "64 KiB")
 
 
+    def test_S11_a_decision_names_one_action_from_the_menu(self):
+        """code-driven-orchestrator/S11"""
+        for action in ("retry", "retry one class up", "fresh worker", "mark blocked", "skip", "ask user"):
+            decision = {"contract": 1, "action": action, "reason": "because"}
+            self.assertEqual(contracts.validate_decision(decision)["action"], action)
+        ask = {"contract": 1, "action": "ask user", "reason": "scope", "question": "which API?"}
+        self.assertEqual(contracts.validate_decision(ask)["question"], "which API?")
+        self.rejects(contracts.validate_decision, {"contract": 1, "action": "retry now", "reason": "x"}, "action")
+        self.rejects(contracts.validate_decision, {"contract": 1, "action": "skip"}, "reason")
+        self.rejects(contracts.validate_decision, {"contract": 2, "action": "skip", "reason": "x"}, "contract")
+        self.rejects(contracts.validate_decision, {"contract": 1, "action": "skip", "reason": "x", "question": 3}, "question")
+        self.rejects(contracts.validate_decision, ["skip"], "object")
+
+
 if __name__ == "__main__":
     unittest.main()

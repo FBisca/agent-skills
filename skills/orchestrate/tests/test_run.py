@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import unittest
 
-from fixtures import ROWS, RunFixture, load_script, plan_text
+from fixtures import ROWS, RunFixture, assignment, load_script, plan_text, wait_result
 
 
 class RunTests(RunFixture, unittest.TestCase):
@@ -102,7 +102,7 @@ class RunTests(RunFixture, unittest.TestCase):
         self.assertIn("Tickets", self.run_driver(expect=2).stderr)
         self.assertEqual(self.calls(), [])
 
-    def test_S3_dispatch_changes_only_the_status_cell_of_dispatched_rows(self):
+    def test_S3_dispatch_changes_only_the_status_cell_of_dispatched_and_person_rows(self):
         """code-driven-orchestrator/S3"""
         before = self.plan.read_text(encoding="utf-8").splitlines()
         self.run_driver("--max-workers", "2")
@@ -110,7 +110,8 @@ class RunTests(RunFixture, unittest.TestCase):
         self.assertEqual(len(before), len(after))
         changed = {b: a for b, a in zip(before, after) if a != b}
         self.assertEqual(changed, {ROWS["T1"]: ROWS["T1"].replace("TO-DO", "IN PROGRESS"),
-                                   ROWS["T3"]: ROWS["T3"].replace("TO-DO", "IN PROGRESS")})
+                                   ROWS["T3"]: ROWS["T3"].replace("TO-DO", "IN PROGRESS"),
+                                   ROWS["T4"]: ROWS["T4"].replace("TO-DO", "needs you: sign-off")})
 
     def test_S3_pause_and_complete_write_one_row_too(self):
         """code-driven-orchestrator/S3"""
@@ -128,10 +129,10 @@ class RunTests(RunFixture, unittest.TestCase):
         """code-driven-orchestrator/S4"""
         self.plan.write_text(plan_text(rows=("T1", "T2")), encoding="utf-8")
         new_row = ROWS["T3"].replace("| T3 | third", "| T6 | sixth")
-        self.waits([{"reason": "timeout", "unfinished": ["demo-t1"],
-                     "replace": [[str(self.plan), "| T1 | first | S1 | none | src/a/ | small | simple | agent | IN PROGRESS |",
-                                  "| T1 | first | S1 | none | src/a/ | small | simple | agent | COMPLETE 2026-11-07 |\n" + new_row]]},
-                    {"reason": "empty", "unfinished": []}])
+        self.waits([wait_result([assignment("demo-t1")], replace=[
+                        [str(self.plan), "| T1 | first | S1 | none | src/a/ | small | simple | agent | IN PROGRESS |",
+                         "| T1 | first | S1 | none | src/a/ | small | simple | agent | COMPLETE 2026-11-07 |\n" + new_row]]),
+                    wait_result()])
         self.run_driver()
         self.assertEqual(sorted(c["args"]["name"] for c in self.calls("spawn")), ["demo-t1", "demo-t2", "demo-t6"])
         self.assertEqual(len(self.calls("wait")), 2)

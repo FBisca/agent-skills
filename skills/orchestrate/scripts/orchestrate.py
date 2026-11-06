@@ -377,6 +377,12 @@ def is_agent(ticket):
     return ticket["Owner"].strip().lower() == "agent"
 
 
+def ready(ticket, by_id):
+    """A TO-DO ticket whose blockers are all COMPLETE."""
+    return ticket["Status"].strip().upper().startswith("TO-DO") and all(
+        is_done(by_id[b]) for b in re.split(r"[,\s]+", ticket["Blocked by"].strip()) if b and b.lower() != "none")
+
+
 def satisfied(ticket, scenarios):
     """Scenario IDs a ticket makes true; a range covers every ID numbered inside it."""
     found, missing = [], []
@@ -492,12 +498,26 @@ def runtime_call(lead, tool, arguments, timeout=120):
     return json.loads(result.stdout)
 
 
+def assignment_of(result):
+    """The assignment id a `spawn` or `resume` answered with: how `wait` names this agent from then on."""
+    found = result.get("assignment_id")
+    if not isinstance(found, str) or not found:
+        raise ValueError("the runtime answered without an assignment_id: %s" % json.dumps(result)[:200])
+    return found
+
+
 def event(message):
     print("[orchestrate] " + message, file=sys.stderr, flush=True)
 
 
-GATES = ("reported", "converged", "reviewed", "fix-pending", "ready-for-ci", "awaiting-merge", "cleanup")  # ledger `gate` stages the loop acts on
+GATES = ("reported", "converged", "reviewed", "fix-pending", "decide", "decided", "redo-pending",
+         "ready-for-ci", "awaiting-merge", "cleanup")  # ledger `gate` stages the loop acts on
+PARKED = ("attention", "blocked", "skipped")  # nothing runs for the unit until the user acts
 MAX_FIX_ROUNDS = 2  # a unit's 3rd failed gate goes to Driver.escalate
+MAX_DECIDERS = 2  # decider calls per unit; the next event pauses the unit instead
+TURN_ENDED = ("idle", "done", "unreported", "error")  # runtime_state of a `working` assignment that needs a person
+ATTENTION = {"blocked": "reported blocked", "decision": "asked for a decision",
+             "exited": "ended without a report"}
 FIX_ROUND = re.compile(r"r\d+$")
 CONVERGE = Path(__file__).resolve().parents[2] / "converge" / "scripts" / "converge.py"
 
@@ -509,6 +529,12 @@ def next_path(directory, stem, suffix):
         if not path.exists():
             return path, index
     raise ValueError("too many %s files in %s" % (stem, directory))
+
+
+def cell(text, limit=160):
+    """Text safe inside one plan table cell: one line, no pipes, cut at `limit`."""
+    flat = " ".join(str(text).replace("|", "/").split())
+    return flat if len(flat) <= limit else flat[:limit - 1].rstrip() + "…"
 
 
 def describe(item):
@@ -563,7 +589,7 @@ class Driver:
                 event("plan not runnable, nothing dispatched this round: %s" % error)
                 plan = None
             acted = self.advance()
-            dispatched = self.dispatch_ready(plan) if plan else 0
+            dispatched = (self.dispatch_ready(plan) + self.attend_people(plan)) if plan else 0
             if idle and not dispatched and not acted and not self.awaiting():
                 return
             wait = {"target": "all", "timeout": self.args.wait_seconds}
@@ -572,7 +598,10 @@ class Driver:
             result = runtime_call(self.lead, "wait", wait, timeout=self.args.wait_seconds + 60)
             self.receipt = result.get("receipt")
             self.receive(result)
-            idle = not result.get("unfinished")
+            # `unfinished` lists assignment ids. A parked unit's assignment stays open in the runtime and makes `wait`
+            # return at once: it is not work, so a run with only parked units left ends.
+            parked = self.parked_assignments()
+            idle = not [entry for entry in result.get("unfinished") or [] if entry not in parked]
             if not (dispatched or acted or self.received):
                 self.idle()
 
@@ -583,41 +612,93 @@ class Driver:
 
     # ---- gates: a worker's report -> converge -> one review -> fix rounds -----------------------------------
     # The ledger task's `gate` field is the whole state: reported -> converged -> reviewing -> reviewed ->
-    # ready-for-ci, or fix-pending -> superseded. `ready-for-ci`, `attention` and `escalated` are the seams
-    # for the CI gate and the decider: nothing here acts on them.
+    # ready-for-ci, or fix-pending -> superseded. An event only a decider can settle (a 3rd failed gate, a worker
+    # that is blocked or asks, or ends with no report) runs decide -> deciding -> decided -> fix-pending
+    # or redo-pending (retry, fresh worker), blocked, skipped, or attention. `attention` is the pause: Status
+    # `needs you`, an `attention.md` entry, nothing else moves. `ready-for-ci` is the seam for the CI gate.
 
     def receive(self, result):
-        """Turn the runtime's `complete` messages into gate stages. Only names and kinds are read here."""
+        """Turn the runtime's reports into gate stages. Agents are told apart by assignment id only: the runtime's
+        messages carry no name, and a resumed worker keeps its name across assignments."""
         self.received = bool(result.get("messages"))
-        names = {a.get("assignment_id"): a.get("name") for a in result.get("assignments") or []}
         for message in result.get("messages") or []:
-            name = message.get("name") or names.get(message.get("assignment_id"))
-            kind = message.get("kind")
-            if not name or kind not in ("complete", "blocked", "decision"):
+            kind, assignment_id = message.get("kind"), message.get("assignment_id")
+            if not assignment_id or kind not in ("complete", "blocked", "decision", "failed"):
                 continue
             if kind != "complete":
-                self.on_agent_attention(name, kind)
+                self.on_agent_attention(assignment_id, "exited" if kind == "failed" else kind, message.get("text") or "")
                 continue
             with ledger(self.ledger_path) as data:
                 for task in data["tasks"].values():
-                    if task.get("gate") == "reviewing" and task["review"]["name"] == name:
+                    if task["status"] in ("COMPLETE", "RELEASED"):
+                        continue
+                    gate = task.get("gate")
+                    if gate == "reviewing" and task["review"].get("assignment_id") == assignment_id:
                         task["gate"] = "reviewed"
                         break
-                    if (task["packet"]["worker"] == name and task["status"] not in ("COMPLETE", "RELEASED")
-                            and not task.get("gate")):
+                    if gate == "deciding" and task["decision"].get("assignment_id") == assignment_id:
+                        task["gate"] = "decided"
+                        break
+                    if not gate and task.get("assignment_id") == assignment_id:
                         task["gate"] = "reported"
                         break
                 else:
-                    event("complete from %s matches no open gate" % name)
+                    event("complete from assignment %s matches no open gate" % assignment_id)
+        self.check_ended(result.get("assignments") or [])
 
-    def on_agent_attention(self, name, kind):
-        """Hook for the decider: a worker reported `blocked` or `decision`."""
-        event("%s reported %s; no handler yet" % (name, kind))
+    def check_ended(self, assignments):
+        """Attention from assignment states, as `wait` reports them: `failed`, `blocked` or `decision`, or `working`
+        with a `runtime_state` that says the turn ended (idle, done) or needs a person (unreported, error)."""
+        for assignment in assignments:
+            state, runtime = assignment.get("state"), assignment.get("runtime_state")
+            if state in ("blocked", "decision"):
+                kind, text = state, ""
+            elif state == "failed" or (state == "working" and runtime in TURN_ENDED):
+                kind, text = "exited", ("runtime state " + runtime) if runtime else ""
+            else:
+                continue
+            if assignment.get("assignment_id"):
+                self.on_agent_attention(assignment["assignment_id"], kind, text, quiet=True)
+
+    def parked_assignments(self):
+        """Assignment ids that belong to a parked unit (paused, blocked or skipped): open in the runtime, not work."""
+        with ledger(self.ledger_path) as data:
+            return {agent.get("assignment_id") for task in data["tasks"].values() if task.get("gate") in PARKED
+                    for agent in (task, task.get("review") or {}, task.get("decision") or {})} - {None}
+
+    def on_agent_attention(self, assignment_id, kind, text="", quiet=False):
+        """An agent reported `blocked` or `decision`, or its assignment failed or ended with no report. Each event is
+        handled once: a unit that already has a gate (deciding, paused, reviewing, ...) ignores it. A reviewer or
+        decider that ends silently moves its gate on, so the missing file is reported as a contract error."""
+        hit = None
+        with ledger(self.ledger_path) as data:
+            for task_id, task in data["tasks"].items():
+                gate = task.get("gate")
+                if task["status"] in ("COMPLETE", "RELEASED"):
+                    continue
+                if gate == "deciding" and task["decision"].get("assignment_id") == assignment_id:
+                    hit = (task_id, "decider", task["decision"]["name"])
+                elif gate == "reviewing" and task["review"].get("assignment_id") == assignment_id:
+                    hit = (task_id, "reviewer", task["review"]["name"])
+                elif not gate and task.get("assignment_id") == assignment_id:
+                    hit = (task_id, "worker", task["packet"]["worker"])
+        if not hit:
+            if not quiet:
+                event("assignment %s %s: already handled or not an open assignment" % (assignment_id, ATTENTION[kind]))
+            return
+        task_id, role, name = hit
+        reason = "%s %s%s" % (name, ATTENTION[kind], ": " + text if text else "")
+        if role == "worker":
+            return self.raise_event(task_id, kind, reason)
+        if kind == "exited":
+            return self.mark(task_id, gate="decided" if role == "decider" else "reviewed")
+        self.attention(task_id, role, reason)
 
     def advance(self):
         """Run every pending gate stage once; each step changes the task's gate or raises. Returns the steps run."""
         steps = {"reported": self.step_reported, "converged": self.step_converged,
-                 "reviewed": self.step_reviewed, "fix-pending": self.step_fix,
+                 "reviewed": self.step_reviewed, "fix-pending": self.step_fix, "decide": self.step_decide,
+                 "decided": self.step_decided, "redo-pending": self.step_redo,
                  "ready-for-ci": self.step_ci, "awaiting-merge": self.step_merge, "cleanup": self.step_cleanup}
         with ledger(self.ledger_path) as data:
             ids = [task_id for task_id, task in data["tasks"].items() if task.get("gate") in steps]
@@ -652,17 +733,49 @@ class Driver:
             data["tasks"][task_id].update(fields, updated_at=now())
 
     def attention(self, task_id, kind, reason):
-        """Hook for the decider and the pause: a gate cannot advance. Recorded on the unit; nothing else moves."""
+        """Pause the unit: a gate cannot advance and no decider can settle it. The ticket's Status reads
+        `needs you`, `attention.md` gets an entry, and the other tickets keep running."""
         with ledger(self.ledger_path) as data:
             task = data["tasks"][task_id]
             task.setdefault("attention", []).append({"at": now(), "kind": kind, "reason": reason})
             task["gate"] = "attention"
+            unit = task["packet"]["unit"].upper()
         event("%s needs attention (%s): %s" % (task_id, kind, reason))
+        self.note_attention(unit, kind, reason)
+        self.write_status(unit, "IN PROGRESS · needs you: " + cell(reason))
 
-    def escalate(self, task_id, reason):
-        """Hook for the decider: a unit failed its gates a 3rd time. Recorded; the worker is left as it is."""
-        self.mark(task_id, gate="escalated", escalation=reason)
-        event("%s escalated: %s" % (task_id, reason))
+    def write_status(self, ticket_id, status):
+        try:
+            set_status(self.plan_path, ticket_id, status)
+        except (ValueError, OSError) as error:
+            self.errors.append("%s: plan Status not written: %s" % (ticket_id, error))
+            event("%s: plan Status not written: %s" % (ticket_id, error))
+
+    def note_attention(self, ticket_id, kind, reason):
+        path = self.run_dir / "attention.md"
+        if not path.exists():
+            path.write_text("# Needs you: %s\n\nThe ticket's Status in the plan carries the same reason.\n\n" % self.slug,
+                            encoding="utf-8")
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write("- %s %s (%s): %s\n" % (now(), ticket_id, kind, " ".join(reason.split())))
+
+    def raise_event(self, task_id, kind, reason, fix=None):
+        """An event only a decider can settle. It gets a fresh decider, `MAX_DECIDERS` times per unit; then the user."""
+        with ledger(self.ledger_path) as data:
+            unit = data["tasks"][task_id]["packet"]["unit"]
+            used = sum(1 for t in data["tasks"].values() if t["packet"].get("unit") == unit and t.get("decision"))
+            if used < MAX_DECIDERS:
+                task = data["tasks"][task_id]
+                task.update(event={"at": now(), "kind": kind, "reason": reason}, gate="decide", updated_at=now())
+                if fix:
+                    task["fix"] = fix
+        if used >= MAX_DECIDERS:
+            return self.attention(task_id, kind, "%s (%d decider calls on %s already)" % (reason, used, unit))
+        event("%s needs a decision (%s): %s" % (task_id, kind, reason))
+
+    def escalate(self, task_id, reason, fix):
+        """A unit failed its gates a 3rd time: a decider settles it. `fix` is the round a `retry` would run."""
+        self.raise_event(task_id, "gate", reason, fix=fix)
 
     def record_report(self, task_id, report, **changes):
         """Checkpoint the worker's report as PARTIAL: the unit is not COMPLETE until CI and the merge."""
@@ -712,9 +825,10 @@ class Driver:
         with ledger(self.ledger_path) as data:
             unit = data["tasks"][task_id]["packet"]["unit"]
             failures = unit_summary(data, unit)["failed_reviews"]
+        fix = {"source": source, "items": items, "attempt": failures}
         if failures > MAX_FIX_ROUNDS:
-            return self.escalate(task_id, "%s failed its gates %d times; last: %s" % (unit, failures, "; ".join(remaining)))
-        self.mark(task_id, gate="fix-pending", fix={"source": source, "items": items, "attempt": failures})
+            return self.escalate(task_id, "%s failed its gates %d times; last: %s" % (unit, failures, "; ".join(remaining)), fix)
+        self.mark(task_id, gate="fix-pending", fix=fix)
 
     def step_converged(self, task_id):
         task = self.task(task_id)
@@ -730,10 +844,10 @@ class Driver:
         task_md = review_dir / "task.md"
         if not task_md.exists():
             task_md.write_text(self.review_text(packet, review["path"]), encoding="utf-8")
-        runtime_call(self.lead, "spawn", {
+        spawned = runtime_call(self.lead, "spawn", {
             "kind": "worker", "name": name, "task": "Read %s and follow it." % task_md, "cwd": packet["checkout"],
             "cli": self.args.cli, "model": self.models["large"], "effort": "high"})
-        self.mark(task_id, gate="reviewing")
+        self.mark(task_id, gate="reviewing", review=dict(review, assignment_id=assignment_of(spawned)))
         event("spawned %s (large, %s, high)" % (name, self.models["large"]))
 
     def review_text(self, packet, review_path):
@@ -903,32 +1017,181 @@ class Driver:
         if not task_md.exists():
             task_md.write_text(self.fix_text(task, new_id, new_dir, findings), encoding="utf-8")
         successor = dict(packet, task_id=new_id, objective="Fix round %d for %s: %s findings" % (attempt, unit.upper(), fix["source"]))
-        with ledger(self.ledger_path) as data:
-            if data["tasks"][task_id]["status"] != "RELEASED":
-                release(data, task_id, "superseded by fix round " + new_id)
-            claim(data, successor)
-            bound = data["tasks"][new_id]["runtime_id"]
-        if not bound:
-            runtime_id = self.hand_over(task, new_id, task_md, findings_path)
-            with ledger(self.ledger_path) as data:
-                bind(data, new_id, str(runtime_id))
+        if fix.get("up"):
+            successor.update(self.class_up(packet))
+        text = ("Read %s and follow it. Its work is already in this checkout; this is a fix round: read the findings at %s "
+                "and the round's brief at %s, then fix only what the findings name." % (
+                    self.run_dir / unit / "task.md", findings_path, task_md))
+        self.hand_round(task, successor, task_md, text, fresh=fix.get("fresh") or fix.get("up"))
         self.mark(task_id, gate="superseded", fix_task=new_id)
         event("fix round %s for %s from %s findings" % (new_id, packet["worker"], fix["source"]))
 
-    def hand_over(self, task, new_id, task_md, findings_path):
-        packet = task["packet"]
-        name = packet["worker"]
-        if self.pane_alive(name):
+    def hand_round(self, task, successor, task_md, text, fresh=False):
+        """Close the unit's open task, claim its successor and put a worker on it: the live pane is resumed, a gone
+        pane (or a `fresh` round) gets a new worker from `text`."""
+        task_id, new_id = task["packet"]["task_id"], successor["task_id"]
+        with ledger(self.ledger_path) as data:
+            if data["tasks"][task_id]["status"] != "RELEASED":
+                release(data, task_id, "superseded by " + new_id)
+            claim(data, successor)
+            bound = data["tasks"][new_id]["runtime_id"]
+        if not bound:
+            runtime_id, assignment_id = self.hand_over(task, successor, task_md, text, fresh)
+            with ledger(self.ledger_path) as data:
+                bind(data, new_id, str(runtime_id))
+                data["tasks"][new_id]["assignment_id"] = assignment_id
+
+    def hand_over(self, task, successor, task_md, text, fresh=False):
+        name = successor["worker"]
+        alive = self.pane_alive(name)
+        if alive and not fresh:
             resumed = runtime_call(self.lead, "resume", {"name": name, "task": "Read %s and follow it." % task_md})
-            return resumed.get("address") or task["runtime_id"]
-        original = self.run_dir / packet["unit"] / "task.md"
+            return resumed.get("address") or task["runtime_id"], assignment_of(resumed)
+        if alive:
+            try:
+                runtime_call(self.lead, "stop", {"name": name})
+            except (ValueError, OSError, subprocess.TimeoutExpired) as error:
+                event("could not stop %s before replacing it: %s" % (name, error))
         spawned = runtime_call(self.lead, "spawn", {
-            "kind": "worker", "name": name, "cwd": packet["checkout"], "cli": packet["backend"],
-            "model": packet["model"], "effort": packet["effort"],
-            "task": "Read %s and follow it. Its work is already in this checkout; this is a fix round: read the findings at %s "
-                    "and the round's brief at %s, then fix only what the findings name." % (original, findings_path, task_md)})
-        event("pane of %s is gone; spawned a fresh worker for %s" % (name, new_id))
-        return spawned.get("address") or spawned.get("assignment_id") or name
+            "kind": "worker", "name": name, "cwd": successor["checkout"], "cli": successor["backend"],
+            "model": successor["model"], "effort": successor["effort"], "task": text})
+        event("%s: spawned a fresh worker for %s (%s)" % (name, successor["task_id"], "replacing the pane" if alive else "pane is gone"))
+        return spawned.get("address") or spawned.get("assignment_id") or name, assignment_of(spawned)
+
+    def class_up(self, packet):
+        """The packet fields that move a retry one model class up; at the top class the effort goes up a notch."""
+        classes, efforts = ROUTE["class"], ROUTE["effort"]
+        at = classes.index(packet["class"])
+        if at + 1 < len(classes):
+            return {"class": classes[at + 1], "model": self.models[classes[at + 1]]}
+        return {"effort": efforts[min(efforts.index(packet["effort"]) + 1, len(efforts) - 1)]}
+
+    # ---- the decider: one action from a fixed menu, validated and applied here ----------------------------------
+
+    def step_decide(self, task_id):
+        task = self.task(task_id)
+        packet, unit = task["packet"], task["packet"]["unit"]
+        decision = task.get("decision")
+        if not decision:
+            path, index = next_path(self.run_dir / unit, "decision", ".json")
+            tail = "-decide" + ("" if index == 1 else str(index))
+            decision = {"name": worker_name(self.slug, unit[1:], tail), "path": str(path), "dir": str(self.run_dir / (unit + tail))}
+            self.mark(task_id, decision=decision)
+        decision_dir = Path(decision["dir"])
+        decision_dir.mkdir(exist_ok=True, mode=0o700)
+        task_md = decision_dir / "task.md"
+        if not task_md.exists():
+            task_md.write_text(self.decide_text(task_id, task, decision["path"]), encoding="utf-8")
+        try:
+            spawned = runtime_call(self.lead, "spawn", {
+                "kind": "worker", "name": decision["name"], "task": "Read %s and follow it." % task_md, "cwd": packet["checkout"],
+                "cli": self.args.cli, "model": self.models["large"], "effort": "high"})
+            decision = dict(decision, assignment_id=assignment_of(spawned))
+        except (ValueError, OSError, subprocess.TimeoutExpired) as error:
+            return self.attention(task_id, "decider", "could not start the decider %s: %s" % (decision["name"], error))
+        self.mark(task_id, gate="deciding", decision=decision)
+        event("spawned %s (large, %s, high)" % (decision["name"], self.models["large"]))
+
+    def decide_text(self, task_id, task, decision_path):
+        packet, unit = task["packet"], task["packet"]["unit"]
+        with ledger(self.ledger_path) as data:
+            summary = unit_summary(data, unit)
+        slice_ = {"unit": unit, "task": task_id, "attempts": summary["attempts"], "failed_reviews": summary["failed_reviews"],
+                  "cutoffs": summary["cutoffs"], "last_report": (task.get("report") or {}).get("summary"),
+                  "remaining": (task.get("report") or {}).get("remaining"), "attention": task.get("attention", [])}
+        paths = ["- Task: %s" % (self.run_dir / unit / "task.md"), "- Plan: %s (its Decisions and Scenarios)" % self.plan_path,
+                 "- This attempt's report: %s" % (self.run_dir / task_id / "report.json")]
+        if task.get("review"):
+            paths.append("- Review: %s" % task["review"]["path"])
+        if (self.run_dir / task_id / "findings.json").exists():
+            paths.append("- Findings this attempt was given: %s" % (self.run_dir / task_id / "findings.json"))
+        paths.append("- Checkout: %s" % packet["checkout"])
+        return "\n".join([
+            "# Decide %s: pick one action, nothing else" % unit.upper(),
+            "",
+            "Event: %s" % task["event"]["reason"],
+            "Ledger slice for the unit:",
+            "```json", json.dumps(slice_, indent=2), "```",
+            "",
+            "Paths (read what you need; nothing more is pasted here):", *paths,
+            "",
+            "Pick exactly one action:",
+            "- `retry`: the same worker tries again, with your reason as its brief.",
+            "- `retry one class up`: a fresh worker on the next model class (or more effort at the top class).",
+            "- `fresh worker`: replace the worker with a new one on the same class.",
+            "- `mark blocked`: the ticket cannot proceed; its Status reads BLOCKED with your reason.",
+            "- `skip`: the ticket is dropped; its Status reads SKIPPED with your reason.",
+            "- `ask user`: only the user can settle it. Always choose this for a scope or product question.",
+            "",
+            "Write %s as JSON, exactly this shape:" % decision_path,
+            '{"contract":1,"action":"<one of the six above>","reason":"<one or two sentences>","question":"<what the user must answer; only for ask user>"}',
+            "Touch nothing else. Then call the agent-runtime `report` tool with kind=complete and one line: `<action> - %s`." % decision_path,
+            ""])
+
+    def step_decided(self, task_id):
+        task = self.task(task_id)
+        try:
+            decision = contracts.load(task["decision"]["path"], contracts.validate_decision)
+        except contracts.ContractError as error:
+            return self.attention(task_id, "decision", str(error))
+        action, reason, unit = decision["action"], decision["reason"], task["packet"]["unit"]
+        event("%s decided %r: %s" % (task_id, action, reason))
+        if action == "ask user":
+            return self.attention(task_id, "ask-user", decision.get("question") or reason)
+        if action in ("mark blocked", "skip"):
+            blocked = action == "mark blocked"
+            with ledger(self.ledger_path) as data:
+                if blocked:
+                    data["tasks"][task_id].update(status="BLOCKED", blocker=reason)
+                else:
+                    release(data, task_id, "skipped by the decider: " + reason)
+                data["tasks"][task_id].update(gate="blocked" if blocked else "skipped", updated_at=now())
+            return self.write_status(unit.upper(), ("BLOCKED" if blocked else "SKIPPED") + " · " + cell(reason))
+        flags = {"fresh": action == "fresh worker", "up": action == "retry one class up"}
+        if task.get("fix"):
+            return self.mark(task_id, gate="fix-pending", fix=dict(task["fix"], **flags))
+        self.mark(task_id, gate="redo-pending", redo=dict(flags, reason=reason))
+
+    def step_redo(self, task_id):
+        """Hand the unit back to a worker after a decider's `retry`: a new task directory with the event and the reason."""
+        task = self.task(task_id)
+        packet, redo, unit = task["packet"], task["redo"], task["packet"]["unit"]
+        with ledger(self.ledger_path) as data:
+            taken = set(data["tasks"])
+        number = next(n for n in range(1, 1000) if "%sd%d" % (unit, n) not in taken or "%sd%d" % (unit, n) == task.get("redo_task"))
+        new_id = "%sd%d" % (unit, number)
+        new_dir = self.run_dir / new_id
+        new_dir.mkdir(exist_ok=True, mode=0o700)
+        task_md = new_dir / "task.md"
+        if not task_md.exists():
+            task_md.write_text(self.redo_text(task, new_id, new_dir, redo), encoding="utf-8")
+        successor = dict(packet, task_id=new_id, objective="Retry %s after: %s" % (unit.upper(), task["event"]["kind"]))
+        if redo["up"]:
+            successor.update(self.class_up(packet))
+        self.mark(task_id, redo_task=new_id)
+        text = ("Read %s and follow it. Its work is already in this checkout; this is a retry: read the retry brief at %s "
+                "and continue from where the work stands." % (self.run_dir / unit / "task.md", task_md))
+        self.hand_round(task, successor, task_md, text, fresh=redo["fresh"] or redo["up"])
+        self.mark(task_id, gate="superseded")
+        event("retry %s for %s after %s" % (new_id, packet["worker"], task["event"]["kind"]))
+
+    def redo_text(self, task, new_id, new_dir, redo):
+        packet, unit = task["packet"], task["packet"]["unit"]
+        return "\n".join([
+            "Contract: %s" % (self.run_dir / "contract.md"),
+            "Report: %s" % (new_dir / "report.json"),
+            "",
+            "# Retry %s (task %s) after a decision" % (unit.upper(), new_id),
+            "",
+            "What happened: %s" % task["event"]["reason"],
+            "The decider's instruction: %s" % redo["reason"],
+            "Original task: %s. Use task_id `%s` in your report." % (self.run_dir / unit / "task.md", new_id),
+            "Same checkout and branch: %s on %s. Work only here; edit only: %s." % (
+                packet["checkout"], task["checkout_at_claim"]["branch"], ", ".join(packet["owns"])),
+            "Commit and push to the same branch. Run before you report COMPLETE: %s." % (
+                "; ".join(packet["checks"]) or "the repository's full CI gate"),
+            "Report review_rounds 0: the driver counts failed rounds.",
+            ""])
 
     def fix_text(self, task, new_id, new_dir, findings):
         packet = task["packet"]
@@ -953,15 +1216,13 @@ class Driver:
     def dispatch_ready(self, plan):
         with ledger(self.ledger_path) as data:
             tasks = data["tasks"]
-            unfinished = sum(1 for t in tasks.values() if t["status"] not in ("COMPLETE", "RELEASED"))
+            unfinished = sum(1 for t in tasks.values()
+                             if t["status"] not in ("COMPLETE", "RELEASED") and t.get("gate") not in PARKED)
         by_id = {t["#"]: t for t in plan["tickets"]}
         count = 0
         for ticket in plan["tickets"]:
             task_id = ticket["#"].lower()
-            if (not is_agent(ticket) or not ticket["Status"].strip().upper().startswith("TO-DO")
-                    or task_id in self.failed
-                    or not all(is_done(by_id[b]) for b in re.split(r"[,\s]+", ticket["Blocked by"].strip())
-                               if b and b.lower() != "none")):
+            if not is_agent(ticket) or task_id in self.failed or not ready(ticket, by_id):
                 continue
             held = tasks.get(task_id)
             if held and held["runtime_id"]:
@@ -977,6 +1238,20 @@ class Driver:
                 unfinished += 0 if held else 1
                 continue
             unfinished += 0 if held else 1
+            count += 1
+        return count
+
+    def attend_people(self, plan):
+        """A person-owned ticket that becomes ready reads `needs you: <what it needs>` and waits for the user."""
+        by_id = {t["#"]: t for t in plan["tickets"]}
+        count = 0
+        for ticket in plan["tickets"]:
+            if is_agent(ticket) or not ready(ticket, by_id):
+                continue
+            needs = cell(ticket["What it delivers"] or "your action")
+            self.note_attention(ticket["#"], "person", needs)
+            self.write_status(ticket["#"], "needs you: " + needs)
+            event("%s needs you: %s" % (ticket["#"], needs))
             count += 1
         return count
 
@@ -1006,6 +1281,7 @@ class Driver:
         runtime_id = spawned.get("address") or spawned.get("assignment_id") or name
         with ledger(self.ledger_path) as data:
             bind(data, task_id, str(runtime_id))
+            data["tasks"][task_id]["assignment_id"] = assignment_of(spawned)
         set_status(self.plan_path, ticket["#"], "IN PROGRESS")
         self.spawned.append(name)
         event("spawned %s (%s, %s, %s)" % (name, klass, packet["model"], effort))
