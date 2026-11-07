@@ -21,7 +21,7 @@ SHARED_CONTRACTS = {
     "cold-read": ("Claude:", "Codex:"),
     "orchestrate": ("scripts/orchestrate.py launch", "Status: APPROVED"),
     "converge": ("scripts/converge.py", "REFUSED"),
-    "start-planning": ("/skill:start-planning", "scripts/fresh_context.py", "scripts/check_deps.py"),
+    "start-planning": ("scripts/fresh_context.py", "references/delegation.md"),
 }
 
 
@@ -81,10 +81,28 @@ class SharedSkills(unittest.TestCase):
 
     def test_S3_the_shared_skills_still_name_claude_and_codex(self):
         """S3: the skills that support several harnesses still say so."""
-        for name in ("cold-read", "start-planning"):
-            text = (SKILLS / name / "SKILL.md").read_text(encoding="utf-8")
-            self.assertIn("Claude", text, name)
-            self.assertIn("Codex", text, name)
+        text = (SKILLS / "cold-read" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("Claude", text)
+        self.assertIn("Codex", text)
+
+
+class NoHarnessInstructions(unittest.TestCase):
+    """A skill body states the workflow; the harness's own discovery states the invocation."""
+
+    def test_no_skill_body_carries_an_invocation_syntax(self):
+        """Native discovery provides the invocation: restating it only pollutes the context."""
+        for directory in sorted(p for p in SKILLS.iterdir() if p.is_dir()):
+            text = (directory / "SKILL.md").read_text(encoding="utf-8")
+            self.assertNotIn("/skill:", text, "%s: Pi invocation syntax" % directory.name)
+            self.assertNotIn("Invoke it as", text, "%s: invocation instructions" % directory.name)
+
+    def test_the_harness_detail_lives_in_a_reference(self):
+        """The per-harness dispatch is loaded on demand, not with the skill."""
+        reference = SKILLS / "start-planning" / "references" / "delegation.md"
+        self.assertTrue(reference.is_file())
+        text = reference.read_text(encoding="utf-8")
+        for harness in ("Claude Code", "Codex", "Pi"):
+            self.assertIn(harness, text)
 
 
 class PlanContract(unittest.TestCase):

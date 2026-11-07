@@ -78,11 +78,11 @@ done
 
 ### Harnesses
 
-The same `SKILL.md` serves every harness; a skill is invoked as `/start-planning` in Claude Code, as the `start-planning` skill in Codex and as `/skill:start-planning` in Pi.
+The same `SKILL.md` serves every harness. Each one discovers a skill natively — a directory with a `SKILL.md` whose frontmatter carries `name` and `description` — so no skill has to teach the harness how to invoke it.
 
 `start-planning` needs one upstream skill, `grilling`, which is not vendored here: install it with `scripts/install-upstream.sh grilling` (see [Upstream skills](#upstream-skills)). The plan refuses to continue without it, and never skips the grill.
 
-Pi has no subagent tool, so the fresh-context gather step runs through the bundled gatherer (`skills/start-planning/scripts/fresh_context.py`), which runs a bounded, isolated `pi --print` session and validates its answer. The supported invocation methods and the known limitations are in **[docs/specs/harness-portability.md](docs/specs/harness-portability.md)**.
+A harness with no subagent of its own dispatches the fresh-context gather through the adapter the skill ships (`skills/start-planning/scripts/fresh_context.py`), which runs a bounded, isolated session and validates its answer. The per-harness dispatch is in `skills/start-planning/references/delegation.md`; the supported methods and the known limitations are in **[docs/specs/harness-portability.md](docs/specs/harness-portability.md)**.
 
 ### Configuration
 

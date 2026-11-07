@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Bounded fresh-context gatherer for start-planning: the Pi path.
+"""Bounded fresh-context gatherer for start-planning: the adapter for a harness with no subagent.
 
-Pi has no subagent tool, so the gather step runs the task packet through a separate
-`pi --print` session: a fresh session directory, no inherited conversation, a timeout, a
-restricted tool set and a strict return schema. Every failure path exits non-zero with a
-reason, so the caller stops instead of continuing on evidence the gatherer never produced.
+The skill requires a fresh-context gatherer — no inherited context, bounded, structured
+result, loud failure. A harness that offers no subagent dispatches this script instead: it
+runs the task packet through a separate `pi --print` session (a fresh session directory, no
+inherited conversation, a timeout, a restricted tool set) and validates the answer against a
+strict schema. Every failure path exits non-zero with a reason, so the caller stops instead
+of continuing on evidence the gatherer never produced.
+
+See `references/delegation.md` for how a harness dispatches it and what each exit code means.
 
 Usage:
     python3 fresh_context.py --packet <packet.md> [--timeout 600] [--output <result.json>]
@@ -210,6 +214,17 @@ def _strings(value, path, problems):
             problems.append("%s[%d] must be a string" % (path, index))
 
 
+def _count_value(value):
+    """A count is an integer; a number written in digits is the same count, not a failure."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
 def validate(obj):
     """The reasons the answer is not a valid gather result; empty means valid."""
     problems = []
@@ -260,7 +275,7 @@ def validate(obj):
         problems.append("counts must be an object")
     else:
         for key, value in counts.items():
-            if not isinstance(value, int) or isinstance(value, bool):
+            if _count_value(value) is None:
                 problems.append("counts[%s] must be an integer" % key)
     return problems
 
@@ -308,6 +323,8 @@ def gather(packet_path, timeout=DEFAULT_TIMEOUT, pi_bin="pi", model=None, cwd=No
     if problems:
         raise GatherError(MALFORMED, "the gatherer answered with an invalid result: %s"
                           % "; ".join(problems))
+    for key, value in answer["counts"].items():
+        answer["counts"][key] = _count_value(value)
     return answer
 
 

@@ -173,6 +173,30 @@ class GathererTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, app.MALFORMED)
         self.assertIn("unknown keys", caught.exception.reason)
 
+    def test_a_count_written_in_digits_is_the_same_count(self):
+        """A count in digits is not a malformed answer: it is the same fact."""
+        answer = dict(ANSWER)
+        answer["counts"] = {"tickets": "3"}
+        runner = self.runner_for(out=json.dumps(answer))
+        gathered = app.gather(str(self.packet), pi_bin=sys.executable, runner=runner)
+        self.assertEqual(gathered["counts"], {"tickets": 3})
+
+    def test_a_count_that_is_not_a_number_is_malformed(self):
+        answer = dict(ANSWER)
+        answer["counts"] = {"tickets": "three"}
+        runner = self.runner_for(out=json.dumps(answer))
+        with self.assertRaises(app.GatherError) as caught:
+            app.gather(str(self.packet), pi_bin=sys.executable, runner=runner)
+        self.assertEqual(caught.exception.code, app.MALFORMED)
+
+    def test_extra_annotations_inside_a_source_are_tolerated(self):
+        """A source may carry extra notes; the result shape is what the plan reads."""
+        answer = json.loads(json.dumps(ANSWER))
+        answer["sources"][0]["settles_note"] = "a note"
+        runner = self.runner_for(out=json.dumps(answer))
+        gathered = app.gather(str(self.packet), pi_bin=sys.executable, runner=runner)
+        self.assertEqual(gathered["sources"][0]["source"], "docs/plans/demo.plan.md")
+
     def test_the_command_line_reports_the_failure_and_exits_non_zero(self):
         with self.assertRaises(app.GatherError):
             app.gather(str(self.packet), pi_bin="pi-that-is-not-installed", runner=self.runner_for())

@@ -64,38 +64,47 @@ class PlanContract(unittest.TestCase):
         self.assertIn("Status: AWAITING APPROVAL", TEXT)
         self.assertIn("then stop for one approval", TEXT)
 
-    def test_S1_pi_has_a_native_invocation(self):
-        """S1: Pi invokes the skill as /skill:start-planning."""
-        self.assertIn("/skill:start-planning", TEXT)
+    def test_S1_pi_discovers_the_skill_natively(self):
+        """S1: the frontmatter is what Pi routes on; the body carries no invocation syntax."""
         self.assertRegex(TEXT, r"description:.*Plan one feature")
+        self.assertNotIn("/skill:", TEXT)
 
 
-class HarnessAdapters(unittest.TestCase):
-    def test_S2_the_gather_has_a_pi_path(self):
-        """S2: the fresh-context gather runs under Pi through the bundled script."""
+class Delegation(unittest.TestCase):
+    """The skill states the requirement; the reference carries the per-harness detail."""
+
+    def test_S2_the_gather_has_an_adapter(self):
+        """S2: the fresh-context gather runs through the adapter the skill ships."""
         self.assertIn("scripts/fresh_context.py", TEXT)
         self.assertTrue((SKILL.parent / "scripts" / "fresh_context.py").is_file())
         self.assertTrue((SKILL.parent / "references" / "gather-packet.md").is_file())
 
     def test_S2_the_gather_may_not_be_skipped_when_it_fails(self):
         """S2: a failed, timed-out or malformed gather stops the plan."""
-        self.assertIn("never continue into the plan on evidence the gatherer never produced", TEXT)
+        self.assertIn("never continue into the plan on evidence it did not produce", TEXT)
 
-    def test_S2_the_grill_has_a_pi_path_and_a_dependency_check(self):
-        """S2: the grill runs under Pi and its missing dependency is detected."""
-        self.assertIn("/skill:grilling", TEXT)
-        self.assertIn("scripts/check_deps.py grilling", TEXT)
-        self.assertTrue((SKILL.parent / "scripts" / "check_deps.py").is_file())
+    def test_S2_a_delegation_must_be_bounded_and_explicit(self):
+        """S2: the requirement holds whatever mechanism the harness uses."""
+        self.assertIn("no inherited context", TEXT)
+        self.assertIn("timeout", TEXT)
+        self.assertIn("structured findings", TEXT)
+        self.assertIn("fails loudly", TEXT)
 
     def test_S2_a_missing_grilling_stops_the_plan(self):
         """S2: no silent skip of the grill."""
         self.assertIn("never skip the grill", TEXT)
+        self.assertIn("never answer its questions yourself", TEXT)
+
+    def test_S2_the_dependency_check_ships_with_the_skill(self):
+        """S2: the missing dependency is detected by a script, not by hope."""
+        self.assertTrue((SKILL.parent / "scripts" / "check_deps.py").is_file())
 
     def test_S3_the_claude_and_codex_paths_are_kept(self):
         """S3: Claude Code keeps the Task subagent and the Skill tool; Codex keeps its skill."""
-        self.assertIn("Task subagent", TEXT)
-        self.assertIn("the Skill tool with `grilling`", TEXT)
-        self.assertIn("Codex", TEXT)
+        reference = (SKILL.parent / "references" / "delegation.md").read_text(encoding="utf-8")
+        self.assertIn("Task subagent", reference)
+        self.assertIn("the Skill tool with `grilling`", reference)
+        self.assertIn("Codex", reference)
 
     def test_S3_the_pre_portability_contract_is_unchanged(self):
         """S3: every sentence the skill had before the portability work is still there."""
@@ -106,6 +115,14 @@ class HarnessAdapters(unittest.TestCase):
         """The skill names scripts that exist: a broken path is a broken step."""
         for name in set(re.findall(r"scripts/[A-Za-z_]+\.py", TEXT)):
             self.assertTrue((SKILL.parent / name).is_file(), name)
+
+    def test_the_reference_carries_the_harness_detail_not_the_skill(self):
+        """The per-harness dispatch lives in the reference, so the main context stays small."""
+        reference = (SKILL.parent / "references" / "delegation.md").read_text(encoding="utf-8")
+        self.assertIn("Claude Code", reference)
+        self.assertIn("Pi", reference)
+        self.assertNotIn("Task subagent", TEXT)
+        self.assertNotIn("Claude Code", TEXT)
 
 
 if __name__ == "__main__":
