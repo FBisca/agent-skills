@@ -108,8 +108,11 @@ scripts/install-upstream.sh            # or: scripts/install-upstream.sh --dry-r
 ## Tests
 
 ```bash
-scripts/run-tests.sh
+python3 -m pip install -r requirements-dev.txt
+scripts/checks.sh
 ```
+
+The check runs Ruff across the repository, the skill frontmatter lint, and the test gate. `scripts/run-tests.sh` runs the tests alone.
 
 Runs the repo contract tests (`tests/`: every `SKILL.md` has frontmatter with a `name` matching its folder and a `description` every harness can read as text; every dropped upstream is in the lock with an install command; `VAULT_DIR` is required; the harness portability and plan Markdown contracts hold) and each skill's own `skills/*/tests` suite in a separate process. CI runs the same on Python 3.11, 3.12 and 3.13, plus `shellcheck` on the scripts. The suite is offline: no network, no model, no agent process.
 

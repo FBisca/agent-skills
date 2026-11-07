@@ -4,7 +4,7 @@ outside the delta is deferred, and the unit's panes stop when it merges or pause
 import json
 import unittest
 
-from fixtures import report_wait, resume_id, spawn_id
+from fixtures import report_wait, resume_id
 from test_gates import BLOCKING, GateFixture
 
 OFF_SCOPE = dict(BLOCKING, id="B2", file="src/zzz/other.py", summary="unrelated code is wrong")

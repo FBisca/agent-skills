@@ -249,7 +249,7 @@ class RunFixture:
 
     def gh_log(self):
         path = self.home / "gh.log"
-        return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
+        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
 
     def gh_calls(self, *prefix):
         """The argv of every logged gh call that starts with `prefix`."""

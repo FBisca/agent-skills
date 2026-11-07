@@ -190,7 +190,7 @@ def changed(repo, base):
             else:
                 added.setdefault(f, []).extend(lines)
     return (sorted(filter(None, files)),
-            {f: l for f, l in added.items() if is_test_file(Path(repo) / f)}, rust_names)
+            {f: line for f, line in added.items() if is_test_file(Path(repo) / f)}, rust_names)
 
 
 def specs_in(repo, specs):

@@ -39,7 +39,7 @@ class LaunchTests(RunFixture, unittest.TestCase):
 
     def hc_calls(self):
         path = self.home / "hc.log"
-        return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
+        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
 
     def launch(self, plan=None, expect=0, parent=None, bad_parent=False):
         env = dict(os.environ, PATH=str(self.home) + os.pathsep + os.environ["PATH"], FAKE_HC_HOME=str(self.home))

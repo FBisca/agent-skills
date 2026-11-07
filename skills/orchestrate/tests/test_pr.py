@@ -55,7 +55,7 @@ class DraftTests(PrFixture, unittest.TestCase):
         self.run_driver()
         ready = [c for c in self.gh_log() if c["argv"][:2] == ["pr", "ready"]]
         self.assertEqual([c["argv"] for c in ready], [["pr", "ready", PR]])
-        states = [json.loads(l) for l in ready[0]["events"] if json.loads(l)["kind"] == "state"]
+        states = [json.loads(line) for line in ready[0]["events"] if json.loads(line)["kind"] == "state"]
         self.assertEqual(states[-1]["gate"][1], "ready-for-ci")  # the review passed and the checks were green
         self.assertEqual([e["source"] for e in self.events("round")], ["review"])
         self.assertEqual(self.task("t1r1")["status"], "COMPLETE")
@@ -121,7 +121,7 @@ class ChecksTests(PrFixture, unittest.TestCase):
         self.waits([first, third, self.reviewer_done(), review3, release])
         self.run_driver()
         ready = self.wake_lines("pr-ready")
-        self.assertEqual([l.split(":")[0] for l in ready], ["pr-ready t3", "pr-ready t1"])
+        self.assertEqual([line.split(":")[0] for line in ready], ["pr-ready t3", "pr-ready t1"])
         self.assertEqual(self.events("round"), [])
 
 
@@ -136,7 +136,7 @@ class SlotTests(PrFixture, unittest.TestCase):
         self.run_driver("--max-workers", "1")
         self.assertEqual(self.spawned(), ["demo-t1", "demo-t1-review", "demo-t3"])
         third = next(c for c in self.calls("spawn") if c["args"]["name"] == "demo-t3")
-        trail = [json.loads(l) for l in third["events"]]
+        trail = [json.loads(line) for line in third["events"]]
         awaiting = [e for e in trail if e["kind"] == "state" and e["task"] == "t1" and e["gate"][1] == "awaiting-merge"]
         done = [e for e in trail if e["kind"] == "state" and e["task"] == "t1" and e["gate"][1] in ("cleanup", "done")]
         self.assertTrue(awaiting and not done, "t3 was dispatched before t1 waited for its merge, or after it merged")

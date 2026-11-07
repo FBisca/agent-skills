@@ -139,7 +139,8 @@ class IdeaCheckTests(unittest.TestCase):
                 self.assertNotIn(cut, out)
 
     def test_S38_check_names_per_gate(self):
-        names = lambda *a: [l.split()[1].rstrip(":") for l in self.run_check(*a)[1].splitlines()]
+        def names(*a):
+            return [line.split()[1].rstrip(":") for line in self.run_check(*a)[1].splitlines()]
         base = ["stage-value", "gate-reason", "hours-logged"]
         g1 = base + ["question-owners", "test-criterion"]
         self.assertEqual(names(), base)
@@ -150,7 +151,7 @@ class IdeaCheckTests(unittest.TestCase):
     def test_S38_all_pass_at_gate_2(self):
         code, out, _ = self.run_check("--gate", "2")
         self.assertEqual(code, 0, out)
-        self.assertTrue(all(l.startswith("PASS ") for l in out.splitlines()), out)
+        self.assertTrue(all(line.startswith("PASS ") for line in out.splitlines()), out)
 
     # --- S39
     def test_S39_kill_or_reshape_without_reason_fails_gate_reason(self):
@@ -307,7 +308,7 @@ class IdeaCheckTests(unittest.TestCase):
     # --- S44
     def test_S44_entry_missing_a_field_fails_naming_entry(self):
         for field in ("Owner", "Date", "Link", "Summary"):
-            text = "\n".join(l for l in ANSWERS.splitlines() if not l.startswith(field)) + "\n"
+            text = "\n".join(line for line in ANSWERS.splitlines() if not line.startswith(field)) + "\n"
             self.write("answers.md", text)
             code, out, _ = self.run_check("--gate", "2")
             self.assertEqual(code, 1, field)

@@ -70,7 +70,7 @@ class IdeaAnswerContract(unittest.TestCase):
         self.assertLess(t.index("`/cold-read <folder>/Brief.md`"), t.index("gate2: pass by"))
 
     def test_S48_names_to_spec_from_the_final_brief(self):
-        done = next(l for l in read("SKILL.md").splitlines() if l.startswith("Done when"))
+        done = next(line for line in read("SKILL.md").splitlines() if line.startswith("Done when"))
         self.assertIn("`/to-spec` is named from the final Brief", done)
         self.assertIn("final Brief", read("SKILL.md"))
 

@@ -4,8 +4,12 @@ Instructions for agents working in this repo.
 
 ## The suite is the gate
 
-`scripts/run-tests.sh` is the gate for any change here; it runs every test file in its own process, in parallel
-(`JOBS` limits the workers). Run the gate before reporting a change complete. A suite that hangs is a failing suite:
+Install `requirements-dev.txt`, then run `scripts/checks.sh` before reporting a change complete; CI runs the same checks.
+For a focused test, run `python3 -B -m unittest discover -v -s <tests-dir> -p <test-file>`.
+If a suite hangs, rerun the affected file with `-v`, identify the last test started, and report its failure output.
+
+`scripts/run-tests.sh` runs every test file in its own process, in parallel
+(`JOBS` limits the workers). A suite that hangs is a failing suite:
 the cause is a fake that never answers, not a slow test.
 
 ## A skill's frontmatter is read by YAML, not by us
