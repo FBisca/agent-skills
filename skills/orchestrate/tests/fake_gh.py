@@ -6,7 +6,8 @@ starting a process per call. The executable the fixture puts on PATH is a wrappe
 Every call is logged with the plan and events as they stand. `pr view` answers `view-early.json` when scripted;
 otherwise a draft is OPEN and the next `prs.json` state is used after that PR is made ready. Each queue's last
 answer repeats. `pr checks` uses `checks-<number>.json`, falling back to `checks.json`. Draft flags are per PR.
-`pr update-branch` uses `update.json`; `run view` returns a canned failed log.
+`pr update-branch` uses `update.json`; `run view` returns a canned failed log. A draft that is never made ready
+raises after 100 polls, exposing a missing transition without hanging the suite.
 """
 
 import json
@@ -48,9 +49,10 @@ def process(argv, timeout=None):
     if events_path and os.path.exists(events_path):
         with open(events_path, encoding="utf-8") as stream:
             events = stream.read().splitlines()
+    with open(os.environ["FAKE_PLAN"], encoding="utf-8") as plan:
+        plan_text = plan.read()
     with open(os.path.join(home, "gh.log"), "a", encoding="utf-8") as log:
-        log.write(json.dumps({"argv": argv, "plan": open(os.environ["FAKE_PLAN"], encoding="utf-8").read(),
-                              "events": events}) + "\n")
+        log.write(json.dumps({"argv": argv, "plan": plan_text, "events": events}) + "\n")
     match = re.search(r"/pull/(\d+)", argv[2] if len(argv) > 2 else "")
     number = match.group(1) if match else "0"
     ready = os.path.join(home, "ready-%s.flag" % number)
@@ -77,7 +79,17 @@ def process(argv, timeout=None):
         return Completed(argv, 2, "", "fake gh: unsupported " + " ".join(argv))
     state = pop(home, "view-early.json")
     if state is None:
-        state = pop(home, "prs.json", "MERGED") if os.path.exists(ready) else "OPEN"
+        if os.path.exists(ready):
+            state = pop(home, "prs.json", "MERGED")
+        else:
+            count_path = os.path.join(home, "draft-polls-%s" % number)
+            with open(count_path, "a+", encoding="utf-8") as count:
+                count.seek(0)
+                polls = len(count.read())
+                if polls >= 100:
+                    raise RuntimeError("fake gh: PR %s stayed draft for 100 polls" % number)
+                count.write(".")
+            state = "OPEN"
     row = {"state": state} if isinstance(state, str) else dict(state)
     row.setdefault("isDraft", not os.path.exists(ready))
     row.setdefault("mergeStateStatus", "CLEAN")
