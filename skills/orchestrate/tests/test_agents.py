@@ -1,11 +1,15 @@
 """ensure_agent: every spawn records an intent first, and a restart re-attaches by the stable name."""
 
+import pytest
 import os
 import sys
 import unittest
 from unittest import mock
 
 from fixtures import RunFixture, load_script, plan_text, resume_id, spawn_id
+
+
+pytestmark = pytest.mark.integration
 
 
 class EnsureAgentTests(RunFixture, unittest.TestCase):

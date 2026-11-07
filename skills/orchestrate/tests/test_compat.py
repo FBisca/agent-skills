@@ -1,5 +1,6 @@
 """A run dir written by the previous driver (contract 1 review.json, no events.jsonl) keeps working."""
 
+import pytest
 import json
 import subprocess
 import sys
@@ -10,6 +11,9 @@ from test_gates import DEFERRED, GateFixture, MAJOR
 
 sys.path.insert(0, str(SCRIPT.parent))
 import contracts  # noqa: E402
+
+
+pytestmark = pytest.mark.integration
 
 
 class CompatTests(GateFixture, unittest.TestCase):

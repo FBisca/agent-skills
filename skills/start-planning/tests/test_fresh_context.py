@@ -1,5 +1,6 @@
 """The Pi gatherer: isolation, bounded runtime, strict answers and clear failures."""
 
+import pytest
 import importlib.util
 import json
 import os
@@ -8,6 +9,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+
+
+pytestmark = pytest.mark.integration
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "fresh_context.py"
 spec = importlib.util.spec_from_file_location("fresh_context", SCRIPT)

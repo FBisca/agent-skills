@@ -9,6 +9,10 @@ import sys
 import tempfile
 import unittest
 
+import pytest
+
+pytestmark = pytest.mark.integration
+
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "converge.py"
 spec = importlib.util.spec_from_file_location("converge", SCRIPT)
 app = importlib.util.module_from_spec(spec)

@@ -1,5 +1,6 @@
 """Behavior checks in temporary repositories; no agents or Herdr servers start."""
 
+import pytest
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import importlib.util
@@ -12,6 +13,9 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+
+
+pytestmark = pytest.mark.integration
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "orchestrate.py"

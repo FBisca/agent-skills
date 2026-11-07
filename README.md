@@ -4,7 +4,7 @@ Agent skills for [Claude Code](https://claude.com/claude-code), [Codex](https://
 
 - **Deterministic gates.** `idea_check.py` and `converge.py` read files and exit non-zero; an agent cannot talk its way past them.
 - **Agents that disagree on purpose.** `cold-read` asks a fresh reader to paraphrase a document; `orchestrate` builds with separate implementer agents and accepts a ticket only when its scenarios pass.
-- **Tested.** The gate and orchestration scripts (`idea-frame`, `idea-answer`, `converge`, `cold-read`, `orchestrate`) have `unittest` suites that run in CI on Python 3.11 to 3.13, and a repo-level test lints every `SKILL.md`. `excalidraw` and `explain-video` are checked by their own render loops, not by unit tests.
+- **Tested.** The gate and orchestration scripts (`idea-frame`, `idea-answer`, `converge`, `cold-read`, `orchestrate`) have test suites that run in CI on Python 3.11 to 3.13, and a repo-level test lints every `SKILL.md`. `excalidraw` and `explain-video` are checked by their own render loops, not by unit tests.
 
 ## The pipeline
 
@@ -108,13 +108,23 @@ scripts/install-upstream.sh            # or: scripts/install-upstream.sh --dry-r
 ## Tests
 
 ```bash
-python3 -m pip install -r requirements-dev.txt
-scripts/checks.sh
+uv sync                          # the environment: uv resolves and installs it
+uv run pytest                    # the fast suite: the unit tests, under 3 seconds
+uv run pytest -m integration     # the integration tests
+uv run pytest -m "" -n 4         # the full suite, four workers
+scripts/checks.sh                # the whole gate: lint, frontmatter, full suite
 ```
 
-The check runs Ruff across the repository, the skill frontmatter lint, and the test gate. `scripts/run-tests.sh` runs the tests alone.
+The tests are `unittest.TestCase` classes, run by pytest. `uv run pytest` takes the unit tests — the ones that stay
+in process; `-m ""` overrides that default and takes every test. CI runs the same gate on Python 3.11, 3.12 and 3.13,
+plus `shellcheck` on the scripts. The suite is offline: no network, no model, no agent process.
 
-Runs the repo contract tests (`tests/`: every `SKILL.md` has frontmatter with a `name` matching its folder and a `description` every harness can read as text; every dropped upstream is in the lock with an install command; `VAULT_DIR` is required; the harness portability and plan Markdown contracts hold) and each skill's own `skills/*/tests` suite in a separate process. CI runs the same on Python 3.11, 3.12 and 3.13, plus `shellcheck` on the scripts. The suite is offline: no network, no model, no agent process.
+The suite covers the repo contracts (`tests/`: every `SKILL.md` has frontmatter with a `name` matching its folder and a `description` every harness can read as text; every dropped upstream is in the lock with an install command; `VAULT_DIR` is required; the harness portability and plan Markdown contracts hold) and each skill's own `skills/*/tests` suite.
+
+Every test carries exactly one marker, `unit` or `integration`: a unit test is in process, isolated and deterministic;
+an integration test drives a real boundary (a subprocess, a pipe, the filesystem). `scripts/run-tests.sh` runs every
+test file in its own process, in parallel, and names the file that never finished — set `TEST_TIMEOUT` (seconds per
+file) or `JOBS` (workers) to adjust it. For a focused run, use `uv run pytest path/to/tests/test_file.py`.
 
 The frontmatter rules also run on their own, over any skills folder:
 

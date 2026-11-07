@@ -1,5 +1,6 @@
 """Applying the Lead's decisions, the request pause, person-owned tickets, and a loop that never spins on a waiting unit."""
 
+import pytest
 import json
 import os
 import sys
@@ -8,6 +9,9 @@ from unittest import mock
 
 from fixtures import (ROWS, RunFixture, assignment, load_script, plan_text, recorded_idles, report_wait, resume_id,
                       spawn_id, wait_result)
+
+
+pytestmark = pytest.mark.integration
 
 
 class DeciderFixture(RunFixture):

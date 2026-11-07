@@ -1,10 +1,14 @@
 """A unit the Lead parked (mark blocked) is answered through the plan: TO-DO retries it, COMPLETE hands it back done,
 anything else holds."""
 
+import pytest
 import unittest
 
 from test_decider import DeciderFixture
 from fixtures import plan_text
+
+
+pytestmark = pytest.mark.integration
 
 
 class ReopenTests(DeciderFixture, unittest.TestCase):

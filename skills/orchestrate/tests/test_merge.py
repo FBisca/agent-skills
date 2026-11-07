@@ -1,5 +1,6 @@
 """CI, merge and cleanup: wait-checks, the merge poll, COMPLETE and dependents, worker stop and worktree removal."""
 
+import pytest
 import json
 import os
 import sys
@@ -8,6 +9,9 @@ from unittest import mock
 
 from fixtures import load_script, plan_text, recorded_idles, report_wait, resume_id
 from test_gates import GateFixture, MAJOR
+
+
+pytestmark = pytest.mark.integration
 
 PR = "https://github.com/o/r/pull/7"
 

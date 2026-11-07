@@ -1,11 +1,15 @@
 """One reviewer per unit: a fix round of any source is re-reviewed as a delta by the same reviewer, a blocking item
 outside the delta is deferred, and the unit's panes stop when it merges or pauses."""
 
+import pytest
 import json
 import unittest
 
 from fixtures import report_wait, resume_id
 from test_gates import BLOCKING, GateFixture
+
+
+pytestmark = pytest.mark.integration
 
 OFF_SCOPE = dict(BLOCKING, id="B2", file="src/zzz/other.py", summary="unrelated code is wrong")
 

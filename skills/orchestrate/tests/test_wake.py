@@ -1,5 +1,6 @@
 """The Lead's channel: requests and wakes, `await`, `decide`, the wake queue, held messages, pr-ready, plan-invalid."""
 
+import pytest
 import json
 from pathlib import Path
 import subprocess
@@ -11,6 +12,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import contracts  # noqa: E402
 from fixtures import SCRIPT, assignment, load_script, plan_text, report_wait, resume_id, wait_result
 from test_gates import GateFixture
+
+
+pytestmark = pytest.mark.integration
 
 PR = "https://github.com/o/r/pull/7"
 MENU = ["retry", "retry one class up", "fresh worker", "mark blocked", "skip", "answer"]

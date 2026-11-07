@@ -1,10 +1,14 @@
 """Contracts v2 in the driver: strict commit check, review envelope, evidence findings, responses, answers."""
 
+import pytest
 import json
 import unittest
 
 from fixtures import report_wait, resume_id
 from test_gates import BLOCKING, CONCERN, GateFixture, NIT, QUESTION
+
+
+pytestmark = pytest.mark.integration
 
 RUN = {"command": "pytest", "exit": 0, "at_commit": "abc1234"}
 RESPONSE = {"id": "Q1", "status": "fixed", "commit": "abc1234", "note": "it raises ValueError"}
@@ -129,7 +133,8 @@ class EvidenceTests(EnvelopeFixture, unittest.TestCase):
         self.assertEqual((item["exit"], item["excerpt"]), (1, "FAIL coverage: S1"))
         self.assertIn("converge.py", item["command"])
         self.assertIn("--ticket T1", item["command"])
-        self.assertIn("FAIL coverage: S1", open(item["log_path"], encoding="utf-8").read())
+        with open(item["log_path"], encoding="utf-8") as log:
+            self.assertIn("FAIL coverage: S1", log.read())
         self.assertIn("FAIL coverage: S1", (self.run_dir / "t1r1" / "task.md").read_text(encoding="utf-8"))
         self.assertIn(item["log_path"], (self.run_dir / "t1r1" / "task.md").read_text(encoding="utf-8"))
 
@@ -144,7 +149,8 @@ class EvidenceTests(EnvelopeFixture, unittest.TestCase):
         for item in findings["items"]:
             self.assert_item(item, "ci", item["check"])
             self.assertIn("FAILED STEP LOG TAIL for run 77", item["excerpt"])
-            self.assertIn("FAILED STEP LOG TAIL for run 77", open(item["log_path"], encoding="utf-8").read())
+            with open(item["log_path"], encoding="utf-8") as log:
+                self.assertIn("FAILED STEP LOG TAIL for run 77", log.read())
         self.assertEqual(findings["items"][0]["command"], "gh pr checks https://github.com/o/r/pull/7")
 
 
