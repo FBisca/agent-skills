@@ -11,8 +11,9 @@ The driver reads these and nothing else from an agent: a missing or invalid file
                 (blocking|concern|question|nit|deferred), `summary`, `answer_required`; a blocking item also `file`,
                 `line`, `fix` and `evidence {command, exit, excerpt, log_path}`. Any other field is kept verbatim.
                 Block iff there is a blocking item.
-`findings.json` driver -> fix round: `source`, `attempt`, the blocking and answer_required `items` (converge and CI items
-                carry `kind`, `source`, `check`, `command`, `exit`, `excerpt`, `log_path`) and the reviewer's `checks_run`.
+`findings.json` driver -> fix round: `source`, `attempt`, the blocking and answer_required `items` (converge, CI
+                and conflict items carry `kind`, `source`, `check`, `command`, `exit`, `excerpt`, `log_path`) and the
+                reviewer's `checks_run`.
 `request.json`  driver -> Lead: why a unit needs a decision, the evidence paths and the action menu; `status` open|resolved.
 `decision.json` Lead (through `orchestrate.py decide`): one `action` from the menu, a `reason`, and for `answer` the `answer`."""
 
@@ -23,7 +24,7 @@ VERSION = 2  # what the driver writes
 SUPPORTED = (1, 2)  # what it reads
 LIMIT = 65536
 STATUSES = ("PARTIAL", "BLOCKED", "COMPLETE")
-SOURCES = ("converge", "review", "ci")
+SOURCES = ("converge", "review", "ci", "conflict")
 ACTIONS = ("retry", "retry one class up", "fresh worker", "mark blocked", "skip", "answer")  # the menu of a request
 MAJOR_FIELDS = ("id", "file", "line", "problem", "fix")  # contract 1
 KINDS = ("blocking", "concern", "question", "nit", "deferred")

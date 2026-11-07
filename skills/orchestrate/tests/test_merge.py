@@ -25,26 +25,26 @@ class MergeTests(GateFixture, unittest.TestCase):
         step["run"] = self.commit(push)
         return step
 
-    def test_S8_a_passing_review_runs_wait_checks_on_the_reports_pr(self):
+    def test_S8_a_passing_review_polls_the_reports_pr_checks(self):
         """code-driven-orchestrator/S8"""
         self.waits([self.worker_done(tests=True), self.reviewer_done()])
         self.run_driver()
-        self.assertEqual(self.wait_checks_log(), ["o/r#7"])
+        self.assertTrue(self.checks_log())
+        self.assertEqual(set(self.checks_log()), {PR})
         self.assertEqual(self.calls("resume"), [])
 
     def test_S8_a_failing_check_sends_the_failed_log_to_the_worker_as_a_fix_round(self):
         """code-driven-orchestrator/S8"""
-        self.checks([[1, "FAIL o/r#7\nunit tests: boom at line 3"], [0, "PASS o/r#7"]])
+        self.checks([("fail", "unit tests"), "green"])
         again = report_wait("demo-t1-review", "complete", id=resume_id("demo-t1-review"))
         again["write"] = [[str(self.run_dir / "t1" / "review.2.json"), self.review()]]
         self.waits([self.worker_done(tests=True), self.reviewer_done(), self.worker_done("t1r1"), again])
         self.run_driver()
         findings = json.loads((self.run_dir / "t1r1" / "findings.json").read_text(encoding="utf-8"))
         self.assertEqual((findings["source"], findings["attempt"]), ("ci", 1))
-        self.assertEqual([(i["check"], i["excerpt"]) for i in findings["items"]], [("ci", "unit tests: boom at line 3")])
-        self.assertIn("boom at line 3", (self.run_dir / "t1r1" / "task.md").read_text(encoding="utf-8"))
+        self.assertEqual([(i["check"], i["kind"]) for i in findings["items"]], [("unit tests", "blocking")])
+        self.assertIn("FAILED STEP LOG TAIL", (self.run_dir / "t1r1" / "task.md").read_text(encoding="utf-8"))
         self.assertEqual([r["args"]["name"] for r in self.calls("resume")], ["demo-t1", "demo-t1-review"])
-        self.assertEqual(self.wait_checks_log(), ["o/r#7", "o/r#7"])
         self.assertEqual(self.task("t1")["report"]["review_rounds"], 1)
         # the fix round opened no PR of its own; the gate finds the unit's earlier one, and the reviewer's delta pass gates it
         self.assertEqual(self.task("t1r1")["status"], "COMPLETE")
@@ -54,16 +54,15 @@ class MergeTests(GateFixture, unittest.TestCase):
         self.prs(["OPEN", "OPEN", "MERGED"])
         self.waits([self.worker_done(tests=True), self.reviewer_done()])
         self.run_driver()
-        calls = self.gh_log()
-        self.assertEqual(calls[0]["argv"], ["pr", "view", PR, "--json", "state,mergeCommit"])
-        self.assertGreaterEqual(len(calls), 3)
-        for call in calls[:2]:
-            self.assertIn("| IN PROGRESS · awaiting merge (%s) |" % PR, call["plan"])
+        views = [c for c in self.gh_log() if c["argv"][:2] == ["pr", "view"]]
+        self.assertGreaterEqual(len(views), 3)
+        self.assertTrue([c for c in views if "| IN PROGRESS · awaiting merge (%s) |" % PR in c["plan"]],
+                        "the ticket never read awaiting merge")
         text = self.plan.read_text(encoding="utf-8")
         self.assertIn("| COMPLETE 2026-", text)
         self.assertIn("merged " + PR, text)
         self.assertEqual(self.task()["status"], "COMPLETE")
-        self.assertEqual(self.wait_checks_log(), ["o/r#7"])
+        self.assertTrue(self.checks_log())
 
     def test_S9_an_unmerged_pr_backs_off_instead_of_spinning_on_gh(self):
         """code-driven-orchestrator/S9"""
@@ -78,9 +77,9 @@ class MergeTests(GateFixture, unittest.TestCase):
                 recorded_idles(spec) as idles:
             spec.main()
         polls = len([c for c in self.gh_log() if c["argv"][:2] == ["pr", "view"]])
-        self.assertEqual(polls, 7)
+        self.assertEqual(polls, 8)
         # the fake wait returns at once, so every no-progress poll must be followed by the idle sleep
-        self.assertGreaterEqual(len(idles), 5)
+        self.assertGreaterEqual(len(idles), 3)
         self.assertEqual(set(idles), {30})
         self.assertEqual(self.task()["status"], "COMPLETE")
 
@@ -131,14 +130,15 @@ class MergeTests(GateFixture, unittest.TestCase):
         self.run_driver()
         self.assertEqual(self.request()["event"], "review")
         self.assertIn("deadbee", self.request()["reason"])
-        self.assertEqual(self.wait_checks_log(), [])
+        self.assertNotIn("ready-for-ci", [e["gate"][1] for e in self.events("state")])
 
-    def test_a_blocking_review_never_reaches_wait_checks(self):
+    def test_a_blocking_review_never_reaches_the_ci_gate(self):
         """code-driven-orchestrator/S8"""
         review = self.review(verdict="block", major=[MAJOR])
         self.waits([self.worker_done(tests=True), self.reviewer_done(review)])
         self.run_driver()
-        self.assertEqual(self.wait_checks_log(), [])
+        self.assertEqual([e for e in self.events("round") if e.get("source") == "ci"], [])  # no CI fix round
+        self.assertNotIn("ready-for-ci", [e["gate"][1] for e in self.events("state")])
 
 
 if __name__ == "__main__":

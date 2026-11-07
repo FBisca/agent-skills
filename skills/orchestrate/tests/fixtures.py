@@ -1,7 +1,6 @@
 """Shared fixtures for the driver tests: a fake agent-runtime, a temp git repo with an origin, a temp plan.
 
-The fakes are modules (`fake_runtime`, `fake_gh`, `fake_wait_checks`): the driver asks the runtime, `gh` and the CI
-gate through seams, so a test run answers them in process and starts no process per call. The fixture also puts thin
+The fakes are modules (`fake_runtime`, `fake_gh`): the driver asks the runtime and `gh` through seams, so a test run answers them in process and starts no process per call. The fixture also puts thin
 wrappers for the same modules on PATH, for a driver run outside the tests.
 """
 
@@ -193,11 +192,11 @@ class RunFixture:
         fake = self.home / "agent-runtime"
         fake.write_text(wrapper("fake_runtime"), encoding="utf-8")
         fake.chmod(0o755)
-        for name, module in (("wait-checks", "fake_wait_checks"), ("gh", "fake_gh")):
+        for name, module in (("gh", "fake_gh"),):
             tool = self.home / name
             tool.write_text(wrapper(module), encoding="utf-8")
             tool.chmod(0o755)
-        self.checks([[0, "PASS o/r#7"]])
+        self.checks(["green"])
         self.prs(["MERGED"])
         self.refuse([])
         self.waits([])
@@ -216,14 +215,24 @@ class RunFixture:
     def refuse(self, names):
         (self.home / "refuse.json").write_text(json.dumps(names), encoding="utf-8")
 
-    def checks(self, answers):
-        (self.home / "checks.json").write_text(json.dumps(answers), encoding="utf-8")
+    GREEN = [{"name": "unit", "bucket": "pass", "link": "https://github.com/o/r/actions/runs/55/job/8"}]
 
-    def pr_checks(self, answers):
-        """What `gh pr checks` answers on its next calls ([exit code, stdout, stderr]; the last repeats)."""
-        (self.home / "checks-pr.json").write_text(json.dumps(answers), encoding="utf-8")
+    def checks(self, answers, pr=None):
+        """What `gh pr checks` answers on its next calls (the last repeats): "green", "pending", "none" (no checks
+        reported yet), "fail" or ("fail", <check name>). With `pr` (a number) only that PR is answered this way."""
+        rows = []
+        for answer in answers:
+            kind, *names = answer if isinstance(answer, tuple) else (answer, "unit tests")
+            fails = [{"name": name, "bucket": "fail", "link": "https://github.com/o/r/actions/runs/77/job/9",
+                      "description": "boom"} for name in names]
+            rows.append({"green": [0, json.dumps(self.GREEN), ""],
+                         "pending": [8, json.dumps([dict(self.GREEN[0], bucket="pending")]), ""],
+                         "none": [1, "", "no checks reported on the 'feat/demo-t1' branch"],
+                         "fail": [1, json.dumps(fails + [self.GREEN[0]]), ""]}[kind])
+        (self.home / ("checks.json" if pr is None else "checks-%s.json" % pr)).write_text(json.dumps(rows), encoding="utf-8")
 
     def prs(self, states):
+        """The PR's states once `gh pr ready` has run: names or objects (mergeStateStatus ...); the last repeats."""
         (self.home / "prs.json").write_text(json.dumps(states), encoding="utf-8")
 
     def early(self, states):
@@ -234,9 +243,9 @@ class RunFixture:
         """What `gh pr update-branch` answers: [exit code, stderr] per call (the last repeats)."""
         (self.home / "update.json").write_text(json.dumps(answers), encoding="utf-8")
 
-    def born_ready(self):
-        """The worker opened the PR ready for review, not as a draft."""
-        (self.home / "ready.flag").write_text("1", encoding="utf-8")
+    def born_ready(self, number=7):
+        """The PR is not a draft when the worker opens it."""
+        (self.home / ("ready-%s.flag" % number)).write_text("1", encoding="utf-8")
 
     def gh_log(self):
         path = self.home / "gh.log"
@@ -246,9 +255,9 @@ class RunFixture:
         """The argv of every logged gh call that starts with `prefix`."""
         return [c["argv"] for c in self.gh_log() if c["argv"][:len(prefix)] == list(prefix)]
 
-    def wait_checks_log(self):
-        path = self.home / "wait-checks.log"
-        return path.read_text(encoding="utf-8").split() if path.exists() else []
+    def checks_log(self):
+        """The pull requests whose checks were polled, in order."""
+        return [argv[2] for argv in self.gh_calls("pr", "checks")]
 
     def states(self, mapping):
         (self.home / "states.json").write_text(json.dumps(mapping), encoding="utf-8")
@@ -266,8 +275,7 @@ class RunFixture:
                     PYTHONPATH=str(TESTS) + os.pathsep + os.environ.get("PYTHONPATH", ""),
                     FAKE_RUNTIME_HOME=str(self.home), FAKE_PLAN=str(self.plan),
                     FAKE_CHECKOUT=str(self.root / "repo.worktrees" / "demo-t1"),
-                    FAKE_EVENTS=str(self.state_dir / "demo" / "events.jsonl"),
-                    ORCHESTRATE_WAIT_CHECKS="fake_wait_checks")
+                    FAKE_EVENTS=str(self.state_dir / "demo" / "events.jsonl"))
 
     def runtime_process(self, argv, timeout=None):
         """The fake runtime's answer, in process: a driver run starts no process per call."""

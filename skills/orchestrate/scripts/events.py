@@ -14,7 +14,12 @@ ledger status changed), `intent` and `agent` (an agent is about to be started / 
 (the implementer was resumed for the answer_required items of a passing review), `response` (one per answered finding),
 `scope` (a re-review's blocking item outside the delta, about no earlier finding, was deferred: `id`, `file`),
 `swap` (an agent below the context reserve was replaced by a fresh one: `name`, `role`, `remaining_tokens`) and
-`context` (`context: unknown`: no usable usage measurement, so the agent was resumed)."""
+`context` (`context: unknown`: no usable usage measurement, so the agent was resumed).
+`ci` (a pull request's checks were polled: `unit`, `task`, `gate`, `state` green|pending|none|failed, `pr`),
+`draft` (a pull request was put back to a draft: `unit`, `task`, `pr`, `outcome`),
+`update-branch` (a pull request behind its base was updated, or it conflicted: `unit`, `task`, `pr`, `outcome`),
+`merged-early` (a pull request was merged while its unit was still working: `unit`, `task`, `pr`, `findings`) and
+`idle` (a unit that showed nothing new at an idle tick: `unit`, `task`, `waiting` agent|ci, `ticks`)."""
 
 from datetime import datetime, timezone
 import json

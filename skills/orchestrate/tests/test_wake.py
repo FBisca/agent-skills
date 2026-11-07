@@ -280,7 +280,7 @@ class PrReadyTests(WakeFixture, unittest.TestCase):
         self.assertEqual(self.wakes()[0]["key"], "t1:abc1234")
 
     def test_S5_a_failing_check_then_a_green_one_still_writes_one_wake(self):
-        self.checks([[1, "FAIL o/r#7\nunit tests: boom"], [0, "PASS o/r#7"]])
+        self.checks([("fail", "unit tests"), "green"])
         again = report_wait("demo-t1-review", "complete", id=resume_id("demo-t1-review"))
         again["write"] = [[str(self.run_dir / "t1" / "review.2.json"), self.review()]]
         self.waits([self.worker_done(tests=True), self.reviewer_done(), self.worker_done("t1r1", tests=True), again])
