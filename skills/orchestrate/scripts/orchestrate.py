@@ -49,12 +49,15 @@ def run(argv, timeout=15):
 
 def checkout_snapshot(path):
     root = Path(path).resolve(strict=True)
-    actual = Path(run(["git", "-C", str(root), "rev-parse", "--show-toplevel"])).resolve()
+    # one `git rev-parse` for the three answers: the root, the head and the branch
+    identity = run(["git", "-C", str(root), "rev-parse", "--show-toplevel", "HEAD", "--abbrev-ref", "HEAD"]).splitlines()
+    require(len(identity) == 3, "git rev-parse answered %r" % identity)
+    actual = Path(identity[0]).resolve()
     require(root == actual, "checkout must be the repository/worktree root")
     return {
         "checkout": str(root),
-        "head": run(["git", "-C", str(root), "rev-parse", "HEAD"]),
-        "branch": run(["git", "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"]),
+        "head": identity[1],
+        "branch": identity[2],
         # This is an inventory, NOT a content fingerprint. Re-read affected source.
         "worktree_status": run(["git", "-C", str(root), "status", "--porcelain=v1"]),
     }
@@ -529,9 +532,19 @@ def class_models(path, backend):
     return models
 
 
+def runtime_process(argv, timeout=None):
+    """One `agent-runtime` process. The tests answer it in process (a fake module), so a driver run starts no
+    process per call: the seam is the process, not the answer."""
+    return subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+
+
+def gh_process(argv, timeout=None):
+    """One `gh` process."""
+    return subprocess.run(["gh", *argv], capture_output=True, text=True, timeout=timeout)
+
+
 def runtime_call(lead, tool, arguments, timeout=120):
-    result = subprocess.run(["agent-runtime", "call", tool, "--lead", lead, "--json", json.dumps(arguments)],
-                            capture_output=True, text=True, timeout=timeout)
+    result = runtime_process(["agent-runtime", "call", tool, "--lead", lead, "--json", json.dumps(arguments)], timeout)
     if result.returncode != 0:
         raise ValueError("agent-runtime %s failed (exit %d): %s"
                          % (tool, result.returncode, (result.stderr.strip() or result.stdout.strip())[:500]))
@@ -1496,8 +1509,7 @@ class Driver:
 
     def step_merge(self, task_id):
         url = self.task(task_id)["pr"]
-        result = subprocess.run(["gh", "pr", "view", url, "--json", "state,mergeCommit"],
-                                capture_output=True, text=True, timeout=60)
+        result = gh_process(["pr", "view", url, "--json", "state,mergeCommit"], timeout=60)
         if result.returncode != 0:
             event("%s gh pr view failed (exit %d); polling again" % (task_id, result.returncode))
             return False
@@ -2338,7 +2350,7 @@ def drive(args):
     return {"slug": driver.slug, "lead": driver.lead, "spawned": driver.spawned, "errors": driver.errors}
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     inspect = commands.add_parser("inspect", help="Read checkout identity and installed command paths")
@@ -2406,7 +2418,7 @@ def main():
     sub = commands.add_parser("launch", help="Check the plan and start `run` in a Herdr terminal named orchestrate-<slug>")
     sub.add_argument("plan")
     sub.add_argument("--repo", help="Repository root; default the plan file's repository")
-    args, extra = parser.parse_known_args()
+    args, extra = parser.parse_known_args(argv)
     if extra and args.command != "launch":
         parser.error("unrecognized arguments: " + " ".join(extra))
     if args.command == "launch":
@@ -2446,14 +2458,21 @@ def main():
         return data["tasks"][args.task] if args.task else [task_summary(t) for t in data["tasks"].values()]
 
 
-if __name__ == "__main__":
+def run_cli(argv=None):
+    """The script's entry point: dispatch, print the answer, return the exit code.
+
+    The tests call this in process, so a driver run starts no process of its own."""
     try:
-        output = main()
+        output = main(argv)
         print(output if isinstance(output, str) else json.dumps(output, separators=(",", ":")))
-        sys.exit(1 if isinstance(output, dict) and output.get("errors") else 0)
+        return 1 if isinstance(output, dict) and output.get("errors") else 0
     except PlanError as error:
         print(json.dumps({"error": str(error)}), file=sys.stderr)
-        sys.exit(2)
+        return 2
     except (ValueError, KeyError, OSError, subprocess.TimeoutExpired) as error:
         print(json.dumps({"error": str(error)}), file=sys.stderr)
-        sys.exit(1)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(run_cli())
