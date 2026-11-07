@@ -1553,10 +1553,14 @@ class Driver:
         return bool(known) and known.get("assignment_id") is None
 
     def spawn_args(self, spawn):
-        """The spawn arguments, plus the run's role when the Lead named one.
+        """The spawn arguments, plus the run's role and profile when the Lead named them.
 
-        Without a named role the spawn carries none and the runtime's default role (the implementer) stands."""
+        Without a named role the spawn carries none and the runtime's default role (the implementer) stands.
+        A named profile replaces the CLI family in the spawn: the runtime resolves it to its own CLI and env."""
         agent = getattr(self.args, "agent", None)
+        profile = getattr(self.args, "profile", None)
+        if profile:
+            spawn = dict(spawn, cli=profile)
         return dict(spawn, agent=agent) if agent else spawn
 
     def ensure_agent(self, name, role, unit, spawn, fresh=False):
@@ -2363,6 +2367,9 @@ def main():
     sub.add_argument("--cli", choices=("claude", "codex"), default="claude")
     sub.add_argument("--agent", help="Role every worker runs under; 'none' runs them without one. "
                                      "Default: the runtime's own role")
+    sub.add_argument("--profile", help="Profile every worker runs under, as the runtime knows it "
+                                       "(a configured profile such as 'minimax'); it replaces the CLI family "
+                                       "in the spawn. Default: the CLI family alone")
     sub.add_argument("--base", default="origin/main", help="Remote branch each worktree starts from")
     sub.add_argument("--repo", help="Repository root; default the plan file's repository")
     sub.add_argument("--gate", action="append", default=[], help="CI command a worker must pass (repeatable)")

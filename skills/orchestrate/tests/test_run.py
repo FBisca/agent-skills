@@ -24,6 +24,22 @@ class RunTests(RunFixture, unittest.TestCase):
         for spawn in spawns:
             self.assertNotIn("agent", spawn["args"])
 
+    def test_named_profile_reaches_every_spawn(self):
+        """The profile the run names reaches every worker it spawns."""
+        self.run_driver("--profile", "minimax")
+        spawns = self.calls("spawn")
+        self.assertTrue(spawns)
+        for spawn in spawns:
+            self.assertEqual(spawn["args"]["cli"], "minimax")
+
+    def test_default_run_names_the_cli_family(self):
+        """Without a named profile, the spawn names the CLI family it runs."""
+        self.run_driver()
+        spawns = self.calls("spawn")
+        self.assertTrue(spawns)
+        for spawn in spawns:
+            self.assertEqual(spawn["args"]["cli"], "claude")
+
     def test_S1_dispatches_ready_agent_tickets_up_to_the_cap(self):
         """code-driven-orchestrator/S1"""
         self.run_driver("--max-workers", "2")
