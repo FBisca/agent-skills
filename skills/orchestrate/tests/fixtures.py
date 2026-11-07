@@ -92,15 +92,64 @@ sys.exit(code)
 '''
 
 FAKE_GH = '''#!/usr/bin/env python3
-"""`gh pr view`: logs the plan as it stands at each call, answers the next PR state from prs.json (last repeats)."""
+"""A fake `gh`. Every call is logged with the plan as it stands.
+
+`pr view` answers the PR's state: `view-early.json` when the test scripted one (a state before `gh pr ready`), else the
+next state of prs.json (the last repeats, MERGED by default). The state never depends on the PR being a draft: a driver
+that does not run `gh pr ready` still sees the merge instead of polling a PR that will never open. The draft itself is
+reported: a PR is a draft unless the worker opened it ready (`ready.flag`). `pr checks` pops checks-pr.json
+([exit, stdout, stderr]), `pr update-branch` pops update.json ([exit, stderr]), `pr ready` marks the PR ready and
+`pr ready --undo` drafts it again.
+"""
 import json, os, sys
 home = os.environ["FAKE_RUNTIME_HOME"]
+argv = sys.argv[1:]
 with open(os.path.join(home, "gh.log"), "a") as log:
-    log.write(json.dumps({"argv": sys.argv[1:], "plan": open(os.environ["FAKE_PLAN"]).read()}) + "\\n")
-queue = json.load(open(os.path.join(home, "prs.json")))
-state = queue.pop(0) if len(queue) > 1 else queue[0]
-json.dump(queue, open(os.path.join(home, "prs.json"), "w"))
-print(json.dumps({"state": state, "mergeCommit": {"oid": "f" * 40} if state == "MERGED" else None}))
+    log.write(json.dumps({"argv": argv, "plan": open(os.environ["FAKE_PLAN"]).read()}) + "\\n")
+
+
+def pop(name, default=None):
+    """The next item of a scripted queue (the last one repeats); the default when there is none."""
+    path = os.path.join(home, name)
+    if not os.path.exists(path):
+        return default
+    queue = json.load(open(path))
+    if not queue:
+        return default
+    item = queue.pop(0) if len(queue) > 1 else queue[0]
+    json.dump(queue, open(path, "w"))
+    return item
+
+
+ready = os.path.join(home, "ready.flag")
+if argv[:2] == ["pr", "checks"]:
+    code, out, err = pop("checks-pr.json", [0, "[]", ""])
+    print(out)
+    print(err, file=sys.stderr)
+    sys.exit(code)
+elif argv[:2] == ["pr", "ready"]:
+    if "--undo" in argv:
+        if os.path.exists(ready):
+            os.remove(ready)
+    else:
+        open(ready, "w").write("1")
+elif argv[:2] == ["pr", "update-branch"]:
+    code, err = pop("update.json", [0, ""])
+    print(err, file=sys.stderr)
+    sys.exit(code)
+else:
+    state = pop("view-early.json")
+    if state is None:
+        state = pop("prs.json", "MERGED")
+    row = {"state": state} if isinstance(state, str) else dict(state)
+    row.setdefault("isDraft", not os.path.exists(ready))
+    row.setdefault("mergeStateStatus", "CLEAN")
+    row.setdefault("mergeable", "MERGEABLE")
+    if row["state"] == "MERGED":
+        row.setdefault("mergeCommit", {"oid": "f" * 40})
+    else:
+        row.setdefault("mergeCommit", None)
+    print(json.dumps(row))
 '''
 
 HEADER = """# Plan: demo
@@ -262,12 +311,32 @@ class RunFixture:
     def checks(self, answers):
         (self.home / "checks.json").write_text(json.dumps(answers), encoding="utf-8")
 
+    def pr_checks(self, answers):
+        """What `gh pr checks` answers on its next calls ([exit code, stdout, stderr]; the last repeats)."""
+        (self.home / "checks-pr.json").write_text(json.dumps(answers), encoding="utf-8")
+
     def prs(self, states):
         (self.home / "prs.json").write_text(json.dumps(states), encoding="utf-8")
+
+    def early(self, states):
+        """PR states `gh pr view` answers before and regardless of `gh pr ready` (a merge by hand)."""
+        (self.home / "view-early.json").write_text(json.dumps(states), encoding="utf-8")
+
+    def updates(self, answers):
+        """What `gh pr update-branch` answers: [exit code, stderr] per call (the last repeats)."""
+        (self.home / "update.json").write_text(json.dumps(answers), encoding="utf-8")
+
+    def born_ready(self):
+        """The worker opened the PR ready for review, not as a draft."""
+        (self.home / "ready.flag").write_text("1", encoding="utf-8")
 
     def gh_log(self):
         path = self.home / "gh.log"
         return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
+
+    def gh_calls(self, *prefix):
+        """The argv of every logged gh call that starts with `prefix`."""
+        return [c["argv"] for c in self.gh_log() if c["argv"][:len(prefix)] == list(prefix)]
 
     def wait_checks_log(self):
         path = self.home / "wait-checks.log"
