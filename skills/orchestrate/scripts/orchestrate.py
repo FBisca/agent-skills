@@ -968,6 +968,11 @@ class Driver:
         if role == "held":
             return self.hold(task_id, assignment_id, kind, reason) if kind in ("blocked", "decision") else None
         if role == "worker":
+            if kind == "exited" and self.report_landed(task_id):
+                # The worker wrote its report and its turn ended before the runtime said so: the report is the
+                # news, not a question for the Lead.
+                self.log("report-landed", unit=self.unit_of(task_id), task=task_id, assignment_id=assignment_id)
+                return self.mark(task_id, gate="reported")
             return self.request(task_id, kind, reason)
         if role == "answerer":
             self.mark(task_id, answers=dict(self.task(task_id)["answers"], state="failed"))
@@ -2138,6 +2143,38 @@ class Driver:
         if task.get("fix"):
             return self.mark(task_id, gate="fix-pending", fix=dict(task["fix"], **flags))
         self.mark(task_id, gate="redo-pending", redo=dict(flags, reason=reason))
+
+    def report_landed(self, task_id):
+        """The worker's report is on disk, it names this task, it says it finished and it belongs to this attempt:
+        the turn ended after the report was written, so the driver reads the report instead of asking a human."""
+        task = self.task(task_id)
+        path = self.report_file(task_id)
+        try:
+            report = contracts.load(path, contracts.validate_report)
+        except (contracts.ContractError, OSError, ValueError):
+            return False
+        if report["task_id"] != task_id or report.get("status") != "COMPLETE":
+            return False
+        if report.get("acceptance_met") is not True:  # the same gate the reported path applies
+            return False
+        return self.belongs_to_attempt(task, path)
+
+    def belongs_to_attempt(self, task, path):
+        """The report was written after the task was claimed: a report left over from an earlier attempt is not this
+        worker's news."""
+        claimed = task.get("started_at")
+        if not claimed:
+            return True
+        try:
+            moment = datetime.fromisoformat(claimed)
+        except ValueError:
+            return True
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+        try:
+            return path.stat().st_mtime >= moment.timestamp()
+        except OSError:
+            return False
 
     def report_is_valid(self, task_id):
         try:

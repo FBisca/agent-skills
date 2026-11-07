@@ -1,5 +1,6 @@
 """Repo-level contracts: skill metadata, the upstream lock and the VAULT_DIR requirement."""
 
+import ast
 import json
 import os
 from pathlib import Path
@@ -108,6 +109,57 @@ class UpstreamLock(unittest.TestCase):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("npx skills add FBisca/agent-skills", readme)
         self.assertIn("install-upstream.sh", readme)
+
+
+class SuiteMarkers(unittest.TestCase):
+    """Every test in this repo carries exactly one of the markers `unit` and `integration`.
+
+    `conftest.py` refuses a suite whose tests carry neither or both, so a file that forgets the marker does not
+    fail its own test: it breaks the collection of the whole run. This test names the file instead.
+    """
+
+    MARKERS = ("unit", "integration")
+
+    def suite_files(self):
+        files = [path for path in (ROOT / "tests").glob("test_*.py")]
+        files.extend(sorted((ROOT / "skills").glob("*/tests/test_*.py")))
+        return files
+
+    def markers_in(self, node):
+        """The markers a node carries: its own decorators and the ones it inherits."""
+        found = set()
+        for decorator in getattr(node, "decorator_list", []):
+            text = ast.unparse(decorator)
+            for marker in self.MARKERS:
+                if "pytest.mark.%s" % marker in text:
+                    found.add(marker)
+        return found
+
+    @pytest.mark.unit
+    def test_every_test_carries_exactly_one_marker(self):
+        unmarked = []
+        for path in self.suite_files():
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            module = set()
+            for statement in tree.body:
+                if isinstance(statement, ast.Assign) and any(
+                        getattr(t, "id", "") == "pytestmark" for t in statement.targets):
+                    for marker in self.MARKERS:
+                        if "pytest.mark.%s" % marker in ast.unparse(statement):
+                            module.add(marker)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ClassDef):
+                    inherited = module | self.markers_in(node)
+                    for item in node.body:
+                        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name.startswith("test"):
+                            found = inherited | self.markers_in(item)
+                            if len(found) != 1:
+                                unmarked.append("%s:%s" % (path.relative_to(ROOT), item.name))
+                elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test"):
+                    found = module | self.markers_in(node)
+                    if len(found) != 1:
+                        unmarked.append("%s:%s" % (path.relative_to(ROOT), node.name))
+        self.assertEqual(sorted(set(unmarked)), [], "every test must carry exactly one of unit and integration")
 
 
 class WorkflowDoc(unittest.TestCase):
