@@ -69,18 +69,18 @@ class ReviewerReuseTests(ReuseFixture, unittest.TestCase):
         self.assertEqual(self.spawned()[:2], ["demo-t1", "demo-t1-review"])
         self.assertEqual(self.spawned().count("demo-t1-review"), 1)
         self.assertEqual(self.states_of("t1r1")[:3], ["reported", "converged", "reviewing"])
-        self.assertEqual(self.wait_checks_log(), ["o/r#7"])
+        self.assertEqual(set(self.checks_log()), {"https://github.com/o/r/pull/7"})
 
     def test_S8_a_ci_fix_round_is_re_reviewed_before_ci_runs_again(self):
         """orchestrate-lean-loop/S8"""
-        self.checks([[1, "FAIL o/r#7\n  unit tests: fail https://x/1\n  E boom"], [0, "PASS o/r#7"]])
+        self.checks([("fail", "unit tests"), "green"])
         self.waits([self.worker_done(tests=True), self.reviewer_done(), self.fix_report(), self.re_review()])
         self.run_driver()
         self.assertEqual(self.spawned()[:2], ["demo-t1", "demo-t1-review"])
         self.assertEqual(self.spawned().count("demo-t1-review"), 1)
         self.assertEqual([c["args"]["name"] for c in self.calls("resume")], ["demo-t1", "demo-t1-review"])
         self.assertEqual(self.states_of("t1r1")[:4], ["reported", "converged", "reviewing", "reviewed"])
-        self.assertEqual(len(self.wait_checks_log()), 2)
+        self.assertGreaterEqual(len(self.checks_log()), 2)
         self.assertIn(str(self.run_dir / "t1r1" / "findings.json"),
                       (self.run_dir / "t1-review2" / "task.md").read_text(encoding="utf-8"))
 
@@ -89,7 +89,7 @@ class ReviewerReuseTests(ReuseFixture, unittest.TestCase):
         blocked = self.review2(verdict="block", items=[dict(BLOCKING, id="B3", file="src/a/x.py")])
         self.waits(self.first_block() + [self.fix_report(), self.re_review(blocked)])
         self.run_driver()
-        self.assertEqual(self.wait_checks_log(), [])
+        self.assertNotIn("ready-for-ci", [e["gate"][1] for e in self.events("state")])
         self.assertEqual(self.task("t1r1")["gate"], "superseded")
         self.assertTrue((self.run_dir / "t1r2" / "findings.json").exists())
 
@@ -107,7 +107,7 @@ class ScopeFilterTests(ReuseFixture, unittest.TestCase):
         self.assertIn("B2", (self.run_dir / "deferred.md").read_text(encoding="utf-8"))
         self.assertIn("unrelated code is wrong", (self.run_dir / "deferred.md").read_text(encoding="utf-8"))
         self.assertFalse((self.run_dir / "t1r2").exists())  # no further fix round
-        self.assertEqual(self.wait_checks_log(), ["o/r#7"])  # the gate did not hold
+        self.assertIn("ready-for-ci", [e["gate"][1] for e in self.events("state")])  # the gate did not hold
         self.assertEqual(self.task("t1r1")["gate"], "done")
 
     def test_S9_a_blocking_item_in_a_changed_file_still_gates(self):
@@ -117,7 +117,7 @@ class ScopeFilterTests(ReuseFixture, unittest.TestCase):
         self.run_driver()
         self.assertEqual(self.events("scope"), [])
         self.assertTrue((self.run_dir / "t1r2" / "findings.json").exists())
-        self.assertEqual(self.wait_checks_log(), [])
+        self.assertNotIn("ready-for-ci", [e["gate"][1] for e in self.events("state")])
 
     def test_S9_a_blocking_item_that_references_an_earlier_finding_still_gates(self):
         """orchestrate-lean-loop/S9"""

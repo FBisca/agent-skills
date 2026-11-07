@@ -134,9 +134,7 @@ class EvidenceTests(EnvelopeFixture, unittest.TestCase):
         self.assertIn(item["log_path"], (self.run_dir / "t1r1" / "task.md").read_text(encoding="utf-8"))
 
     def test_S14_a_failing_ci_check_takes_its_excerpt_from_the_failing_log(self):
-        out = ("FAIL o/r#7\n  unit tests: fail https://github.com/o/r/actions/runs/9/job/1\n"
-               "  lint: fail https://github.com/o/r/actions/runs/9/job/2\n  E  boom at line 3\n  E  stack frame")
-        self.checks([[1, out], [0, "PASS o/r#7"]])
+        self.checks([("fail", "unit tests", "lint"), "green"])
         self.waits([self.worker_done(tests=True), self.reviewer_done(), self.worker_done("t1r1")])
         self.run_driver()
         findings = self.read("t1r1", "findings.json")
@@ -145,9 +143,9 @@ class EvidenceTests(EnvelopeFixture, unittest.TestCase):
         self.assertEqual(checks, ["unit tests", "lint"])
         for item in findings["items"]:
             self.assert_item(item, "ci", item["check"])
-            self.assertIn("boom at line 3", item["excerpt"])
-            self.assertIn("boom at line 3", open(item["log_path"], encoding="utf-8").read())
-        self.assertEqual(findings["items"][0]["command"], "wait-checks o/r#7")
+            self.assertIn("FAILED STEP LOG TAIL for run 77", item["excerpt"])
+            self.assertIn("FAILED STEP LOG TAIL for run 77", open(item["log_path"], encoding="utf-8").read())
+        self.assertEqual(findings["items"][0]["command"], "gh pr checks https://github.com/o/r/pull/7")
 
 
 class FixRoundTests(EnvelopeFixture, unittest.TestCase):
@@ -223,7 +221,7 @@ class AnswerTests(EnvelopeFixture, unittest.TestCase):
     def test_S17_a_pass_with_answer_required_items_goes_to_ci_and_resumes_the_worker_for_answers_only(self):
         self.waits(self.passing_with_question() + [self.answers_report([RESPONSE])])
         self.run_driver()
-        self.assertEqual(self.wait_checks_log(), ["o/r#7"])
+        self.assertIn("ready-for-ci", [e["gate"][1] for e in self.events("state")])
         resumes = self.calls("resume")
         self.assertEqual([r["args"]["name"] for r in resumes], ["demo-t1"])
         self.assertEqual(resumes[0]["args"]["task"], "Read %s and follow it." % (self.run_dir / "t1a1" / "task.md"))
@@ -259,7 +257,7 @@ class AnswerTests(EnvelopeFixture, unittest.TestCase):
         self.assertIn("%s..HEAD" % head, text)
         self.assertIn(str(self.run_dir / "t1a1" / "findings.json"), text)
         self.assertEqual(self.task()["gate"], "done")
-        self.assertEqual(len(self.wait_checks_log()), 2)
+        self.assertGreaterEqual(len(self.checks_log()), 2)
 
     def test_S16_missing_answers_resume_the_worker_once_then_become_a_request(self):
         self.waits(self.passing_with_question() + [self.answers_report([]), self.answers_report([], nth=2, name="report.2.json"),

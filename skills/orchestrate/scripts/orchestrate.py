@@ -7,7 +7,6 @@ import argparse
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import fcntl
-import importlib
 import json
 import math
 import os
@@ -551,19 +550,6 @@ def runtime_call(lead, tool, arguments, timeout=120):
     return json.loads(result.stdout)
 
 
-def wait_checks(ref, timeout=600):
-    """The CI gate's wait for a pull request's checks.
-
-    The wait is a module (`wait_checks`), not a program: the driver imports it, so the tests answer it with a mock
-    module (`ORCHESTRATE_WAIT_CHECKS`) instead of starting a process per call."""
-    name = os.environ.get("ORCHESTRATE_WAIT_CHECKS") or "wait_checks"
-    try:
-        module = importlib.import_module(name)
-    except ImportError as error:
-        raise ValueError("no wait-checks module to answer the CI gate (%s): %s" % (name, error))
-    return module.wait(ref, timeout=timeout)
-
-
 def assignment_of(result):
     """The assignment id a `spawn` or `resume` answered with: how `wait` names this agent from then on."""
     found = result.get("assignment_id")
@@ -611,7 +597,7 @@ def describe(item):
     """The lines a fix round shows for one findings item (text lines of contract 1 are shown as they are)."""
     if not isinstance(item, dict):
         return str(item)
-    if item.get("source") in ("converge", "ci"):
+    if item.get("source") in ("converge", "ci", "conflict"):
         return "%s %s: %s (exit %s of `%s`; full log %s)" % (item["source"], item["check"], item["excerpt"], item["exit"],
                                                             item["command"], item["log_path"])
     where = "%s:%s " % (item["file"], item["line"]) if item.get("file") else ""
@@ -706,6 +692,8 @@ class Driver:
         self.received = False
         self.sleep = time.sleep  # injectable so tests do not really sleep
         self.last_plan = None
+        self.ticks = {}  # unit -> [what it showed at the last tick, how many ticks it showed nothing new]
+        self.last_tick = time.monotonic()
 
     # ---- the event log: every state change is on disk before the next step -----------------------------------
 
@@ -769,6 +757,7 @@ class Driver:
             result = runtime_call(self.lead, "wait", wait, timeout=self.args.wait_seconds + 60)
             self.receipt = result.get("receipt")
             self.receive(result)
+            self.idle_ticks(result.get("assignments") or [])
             # `unfinished` lists assignment ids. A parked unit's assignment stays open in the runtime and makes `wait`
             # return at once: it is not work, so a run with only parked units left ends.
             parked = self.parked_assignments()
@@ -792,6 +781,42 @@ class Driver:
         at once when nothing is unfinished, so a PR awaiting merge or a parked gate would otherwise spin."""
         self.log("idle", interval=self.args.idle_interval)
         self.sleep(self.args.idle_interval)
+
+    def idle_ticks(self, assignments):
+        """Every `--idle-minutes`, look at each unit: did its agent show anything new, did its CI move? A unit that
+        shows nothing at two consecutive ticks needs the Lead."""
+        moment = time.monotonic()
+        if moment - self.last_tick < self.args.idle_minutes * 60:
+            return
+        self.last_tick = moment
+        for unit, task in self.units().items():
+            task_id = task["packet"]["task_id"]
+            if task["status"] in ("COMPLETE", "RELEASED") or task.get("gate") in PARKED:
+                continue
+            if task.get("gate") == "requested":
+                continue  # the Lead already has it
+            signature = self.idle_signature(task_id, assignments)
+            previous = self.ticks.get(task_id)
+            if previous is None or previous[0] != signature:
+                self.ticks[task_id] = [signature, 0]
+                continue
+            streak = previous[1] + 1
+            self.ticks[task_id] = [signature, streak]
+            waiting = "ci" if task.get("gate") in ("ready-for-ci", "awaiting-merge") else "agent"
+            self.log("idle", unit=unit, task=task_id, waiting=waiting, ticks=streak)
+            if streak >= 2:
+                self.request(task_id, "idle", "idle: %s showed no new state or report for %d ticks"
+                             % (unit, streak))
+
+    def idle_signature(self, task_id, assignments):
+        """What a unit showed since the last tick: its gate, its report, its checks and its agents' state."""
+        task = self.task(task_id)
+        unit = task["packet"]["unit"]
+        with self.book() as data:
+            mine = {a.get("assignment_id") for a in (data.get("agents") or {}).values() if a.get("unit") == unit}
+        agents = sorted([a.get("assignment_id"), a.get("state"), a.get("runtime_state")]
+                        for a in assignments if a.get("assignment_id") in mine)
+        return json.dumps([task.get("gate"), task.get("report_path"), task.get("ci_state"), agents], sort_keys=True)
 
     # ---- gates: a worker's report -> converge -> review -> fix rounds ---------------------------------------
     # The ledger task's `gate` field is the whole state: reported -> converged -> reviewing -> reviewed ->
@@ -906,6 +931,12 @@ class Driver:
 
     def advance(self):
         """Run every pending gate stage once; each step changes the task's gate or raises. Returns the steps run."""
+        try:
+            self.poll()  # one non-blocking look at every pull request before the gates move
+        except (ValueError, OSError, subprocess.TimeoutExpired) as error:
+            self.errors.append("poll: %s" % error)
+            self.log("error", gate="poll", error=str(error)[:500])
+            event("the pull request poll failed: %s" % error)
         steps = {"reported": self.step_reported, "converged": self.step_converged,
                  "reviewed": self.step_reviewed, "fix-pending": self.step_fix, "requested": self.step_requested,
                  "decided": self.step_decided, "redo-pending": self.step_redo,
@@ -1005,6 +1036,23 @@ class Driver:
             path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             write_atomic(path, json.dumps(row, indent=2) + "\n")
         self.wake("decision", unit, "decision %s: %s -> %s" % (unit, cell(task["event"]["reason"], 200), path), key=str(path))
+
+    def close_request(self, task_id, reason):
+        """The unit no longer needs the Lead: its open request is resolved, with the decision that says why."""
+        task = self.task(task_id)
+        request = task.get("request")
+        if not request:
+            return
+        path = Path(request["path"])
+        if not path.exists():
+            return
+        document = contracts.load(path, contracts.validate_request)
+        if document["status"] != "open":
+            return
+        decision_path = next_path(path.parent, "decision", ".json")[0]
+        decision = contracts.validate_decision({"contract": contracts.VERSION, "action": "skip", "reason": reason})
+        write_atomic(decision_path, json.dumps(decision, indent=2) + "\n")
+        write_atomic(path, json.dumps(dict(document, status="resolved", decision=str(decision_path)), indent=2) + "\n")
 
     def step_requested(self, task_id):
         """Wait for the Lead: a resolved request moves the unit on to `decided`. False while it is still open."""
@@ -1173,7 +1221,7 @@ class Driver:
                             for number, line in enumerate(lines, 1)]
         return "error", [(result.stderr.strip() or result.stdout.strip() or "converge exited %d" % result.returncode)[:500]]
 
-    def fail_gate(self, task_id, report, source, items, checks_run=(), answer_ids=()):
+    def fail_gate(self, task_id, report, source, items, checks_run=(), answer_ids=(), rebase=False):
         """A gate failed: raise review_rounds, then a fix round, or the escalation hook on the 3rd failure."""
         remaining = [short(item) for item in items]
         with self.book() as data:  # the driver's count: the report's review_rounds is never read
@@ -1185,7 +1233,7 @@ class Driver:
             failures = rounds[unit]
         self.record_report(task_id, report, review_rounds=1, remaining=remaining)
         fix = {"source": source, "items": items, "attempt": failures, "checks_run": list(checks_run),
-               "answer_ids": list(answer_ids)}
+               "answer_ids": list(answer_ids), "rebase": True if rebase else None}
         self.log("round", unit=unit, task=task_id, source=source, attempt=failures)
         for item in items:
             self.log_finding(unit, task_id, source, item.get("kind", "blocking") if isinstance(item, dict) else "blocking", item)
@@ -1443,13 +1491,31 @@ class Driver:
             return event("%s: %s disputed with changes_code; delta re-review from %s" % (task_id, ", ".join(changing), task["reviewed_commit"][:7]))
         self.mark(task_id, answers=dict(answers, state="done"))
 
-    # ---- CI, merge, cleanup ------------------------------------------------------------------------------
-    # ready-for-ci -> awaiting-merge -> cleanup -> done. The driver never merges: it polls `gh` for the merge.
+    # ---- PR, CI and merge: one non-blocking poll in the loop -----------------------------------------------
+    # The worker opens a draft pull request with its report. The driver keeps it a draft while the review runs,
+    # polls its checks on every round (nothing waits, no fix round is raised for checks that are not there yet), and
+    # marks it ready (`gh pr ready`) once the last review passed with green checks. From then on the unit waits for
+    # the merge: it holds no worker slot and the driver only polls `gh` for it.
+
+    def gh(self, argv, timeout=60):
+        """Run `gh` and return (exit code, stdout, stderr). A `gh` that cannot run is an error, not a guess."""
+        try:
+            result = gh_process(argv, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return 1, "", "gh timed out"
+        except OSError as error:
+            return 1, "", str(error)
+        return result.returncode, result.stdout, result.stderr
 
     def pr_url(self, task_id):
         """The unit's pull request: a fix round opens none, so fall back to an earlier attempt's report."""
         task = self.task(task_id)
-        reports = [contracts.load(task["report_path"], contracts.validate_report)]
+        reports = []
+        if task.get("report_path"):
+            try:
+                reports.append(contracts.load(task["report_path"], contracts.validate_report))
+            except contracts.ContractError:
+                pass
         with self.book() as data:
             reports += [t["report"] for t in data["tasks"].values()
                         if t["packet"].get("unit") == task["packet"]["unit"] and t.get("report")]
@@ -1458,46 +1524,181 @@ class Driver:
         require(match, "report.json names no pull request URL to check (pr: %r)" % url)
         return url, "%s#%s" % match.groups()
 
+    def pr_of(self, task_id):
+        """The unit's pull request URL, or None when no report names one."""
+        try:
+            return self.pr_url(task_id)[0]
+        except (contracts.ContractError, ValueError):
+            return None
+
+    def pr_view(self, url):
+        """The pull request as `gh` sees it: {state, isDraft, mergeStateStatus, mergeable}. A `gh` that fails is no
+        state at all: the driver polls again rather than guessing."""
+        code, out, err = self.gh(["pr", "view", url, "--json", "state,isDraft,mergeStateStatus,mergeable,mergeCommit"])
+        if code != 0:
+            return {"error": (err or out).strip()[:200]}
+        try:
+            state = json.loads(out)
+        except ValueError:
+            return {"error": "gh pr view printed no JSON"}
+        return state if isinstance(state, dict) else {"error": "gh pr view printed no object"}
+
+    def pr_checks(self, url):
+        """The pull request's checks as (state, rows): green, pending, none or failed. `gh` prints one JSON row per
+        check; a bucket says how it went. An exit code `gh` does not use for checks is an error, not a state."""
+        code, out, err = self.gh(["pr", "checks", url, "--json", "name,bucket,link,description"])
+        try:
+            rows = json.loads(out or "[]")
+        except ValueError:
+            rows = []
+        rows = [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+        buckets = {str(r.get("bucket") or "").lower() for r in rows}
+        if buckets & {"fail", "failing", "cancel", "cancelled", "timed_out", "action_required"}:
+            return "failed", rows
+        if buckets & {"pending", "queued", "in_progress", "waiting", "requested"}:
+            return "pending", rows
+        if code == 0 and rows:
+            return "green", rows
+        if code in (0, 1, 8) and not rows:
+            return "none", rows
+        if code in (0, 1, 8):
+            return "pending", rows
+        return "error", rows
+
+    def units(self):
+        """Every unit of the run with the task that is still open for it."""
+        with self.book() as data:
+            tasks = [json.loads(json.dumps(t)) for t in data["tasks"].values()]
+        units = {}
+        for task in tasks:
+            unit = task["packet"].get("unit") or task["packet"]["task_id"]
+            units.setdefault(unit, []).append(task)
+        return {unit: group[-1] for unit, group in units.items()}
+
+    def unit_flag(self, unit, key):
+        """True when any attempt of the unit carries the flag: the pull request belongs to the unit, not to a task."""
+        with self.book() as data:
+            return any(task["packet"].get("unit") == unit and task.get(key)
+                       for task in data["tasks"].values())
+
+    def poll(self):
+        """One non-blocking look at every unit's pull request: was it merged by hand, is it still a draft, how are
+        its checks. A unit with no checks yet, or with checks still running, is looked at again on a later round: no
+        fix round is raised and no other unit waits."""
+        for unit, task in self.units().items():
+            task_id = task["packet"]["task_id"]
+            gate = task.get("gate")
+            if task["status"] in ("COMPLETE", "RELEASED") or gate in PARKED or gate in ("awaiting-merge", "cleanup", "done"):
+                continue
+            url = self.pr_of(task_id)
+            if not url:
+                continue
+            state = self.pr_view(url)
+            if state.get("error"):
+                continue
+            if state.get("state") == "MERGED":
+                self.merged_early(task_id, state)
+                continue
+            if gate in ("converged", "reviewing", "reviewed") and not self.unit_flag(unit, "pr_ready"):
+                self.ensure_draft(task_id, url, state)
+            if gate in ("converged", "reviewing", "reviewed", "ready-for-ci"):
+                self.poll_checks(task_id, url)
+
+    def ensure_draft(self, task_id, url, state):
+        """The pull request is a draft while the review runs: a worker that opened it ready is put back."""
+        unit = self.unit_of(task_id)
+        if self.unit_flag(unit, "draft_done"):
+            return
+        if not state.get("isDraft"):
+            code, out, err = self.gh(["pr", "ready", url, "--undo"])
+            self.log("draft", unit=unit, task=task_id, pr=url, outcome="draft" if code == 0 else "failed")
+            event("%s: the pull request is a draft again (%s)" % (task_id, url))
+        self.mark(task_id, draft_done=True)
+
+    def poll_checks(self, task_id, url):
+        """The pull request's checks, once per round. The state is kept on the task; nothing waits for it."""
+        state, rows = self.pr_checks(url)
+        task = self.task(task_id)
+        if task.get("ci_state") != state or task.get("ci_rows") != rows:
+            self.mark(task_id, ci_state=state, ci_rows=rows)
+        self.log("ci", unit=self.unit_of(task_id), task=task_id, gate=task.get("gate"), state=state, pr=url)
+        return state
+
     def step_ci(self, task_id):
+        """The unit's checks. Green and the last review passed: the pull request is marked ready and the unit waits
+        for the merge. A pull request behind its base is updated; a conflict is a fix round of its own."""
         task = self.task(task_id)
         try:
-            url, ref = self.pr_url(task_id)
+            url = self.pr_url(task_id)[0]
         except (contracts.ContractError, ValueError) as error:
             return self.request(task_id, "ci", str(error))
-        waiting = (task.get("answers") or {}).get("state") in ("working", "reported")
-        if not task.get("ci_green"):
-            result = wait_checks(ref, timeout=self.args.ci_seconds)
-            if result.timed_out:
-                event("%s checks of %s still running; polling again" % (task_id, ref))
-                return False
-            if result.returncode != 0:
-                lines = [line for line in result.stdout.splitlines() if line.strip()]
-                if result.returncode != 1 or not lines:
-                    return self.request(task_id, "ci", (result.stderr.strip() or result.stdout.strip()
-                                                          or "wait-checks exited %d" % result.returncode)[:500])
+        state = task.get("ci_state")
+        if state != "green":
+            if state == "failed":
                 report = contracts.load(self.task(task_id)["report_path"], contracts.validate_report)
-                return self.fail_gate(task_id, report, "ci", self.ci_items(task_id, ref, result))
-            self.mark(task_id, ci_green=True)
+                return self.fail_gate(task_id, report, "ci", self.ci_items(task_id, url, task.get("ci_rows") or []))
+            if state == "error":
+                return self.request(task_id, "ci", "gh pr checks failed for %s" % url)
+            event("%s: no checks yet, or they are still running; polling again" % task_id)
+            return False  # no fix round: the unit is polled again on a later round
+        waiting = (task.get("answers") or {}).get("state") in ("working", "reported")
         if waiting:  # green, but the implementer's answers may still change the code: pr-ready waits for them
             return False
+        if not task.get("pr_ready"):
+            code, out, err = self.gh(["pr", "ready", url])
+            if code != 0:
+                return self.request(task_id, "ci", "gh pr ready failed: %s" % (err or out).strip()[:200])
+            self.mark(task_id, pr_ready=True)
+            event("%s: the pull request is ready for review (%s)" % (task_id, url))
+        view = self.pr_view(url)
+        if str(view.get("mergeStateStatus") or "").upper() == "BEHIND":
+            return self.update_branch(task_id, url)
         unit = self.unit_of(task_id)
         head = contracts.load(self.task(task_id)["report_path"], contracts.validate_report)["head"]
         self.wake("pr-ready", unit, "pr-ready %s: %s" % (unit, url), key="%s:%s" % (unit, head))
         self.put_status(task_id, "IN PROGRESS · awaiting merge (%s)" % url)
         self.mark(task_id, gate="awaiting-merge", pr=url)
 
-    def ci_items(self, task_id, ref, result):
-        """The failing CI checks as evidence items. `wait-checks` prints `FAIL <pr>`, one `  <check>: fail <link>` line per
-        failing check, then the tail of the failed log; the whole output is saved as the items' log."""
+    def update_branch(self, task_id, url):
+        """The pull request is behind its base: `gh pr update-branch` brings it up to date. A clean update needs no
+        review (nobody wrote code); a conflict is a fix round of its own: a fresh worker rebases and the result goes
+        to a delta re-review."""
+        code, out, err = self.gh(["pr", "update-branch", url])
+        unit = self.unit_of(task_id)
+        if code == 0:
+            self.log("update-branch", unit=unit, task=task_id, pr=url, outcome="updated")
+            event("%s: the branch was updated; no review needed" % unit)
+            self.mark(task_id, ci_state=None, ci_rows=None)
+            return False  # the new commits run CI again: polled on a later round
+        excerpt = (err or out).strip()[:1500] or "gh pr update-branch exited %d" % code
+        self.log("update-branch", unit=unit, task=task_id, pr=url, outcome="conflict")
+        log = next_path(self.run_dir / task_id, "update-branch", ".log")[0]
+        log.write_text(excerpt + "\n", encoding="utf-8")
+        report = contracts.load(self.task(task_id)["report_path"], contracts.validate_report)
+        item = {"id": "BR1", "kind": "blocking", "source": "conflict", "check": "update-branch",
+                "command": "gh pr update-branch %s" % url, "exit": code, "excerpt": excerpt, "log_path": str(log)}
+        return self.fail_gate(task_id, report, "conflict", [item], rebase=True)
+
+    def ci_items(self, task_id, url, rows):
+        """The failing CI checks as evidence items: the check's name and the tail of its log (`gh run view`)."""
         log = next_path(self.run_dir / task_id, "ci", ".log")[0]
-        log.write_text(result.stdout, encoding="utf-8")
-        lines = [line for line in result.stdout.splitlines() if line.strip()]
-        checks = [m.group(1).strip() for m in (re.match(r"\s+(.+?): (?:fail|cancel) \S+\s*$", line) for line in lines) if m]
-        tail = [line.strip() for line in lines[1:] if not re.match(r"\s+.+?: (?:fail|cancel) \S+\s*$", line)]
-        excerpt = "\n".join(tail)[-1500:] or lines[0]
-        return [{"id": "CI%d" % number, "kind": "blocking", "source": "ci", "check": check, "command": "wait-checks " + ref,
-                 "exit": result.returncode, "excerpt": excerpt, "log_path": str(log)}
-                for number, check in enumerate(checks or ["ci"], 1)]
+        failing = [row for row in rows
+                   if str(row.get("bucket") or "").lower() in ("fail", "failing", "cancel", "cancelled")]
+        items = []
+        for number, row in enumerate(failing, 1):
+            excerpt = str(row.get("description") or "").strip()
+            run = re.search(r"/runs/(\d+)", str(row.get("link") or ""))
+            if run:
+                code, out, err = self.gh(["run", "view", run.group(1), "--log-failed"])
+                excerpt = (out or err).strip() or excerpt
+            items.append({"id": "CI%d" % number, "kind": "blocking", "source": "ci",
+                          "check": row.get("name") or "ci", "command": "gh pr checks %s" % url, "exit": 1,
+                          "excerpt": excerpt or "the check failed", "log_path": str(log)})
+        if not items:
+            items = [{"id": "CI1", "kind": "blocking", "source": "ci", "check": "ci", "command": "gh pr checks %s" % url,
+                      "exit": 1, "excerpt": "the checks failed", "log_path": str(log)}]
+        log.write_text("\n".join("%s: %s" % (item["check"], item["excerpt"]) for item in items) + "\n", encoding="utf-8")
+        return items
 
     def put_status(self, task_id, status):
         """The ticket's Status cell; the archive unit has no row."""
@@ -1508,14 +1709,13 @@ class Driver:
         return self.task(task_id)["packet"]["unit"].upper()
 
     def step_merge(self, task_id):
-        url = self.task(task_id)["pr"]
-        result = gh_process(["pr", "view", url, "--json", "state,mergeCommit"], timeout=60)
-        if result.returncode != 0:
-            event("%s gh pr view failed (exit %d); polling again" % (task_id, result.returncode))
-            return False
-        try:
-            state = json.loads(result.stdout)
-        except ValueError:
+        """The unit waits for the merge: the driver polls `gh` for it, and the merge itself is the user's."""
+        url = self.task(task_id).get("pr")
+        if not url:
+            return self.request(task_id, "merge", "no pull request to wait for")
+        state = self.pr_view(url)
+        if state.get("error"):
+            event("%s: gh pr view failed (%s); polling again" % (task_id, state["error"]))
             return False
         if state.get("state") == "CLOSED":
             return self.request(task_id, "merge", "%s was closed without a merge" % url)
@@ -1532,6 +1732,71 @@ class Driver:
         self.put_status(task_id, "COMPLETE %s · merged %s%s" % (now()[:10], url, " (%s)" % commit[:7] if commit else ""))
         self.mark(task_id, gate="cleanup", merge_commit=commit)
         event("%s merged: %s" % (task_id, url))
+
+    def merged_early(self, task_id, state):
+        """The pull request was merged while the unit was still working: a merge is final. The unit is complete, its
+        agents stop, and the findings it never settled go to deferred.md tagged merged-early."""
+        task = self.task(task_id)
+        unit = task["packet"]["unit"]
+        url = task.get("pr") or self.pr_of(task_id)
+        items = self.open_findings(unit)
+        if items:
+            self.defer_merged(unit, items, self.run_dir / unit)
+        self.log("merged-early", unit=unit, task=task_id, pr=url, findings=len(items))
+        self.close_request(task_id, "the pull request was merged before the unit finished")
+        report = self.merged_report(task_id, url)
+        try:
+            with self.book() as data:
+                checkpoint(data, task_id, report)
+        except ValueError as error:
+            return self.request(task_id, "merge", "merged, but the ledger rejected COMPLETE: %s" % error)
+        commit = (state.get("mergeCommit") or {}).get("oid", "")
+        self.put_status(task_id, "COMPLETE %s · merged %s%s" % (now()[:10], url, " (%s)" % commit[:7] if commit else ""))
+        self.mark(task_id, gate="cleanup", pr=url, merge_commit=commit)
+        self.stop_unit_agents(unit, "merged")
+        event("%s merged early: %s" % (unit, url))
+
+    def merged_report(self, task_id, url):
+        """The report a unit that was merged before it finished completes with: the merge settled it."""
+        task = self.task(task_id)
+        try:
+            head = head_of(task["packet"]["checkout"])
+        except (ValueError, OSError, subprocess.TimeoutExpired):
+            head = "unknown"
+        return {"contract": contracts.VERSION, "task_id": task_id, "status": "COMPLETE",
+                "summary": "the pull request was merged before the unit finished", "acceptance_met": True,
+                "files": [], "decisions": [], "interfaces": [], "remaining": [], "checks": [],
+                "review_rounds": 0, "usage": "unknown", "head": head, "pr": url}
+
+    def open_findings(self, unit):
+        """The findings a unit has not settled: the newest fix round's items, or the ones a fix round is about to
+        get."""
+        _, findings, _ = self.unit_trail(unit)
+        if findings:
+            try:
+                document = json.loads(Path(findings).read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                document = None
+            if isinstance(document, dict) and document.get("items"):
+                return list(document["items"])
+        with self.book() as data:
+            tasks = [t for t in data["tasks"].values() if t["packet"].get("unit") == unit]
+        for task in reversed(tasks):
+            items = (task.get("fix") or {}).get("items") or []
+            if items:
+                return list(items)
+        return []
+
+    def defer_merged(self, unit, items, source):
+        """The findings a merged-early unit never settled: deferred, tagged with the merge that ended it."""
+        deferred = self.run_dir / "deferred.md"
+        if not deferred.exists():
+            deferred.write_text("# Deferred findings: %s (for the major review after the driver ships)\n\n" % self.slug,
+                                encoding="utf-8")
+        with deferred.open("a", encoding="utf-8") as stream:
+            for item in items:
+                stream.write("- %s %s [merged-early]: %s (%s)\n" % (unit.upper(), item.get("id", "?"),
+                                                                      item_text(item), source))
 
     def step_cleanup(self, task_id):
         """A merge is final: stop the unit's implementer and reviewer panes, then remove the worktree only when nothing
@@ -1710,7 +1975,13 @@ class Driver:
         text = ("Read %s and follow it. Its work is already in this checkout; this is a fix round: read the findings at %s "
                 "and the round's brief at %s, then fix only what the findings name." % (
                     self.run_dir / unit / "task.md", findings_path, task_md))
-        self.hand_round(task, successor, task_md, text, fresh=fix.get("fresh") or fix.get("up"), answer=fix.get("answer"))
+        if fix.get("rebase"):
+            text = ("Read %s and follow it. The pull request could not be updated because the branch conflicts with "
+                    "its base: this is a rebase round, not a fix round. Rebase the branch onto the base, resolve the "
+                    "conflicts, push the result to the same branch and open no new pull request. The round's brief is "
+                    "at %s." % (task_md, task_md))
+        self.hand_round(task, successor, task_md, text, fresh=fix.get("fresh") or fix.get("up") or fix.get("rebase"),
+                        answer=fix.get("answer"))
         self.mark(new_id, answer_ids=list(fix.get("answer_ids") or []))
         self.mark(task_id, gate="superseded", fix_task=new_id, held=[])
         self.replay_held(task, new_id)
@@ -1856,6 +2127,8 @@ class Driver:
 
     def fix_text(self, task, new_id, new_dir, findings):
         packet = task["packet"]
+        if findings["source"] == "conflict":
+            return self.rebase_text(task, new_id, new_dir, findings)
         return "\n".join([
             "Contract: %s" % (self.run_dir / "contract.md"),
             "Report: %s" % (new_dir / "report.json"),
@@ -1877,6 +2150,29 @@ class Driver:
                "Without them the driver asks you once more.", ""]
               if any(i.get("answer_required") is True for i in findings["items"] if isinstance(i, dict)) else []),
             *(["The Lead's answer: %s" % task["fix"]["answer"], ""] if task["fix"].get("answer") else []),
+            "Commit and push to the same branch; open no new pull request. Run before you report COMPLETE: %s." % (
+                "; ".join(packet["checks"]) or "the repository's full CI gate"),
+            "Report review_rounds 0: the driver counts failed rounds.",
+            ""])
+
+    def rebase_text(self, task, new_id, new_dir, findings):
+        """The brief of a rebase round: the branch conflicts with its base, so the worker rebases it."""
+        packet = task["packet"]
+        return "\n".join([
+            "Contract: %s" % (self.run_dir / "contract.md"),
+            "Report: %s" % (new_dir / "report.json"),
+            "",
+            "# Rebase %s (task %s): the branch conflicts with its base" % (packet["unit"].upper(), new_id),
+            "",
+            "This is a rebase round: the pull request of %s could not be updated because the branch conflicts with "
+            "the base. Rebase the branch onto the base, resolve the conflicts, and push the result to the same "
+            "branch. What `gh pr update-branch` said (also in %s):" % (packet["unit"].upper(), new_dir / "findings.json"),
+            "",
+            *["- " + describe(item) for item in findings["items"]],
+            "",
+            "Original task: %s. Use task_id `%s` in your report." % (self.run_dir / packet["unit"] / "task.md", new_id),
+            "Same checkout and branch: %s on %s. Work only here; edit only: %s." % (
+                packet["checkout"], task["checkout_at_claim"]["branch"], ", ".join(packet["owns"])),
             "Commit and push to the same branch; open no new pull request. Run before you report COMPLETE: %s." % (
                 "; ".join(packet["checks"]) or "the repository's full CI gate"),
             "Report review_rounds 0: the driver counts failed rounds.",
@@ -2034,8 +2330,10 @@ class Driver:
     def dispatch_ready(self, plan):
         with self.book() as data:
             tasks = data["tasks"]
+            # a unit that waits for its merge holds no slot: only work that still needs an agent counts
             unfinished = sum(1 for t in tasks.values()
-                             if t["status"] not in ("COMPLETE", "RELEASED") and t.get("gate") not in PARKED)
+                             if t["status"] not in ("COMPLETE", "RELEASED") and t.get("gate") not in PARKED
+                             and t.get("gate") not in ("awaiting-merge", "cleanup", "done"))
         by_id = {t["#"]: t for t in plan["tickets"]}
         count = 0
         for ticket in plan["tickets"]:
@@ -2171,7 +2469,7 @@ class Driver:
             *scenarios,
             "",
             "Before you report COMPLETE, run: " + "; ".join(gate) + ".",
-            "Then open a pull request against %s." % self.args.base.partition("/")[2],
+            "Then open a draft pull request against %s." % self.args.base.partition("/")[2],
             ""])
 
 
@@ -2340,6 +2638,7 @@ def drive(args):
     require(args.max_workers >= 1, "--max-workers must be at least 1")
     require(args.max_fix_rounds >= 0, "--max-fix-rounds must not be negative")
     require(args.context_reserve >= 0, "--context-reserve must not be negative")
+    require(args.idle_minutes >= 0, "--idle-minutes must not be negative")
     driver = Driver(args)
     driver.start()
     try:
@@ -2401,9 +2700,11 @@ def main(argv=None):
     sub.add_argument("--state-dir", default="~/.local/state/orchestrate", help="Holds <slug>.json and the <slug>/ run directory")
     sub.add_argument("--models-file", default="~/.claude/CLAUDE.md", help="File holding the 'Model classes' table")
     sub.add_argument("--converge", default=str(CONVERGE), help="converge.py used to gate each report")
-    sub.add_argument("--ci-seconds", type=int, default=600, help="Longest one wait-checks call blocks before the loop moves on")
     sub.add_argument("--wait-seconds", type=int, default=60, help="Longest one wait blocks before the plan is re-read")
     sub.add_argument("--idle-interval", type=float, default=30, help="Seconds to sleep after an iteration that made no progress")
+    sub.add_argument("--idle-minutes", type=float, default=10,
+                     help="Minutes between the idle ticks: a unit whose agent and CI show nothing new is logged idle, "
+                          "and at two ticks in a row the Lead is asked")
     sub = commands.add_parser("await", help="Print the next wake the Lead has not seen, or `finished -> <retro>`; waits for one")
     sub.add_argument("plan")
     sub.add_argument("--state-dir", default="~/.local/state/orchestrate", help="Holds <slug>.json and the <slug>/ run directory")

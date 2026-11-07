@@ -76,7 +76,8 @@ class ArchiveTests(ArchiveFixture, unittest.TestCase):
         self.run_driver()
         task = self.task("archive")
         self.assertEqual((task["status"], task["gate"]), ("COMPLETE", "done"))
-        self.assertEqual(self.wait_checks_log(), ["o/r#7", "o/r#9"])
+        self.assertEqual(set(self.checks_log()),
+                         {"https://github.com/o/r/pull/7", "https://github.com/o/r/pull/9"})
         self.assertEqual(self.calls("resume"), [])
         self.assertNotIn("demo-archive-review", self.spawned())
 
