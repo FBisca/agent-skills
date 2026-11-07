@@ -61,8 +61,8 @@ After standalone Pi works, it must be able to invoke the existing `start-plannin
 
 | # | What it delivers | Satisfies | Blocked by | Paths | Size | Difficulty | Owner | Status |
 |---|---|---|---|---|---|---|---|---|
-| T1 | Make `start-planning` and its grilling/fresh-context handoffs genuinely usable on Pi while retaining Claude/Codex paths and treating `grilling` as a separately installed skill if it is not vendored. | S1, S2, S3 | none | `skills/start-planning/`, `tests/`, `docs/` | regular | complex | agent | TO-DO |
-| T2 | Add portable invocation checks and regressions across high-priority skills; document unsupported tools explicitly. | S3, S4 | T1 | `tests/`, `README.md`, `docs/` | regular | simple | agent | TO-DO |
+| T1 | Make `start-planning` and its grilling/fresh-context handoffs genuinely usable on Pi while retaining Claude/Codex paths and treating `grilling` as a separately installed skill if it is not vendored. | S1, S2, S3 | none | `skills/start-planning/`, `tests/`, `docs/` | regular | complex | agent | COMPLETE 2026-11-07 |
+| T2 | Add portable invocation checks and regressions across high-priority skills; document unsupported tools explicitly. | S3, S4 | T1 | `tests/`, `README.md`, `docs/` | regular | simple | agent | COMPLETE 2026-11-07 |
 | T3 | Manually produce and validate a real plan with MiniMax on Pi, then sign off. | S1, S2 | T2 | `docs/plans/` |  |  | user | TO-DO |
 
 **Dependency:** `dotfiles/2026-11-07-pi-bootstrap.plan.md` has reached manual Pi smoke verification.

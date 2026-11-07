@@ -1,6 +1,6 @@
 # agent-skills
 
-Agent skills for [Claude Code](https://claude.com/claude-code) and [Codex](https://developers.openai.com/codex). They turn a raw idea into a gated, spec-driven build: each stage hands a checkable artifact to the next, and the gates are scripts, not opinions.
+Agent skills for [Claude Code](https://claude.com/claude-code), [Codex](https://developers.openai.com/codex) and [Pi](https://pi.dev/). They turn a raw idea into a gated, spec-driven build: each stage hands a checkable artifact to the next, and the gates are scripts, not opinions.
 
 - **Deterministic gates.** `idea_check.py` and `converge.py` read files and exit non-zero; an agent cannot talk its way past them.
 - **Agents that disagree on purpose.** `cold-read` asks a fresh reader to paraphrase a document; `orchestrate` builds with separate implementer agents and accepts a ticket only when its scenarios pass.
@@ -74,7 +74,15 @@ for skill in skills/*/; do
 done
 ```
 
-`~/.claude/skills` is read by Claude Code, `~/.agents/skills` by Codex.
+`~/.claude/skills` is read by Claude Code, `~/.agents/skills` by Codex and by Pi.
+
+### Harnesses
+
+The same `SKILL.md` serves every harness; a skill is invoked as `/start-planning` in Claude Code, as the `start-planning` skill in Codex and as `/skill:start-planning` in Pi.
+
+`start-planning` needs one upstream skill, `grilling`, which is not vendored here: install it with `scripts/install-upstream.sh grilling` (see [Upstream skills](#upstream-skills)). The plan refuses to continue without it, and never skips the grill.
+
+Pi has no subagent tool, so the fresh-context gather step runs through the bundled gatherer (`skills/start-planning/scripts/fresh_context.py`), which runs a bounded, isolated `pi --print` session and validates its answer. The supported invocation methods and the known limitations are in **[docs/specs/harness-portability.md](docs/specs/harness-portability.md)**.
 
 ### Configuration
 
@@ -103,7 +111,7 @@ scripts/install-upstream.sh            # or: scripts/install-upstream.sh --dry-r
 scripts/run-tests.sh
 ```
 
-Runs the repo contract tests (`tests/`: every `SKILL.md` has frontmatter with a `name` matching its folder and a `description`; every dropped upstream is in the lock with an install command; `VAULT_DIR` is required) and each skill's own `skills/*/tests` suite in a separate process. CI runs the same on Python 3.11, 3.12 and 3.13, plus `shellcheck` on the scripts.
+Runs the repo contract tests (`tests/`: every `SKILL.md` has frontmatter with a `name` matching its folder and a `description`; every dropped upstream is in the lock with an install command; `VAULT_DIR` is required; the harness portability and plan Markdown contracts hold) and each skill's own `skills/*/tests` suite in a separate process. CI runs the same on Python 3.11, 3.12 and 3.13, plus `shellcheck` on the scripts. The suite is offline: no network, no model, no agent process.
 
 ## License
 
