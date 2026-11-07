@@ -33,6 +33,38 @@ A harness with no subagent of its own dispatches the fresh-context gather throug
 - **Why it ships with the skill.** Pi has a subagent extension, but as an example: it must be installed by hand before any skill can call it, and it spawns the same kind of separate `pi` process. A skill has to work for someone who installed Pi and nothing else.
 - **No credentials in the packet.** A packet carrying a secret-looking string is refused before the subprocess starts.
 
+## Frontmatter
+
+Every harness reads a skill's frontmatter as YAML, and each one is a little different about what
+it accepts. A frontmatter that YAML cannot parse makes the skill disappear from that harness; a
+frontmatter that YAML reads as something other than the text the author wrote makes the harness
+route on a description nobody wrote. Neither is loud.
+
+The rules, and the script that enforces them:
+
+```bash
+python3 scripts/lint_skills.py                 # this repo's skills
+python3 scripts/lint_skills.py path/to/skills  # any other repo's skills
+```
+
+The rule the lint holds is the one every harness agrees on: **the value a harness reads is the
+text the author wrote.** A description that holds a colon or a `#` is quoted, because an unquoted
+value is a YAML plain scalar and plain scalars do not survive those two characters:
+
+| Unquoted | YAML reads | The harness gets |
+| --- | --- | --- |
+| `description: into the vault: tasks` | a nested mapping | the whole frontmatter fails to parse; the skill vanishes |
+| `description: Friday, his #reply` | a comment starts at the `#` | `Friday, his` |
+
+Both dialects are covered. YAML 1.1 (PyYAML) and YAML 1.2 (the `yaml` npm package Pi uses)
+disagree about plain scalars such as `yes`, `12:30` and `2026-11-07` - one reads a boolean or a
+number where the other reads text - so a value is only accepted when both read the same thing
+back. A description that is not text is refused for the same reason.
+
+The lint is stdlib-only, so it runs in CI on a bare Python, and it names the file, the line and
+the reason. `tests/test_skill_frontmatter.py` runs it over this repo's skills and over the
+frontmatter that must be refused.
+
 ## The `grilling` dependency
 
 `grilling` is an upstream skill and is not vendored in this repo. Before the grill, the plan runs:
@@ -54,6 +86,7 @@ scripts/install-upstream.sh grilling
 - **Pi has no plan mode and no review subagent.** Steps that rely on a second opinion must go through a delegation: the harness's own, or the adapter the skill ships.
 - **`grilling` must be installed separately.** The plan refuses to continue without it; it does not install it.
 - **Frontmatter must be quoted when it holds a colon.** Pi's YAML parser rejects an unquoted `description:` with a colon inside it ("Nested mappings are not allowed in compact mappings") and skips the skill without failing loudly. `assemble-crew` and `deep-prompt` hit this; both descriptions are quoted now, and `tests/test_pi_discovery.py` fails if any skill in this repo stops loading in Pi.
+- **A `#` in an unquoted description is worse than a colon.** YAML starts a comment there, so the description is silently cut at that word. Every harness does it: Pi, Claude Code and Codex all read `Friday, his #heritage-updates reply` as `Friday, his`. The skill still loads, so nothing reports the loss. Quote the value.
 - **T3 is manual.** Nothing here proves a real plan was produced with MiniMax M3.1 inside Pi; that is the acceptance test in the plan.
 
 ## Verification

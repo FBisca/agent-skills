@@ -8,6 +8,17 @@ Instructions for agents working in this repo.
 (`JOBS` limits the workers). Run the gate before reporting a change complete. A suite that hangs is a failing suite:
 the cause is a fake that never answers, not a slow test.
 
+## A skill's frontmatter is read by YAML, not by us
+
+Every harness reads a `SKILL.md` frontmatter as YAML. A value that is not quoted and holds a colon is read as a nested
+mapping, so the skill vanishes from that harness; a value that holds a `#` is cut at that word, so the harness routes on
+half a description. `scripts/lint_skills.py` holds the rules and names the file, the line and the reason; run it on
+any skills folder, not only this repo's. The gate runs it over this repo's skills.
+
+Quote a description that holds a colon or a `#`. The lint is stdlib-only on purpose: it must run in CI on a bare Python,
+and the YAML dialects the harnesses use disagree about plain scalars, so it accepts a value only when every dialect
+reads the same text back.
+
 ## Test fakes are contracts
 
 `skills/orchestrate/scripts/orchestrate.py` polls whatever the fakes answer. A fake with no terminal answer — a PR that

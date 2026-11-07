@@ -111,7 +111,16 @@ scripts/install-upstream.sh            # or: scripts/install-upstream.sh --dry-r
 scripts/run-tests.sh
 ```
 
-Runs the repo contract tests (`tests/`: every `SKILL.md` has frontmatter with a `name` matching its folder and a `description`; every dropped upstream is in the lock with an install command; `VAULT_DIR` is required; the harness portability and plan Markdown contracts hold) and each skill's own `skills/*/tests` suite in a separate process. CI runs the same on Python 3.11, 3.12 and 3.13, plus `shellcheck` on the scripts. The suite is offline: no network, no model, no agent process.
+Runs the repo contract tests (`tests/`: every `SKILL.md` has frontmatter with a `name` matching its folder and a `description` every harness can read as text; every dropped upstream is in the lock with an install command; `VAULT_DIR` is required; the harness portability and plan Markdown contracts hold) and each skill's own `skills/*/tests` suite in a separate process. CI runs the same on Python 3.11, 3.12 and 3.13, plus `shellcheck` on the scripts. The suite is offline: no network, no model, no agent process.
+
+The frontmatter rules also run on their own, over any skills folder:
+
+```bash
+python3 scripts/lint_skills.py                 # this repo's skills
+python3 scripts/lint_skills.py path/to/skills  # any other repo's skills
+```
+
+It is the same contract the gate enforces, so another repo that keeps its skills here can run it too. See [Frontmatter](docs/specs/harness-portability.md#frontmatter) for why a colon or a `#` in an unquoted description breaks a harness.
 
 ## License
 
