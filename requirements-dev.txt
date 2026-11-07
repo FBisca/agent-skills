@@ -1,1 +1,4 @@
+# The pip fallback for the test environment. uv is the default: `uv sync` (see pyproject.toml).
+pytest>=8.0
+pytest-xdist>=3.6
 ruff==0.14.14

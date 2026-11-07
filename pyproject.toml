@@ -1,3 +1,34 @@
+[project]
+name = "agent-skills"
+version = "0.1.0"
+description = "Agent skills for Claude Code, Codex and Pi, with deterministic gates."
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-xdist>=3.6",
+    "ruff==0.14.14",
+]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests", "skills"]
+# `--strict-markers` turns an unknown marker into an error; `--import-mode=importlib` lets two
+# skills carry a file with the same name. The default selection (the unit tests) lives in
+# `conftest.py`, so that naming a file runs that file's tests whatever their marker.
+addopts = '--strict-markers --import-mode=importlib'
+markers = [
+    "unit: pure logic, in process, no subprocess and no server (the fast suite)",
+    "integration: drives a real component boundary (a subprocess, an IPC pipe, the filesystem)",
+]
+filterwarnings = [
+    # A leaked file or stream is a bug in the test or in the code under test, not a warning to hide.
+    "error::ResourceWarning",
+    "error::pytest.PytestUnraisableExceptionWarning",
+]
+
 [tool.ruff]
 target-version = "py311"
 

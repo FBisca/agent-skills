@@ -4,10 +4,14 @@ S3: the shared skills keep the Claude Code and Codex behaviour they had.
 S4: the test suite runs offline and enforces the Markdown plan contract.
 """
 
+import pytest
 from pathlib import Path
 import re
 import subprocess
 import unittest
+
+
+pytestmark = pytest.mark.integration
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILLS = ROOT / "skills"

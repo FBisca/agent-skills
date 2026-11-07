@@ -1,5 +1,6 @@
 """The dependency check: `grilling` is installed elsewhere, so the plan must find it or stop."""
 
+import pytest
 import importlib.util
 import io
 from contextlib import redirect_stderr, redirect_stdout
@@ -7,6 +8,9 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+
+
+pytestmark = pytest.mark.unit
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "check_deps.py"
 spec = importlib.util.spec_from_file_location("check_deps", SCRIPT)

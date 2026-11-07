@@ -2,15 +2,30 @@
 
 Instructions for agents working in this repo.
 
-## The suite is the gate
+## Testing
 
-Install `requirements-dev.txt`, then run `scripts/checks.sh` before reporting a change complete; CI runs the same checks.
-For a focused test, run `python3 -B -m unittest discover -v -s <tests-dir> -p <test-file>`.
-If a suite hangs, rerun the affected file with `-v`, identify the last test started, and report its failure output.
+- **Unit:** In-process, isolated, deterministic; mock external dependencies.
+- **Integration:** Tests real component boundaries (subprocesses, IPC, databases, network), even when dependencies are
+  faked.
+- Prefer unit tests for fast feedback; use integration tests to verify contracts.
+- Classify tests by behaviour, not filename. Never weaken or reclassify tests just to improve speed.
 
-`scripts/run-tests.sh` runs every test file in its own process, in parallel
-(`JOBS` limits the workers). A suite that hangs is a failing suite:
-the cause is a fake that never answers, not a slow test.
+The environment is [uv](https://docs.astral.sh/uv/): `uv sync` sets it up, `uv run pytest` is the runner. The tests
+are `unittest.TestCase` classes, so pytest runs them unchanged.
+
+```bash
+uv run pytest                    # the fast suite (the unit tests): under 3 seconds
+uv run pytest -m integration     # the integration tests
+uv run pytest -m "" -n 4         # the full suite, four workers
+uv run pytest -m "" -n auto      # the full suite, every core
+uv run pytest --durations=20     # where the time goes (add -m "" for the full suite)
+```
+
+`uv run pytest` runs the unit tests; `-m ""` is what overrides that default for the full suite. Run the fast suite
+while you work; run the full suite before you report a change complete. `scripts/checks.sh` is the whole gate (lint,
+frontmatter, full suite) and is what CI runs. If the suite hangs, `scripts/run-tests.sh` runs every file in its own
+process (`JOBS` limits the workers, `TEST_TIMEOUT` the seconds per file) and names the file that never finished: a
+suite that hangs is a failing suite, and the cause is a fake that never answers, not a slow test.
 
 ## A skill's frontmatter is read by YAML, not by us
 

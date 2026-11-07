@@ -5,6 +5,8 @@ import subprocess
 import sys
 import unittest
 
+import pytest
+
 from fixtures import SCRIPT, load_script
 from test_archive import ArchiveFixture, ARCHIVE
 from test_decider import DeciderFixture
@@ -17,6 +19,7 @@ def subsequence(wanted, actual):
 
 
 class EventTests(ArchiveFixture, unittest.TestCase):
+    @pytest.mark.integration
     def test_S27_every_state_change_is_one_json_line_logged_before_the_next_step(self):
         """orchestrate-lean-loop/S27"""
         self.waits(self.ticket_merged() + [self.archive_done(), self.gaps_done()])
@@ -37,6 +40,7 @@ class EventTests(ArchiveFixture, unittest.TestCase):
         self.assert_intents_precede_spawns()
         self.assertIn(ARCHIVE, [e["name"] for e in self.events("intent")])
 
+    @pytest.mark.integration
     def test_S27_findings_are_logged_with_their_kind_and_source(self):
         """orchestrate-lean-loop/S27"""
         review = self.review(verdict="block", major=[MAJOR], deferred=[DEFERRED])
@@ -46,6 +50,7 @@ class EventTests(ArchiveFixture, unittest.TestCase):
         self.assertEqual(findings, [("review", "deferred", "D1"), ("review", "blocking", "M1")])
         self.assertEqual([(e["unit"], e["source"]) for e in self.events("round")], [("t1", "review")])
 
+    @pytest.mark.integration
     def test_S27_converge_failures_and_ci_lines_are_findings_too(self):
         """orchestrate-lean-loop/S27"""
         self.waits([self.worker_done(), self.worker_done("t1r1", tests=True)])
@@ -53,6 +58,7 @@ class EventTests(ArchiveFixture, unittest.TestCase):
         found = self.events("finding")
         self.assertTrue(found and all(e["source"] == "converge" and e["finding_kind"] == "blocking" for e in found))
 
+    @pytest.mark.integration
     def test_S27_idle_ticks_are_logged(self):
         """orchestrate-lean-loop/S27"""
         self.prs(["OPEN"] * 4 + ["MERGED"])
@@ -60,6 +66,7 @@ class EventTests(ArchiveFixture, unittest.TestCase):
         self.run_driver()
         self.assertGreaterEqual(len(self.events("idle")), 2)
 
+    @pytest.mark.integration
     def test_S27_metrics_are_rebuilt_from_events_after_a_crash(self):
         """orchestrate-lean-loop/S27"""
         worker = self.worker_done(tests=True)
@@ -81,6 +88,7 @@ class EventTests(ArchiveFixture, unittest.TestCase):
         self.assertEqual(json.loads(metrics_path.read_text(encoding="utf-8")), written)
         self.assertEqual(json.loads(result.stdout), written)
 
+    @pytest.mark.unit
     def test_S27_the_rollup_counts_events_alone(self):
         """orchestrate-lean-loop/S27"""
         spec = load_script()
@@ -100,6 +108,7 @@ class EventTests(ArchiveFixture, unittest.TestCase):
 
 
 class DecisionEventTests(DeciderFixture, unittest.TestCase):
+    @pytest.mark.integration
     def test_S27_an_applied_decision_is_logged(self):
         """orchestrate-lean-loop/S27"""
         self.waits([self.blocked(), self.decided("skip", reason="not needed")])

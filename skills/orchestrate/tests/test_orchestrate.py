@@ -1,5 +1,6 @@
 """Behavior checks in temporary repositories; no agents or Herdr servers start."""
 
+import pytest
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import importlib.util
@@ -12,6 +13,9 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+
+
+pytestmark = pytest.mark.integration
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "orchestrate.py"
@@ -242,6 +246,7 @@ class ContextAndTransportTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             info = json.loads(result.stdout)
             self.assertEqual(info["agent_runtime"]["runtime"], "from-home")
+            self.assertEqual(sorted(info["executables"]), ["claude", "codex", "pi"])
             self.assertNotIn("herdr", info["executables"])
             on_path = json.loads(cli(base, "inspect", "--checkout", str(SCRIPT.parents[3])).stdout)
             self.assertEqual(on_path["agent_runtime"]["runtime"], "from-path")

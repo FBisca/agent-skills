@@ -1,5 +1,6 @@
 """`launch` validates the plan and starts the driver in a named Herdr terminal through a fake `hc`."""
 
+import pytest
 import json
 import os
 import subprocess
@@ -7,6 +8,9 @@ import sys
 import unittest
 
 from fixtures import RunFixture, SCRIPT, plan_text
+
+
+pytestmark = pytest.mark.integration
 
 FAKE_HC = """#!/usr/bin/env python3
 import json, os, sys

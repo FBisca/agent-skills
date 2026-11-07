@@ -1,5 +1,6 @@
 """The CI gate's wait: the module the driver imports, answered by a fake `gh`."""
 
+import pytest
 import contextlib
 import io
 import json
@@ -9,6 +10,9 @@ from unittest import mock
 
 import fixtures  # noqa: F401  (puts the driver's modules on the path)
 import wait_checks
+
+
+pytestmark = pytest.mark.unit
 
 
 class FakeGh:

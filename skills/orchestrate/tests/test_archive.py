@@ -1,10 +1,14 @@
 """The archive unit, the gaps reviewer, `converge --final`, and the run metrics."""
 
+import pytest
 import json
 import unittest
 
 from fixtures import report_wait, resume_id, spawn_id
 from test_gates import GateFixture
+
+
+pytestmark = pytest.mark.integration
 
 ARCHIVE = "demo-archive"
 SPEC = """# Demo

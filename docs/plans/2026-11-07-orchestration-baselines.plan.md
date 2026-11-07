@@ -1,6 +1,6 @@
 # Plan: Restore a Verified Orchestration Workflow, Then Measure Alternatives
 
-Slug: `orchestration-baselines`. Living spec: `docs/specs/orchestration-evaluation.md`. Status: **APPROVED — READY FOR EXECUTION**.
+Slug: `orchestration-baselines`. Living spec: `docs/specs/orchestration-evaluation.md`. Status: APPROVED
 
 ## Why now
 
@@ -21,6 +21,7 @@ The current orchestration path is reported broken. First capture reproducible fa
 | D1 | Make a failing end-to-end regression for the current broken dispatch → edit → verification → completion path; repair to fixed scenarios before comparative benchmarking. | Gate bug fixes on a functioning historical benchmark. | Correctness is a precondition for meaningful comparison. | User decision Q30/Q35 |
 | D2 | Report verified completion first, then intervention count, elapsed time, input/output/cache tokens and reruns. | Optimise context size in isolation. | Context only matters insofar as it improves results. | Routing calibration |
 | D3 | Separate repair and instrumentation from the later paired comparison. Once repaired, freeze a revision and run counterfactual experiments without simultaneous graph tuning. | Compare moving targets. | Interpretability without blocking recovery. | Q30/Q35 |
+| D4 | Ticket cells carry machine-readable values only: `Status: APPROVED`, `Blocked by` holds ticket IDs of this plan (cross-plan dependencies stay in prose), `Satisfies` holds scenario IDs, `Difficulty` is `simple`/`complex`, `Owner` is `agent` or `user`. T1 is not blocked (its offline fixture may begin independently of P0/P1); T3 is `complex` because `metrics.json` is a public contract; T4 is `agent`-owned and pauses for user approval of model access and budget. | Leaving the prose in the cells; treating the plan as free text. | The driver validates these columns; prose in a cell reads as a ticket or scenario that does not exist. | Driver schema check, 2026-11-07 |
 
 ## Binding P3 contract — Q19, Q21–Q22, Q28–Q30, Q35, Q38–Q43
 
@@ -34,7 +35,6 @@ The current orchestration path is reported broken. First capture reproducible fa
 
 ## Scenarios
 
-- **S0** WHEN a known orchestration failure is reproduced on an isolated fixture, THEN the test fails before repair and passes afterwards under the same fixed acceptance criteria; only a deterministic validator marks the source revision verified.
 - **S0** WHEN a known orchestration failure is reproduced on an isolated fixture, THEN the test fails before repair and passes afterwards under the same fixed acceptance criteria; only a deterministic validator marks the source revision verified.
 - **S1** WHEN a repaired workflow is later compared with a single agent on clean worktrees, THEN the report records identical source commit, scenario gate and task scope for both.
 - **S2** WHEN a run succeeds or fails, THEN results include verified completion, elapsed time, intervention and tool-loop/retry counts, with token figures labelled input/output/cached and unavailable fields left blank.
@@ -61,9 +61,9 @@ The current orchestration path is reported broken. First capture reproducible fa
 
 | # | What it delivers | Satisfies | Blocked by | Paths | Size | Difficulty | Owner | Status |
 |---|---|---|---|---|---|---|---|---|
-| T1 | Reproduce a failing end-to-end dispatch/verification test, including report timing and restart, before changing graph logic | S0, S3 | P0/P1 for live Pi only; offline fixture may begin independently | `skills/orchestrate/tests/`, `tests/` | regular | complex | agent | TO-DO |
-| T2 | Repair one complete ticket from clean worktree to verified terminal state, preserving Claude/Codex behaviour and approved transitions | S0; green regression and terminal verification | T1; #39/#45 reconciliation for any overlapping runtime edit | `skills/orchestrate/scripts/`, `skills/orchestrate/tests/`; separate runtime PR if needed | regular | complex | agent | TO-DO |
-| T3 | Add schema-versioned attempt evidence with existing `metrics.json` compatibility; unknown measurements remain null | S2 | T2 | `skills/orchestrate/scripts/`, `skills/orchestrate/tests/`, `benchmarks/` | regular | medium | agent | TO-DO |
-| T4 | Compare at least three real tasks per candidate route with pinned revisions and acceptance checks, single-agent versus orchestrated execution | S1–S4, failure report | T3, approved model access, budget | `benchmarks/`, `docs/` | regular | complex | user + agent | TO-DO |
+| T1 | Reproduce a failing end-to-end dispatch/verification test, including report timing and restart, before changing graph logic; the offline fixture may begin independently of P0/P1, live Pi runs wait on them | S0, S3 | none | `skills/orchestrate/tests/`, `tests/` | regular | complex | agent | IN PROGRESS · decision pending: orchestration-baselines-t1 ended without a report: runtime state idle |
+| T2 | Repair one complete ticket from clean worktree to verified terminal state, preserving Claude/Codex behaviour and approved transitions; reconcile any overlapping runtime edit with #39/#45 before merge, in a separate runtime PR if needed | S0 | T1 | `skills/orchestrate/scripts/`, `skills/orchestrate/tests/` | regular | complex | agent | TO-DO |
+| T3 | Add schema-versioned attempt evidence with existing `metrics.json` compatibility; unknown measurements remain null | S2 | T2 | `skills/orchestrate/scripts/`, `skills/orchestrate/tests/`, `benchmarks/` | regular | complex | agent | TO-DO |
+| T4 | Compare at least three real tasks per candidate route with pinned revisions and acceptance checks, single-agent versus orchestrated execution, plus a failure report; pause for the user to approve model access and budget before any provider spend | S1–S4 | T3 | `benchmarks/`, `docs/` | regular | complex | agent | TO-DO |
 
 **Dependency:** P0/P1, plus P2 for Pi delegation. P3 T2 is the gate for P4/P4b; P3 T4 only gates P5 optimisation, not correctness or typed routing. **Status: APPROVED — READY FOR EXECUTION.**
