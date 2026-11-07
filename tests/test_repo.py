@@ -39,6 +39,17 @@ def frontmatter(path):
     return fields
 
 
+def repo_files():
+    """The files this repo ships or is working on: tracked, plus untracked and not ignored.
+
+    Ignored files (a local `.claude/settings.local.json`, caches) are the machine's, not the
+    repo's, and must not decide whether the gate is green.
+    """
+    listed = subprocess.run(["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+                             cwd=ROOT, capture_output=True, text=True, check=True).stdout.split()
+    return [ROOT / name for name in listed]
+
+
 class SkillMetadata(unittest.TestCase):
     def test_every_skill_has_matching_name_and_description(self):
         dirs = sorted(p for p in SKILLS.iterdir() if p.is_dir())
@@ -62,9 +73,7 @@ class SkillMetadata(unittest.TestCase):
         self.assertTrue((SKILLS / "idea-frame" / "templates" / "project.md").is_file())
 
     def test_no_symlinks_or_absolute_user_paths(self):
-        for path in ROOT.rglob("*"):
-            if ".git" in path.parts or "__pycache__" in path.parts:
-                continue
+        for path in repo_files():
             self.assertFalse(path.is_symlink(), f"symlink: {path}")
             if path.is_file() and path.suffix in {".md", ".py", ".json", ".sh", ".yml", ".yaml"} and path != Path(__file__):
                 self.assertNotIn("/Users/", path.read_text(encoding="utf-8", errors="ignore"), str(path))
