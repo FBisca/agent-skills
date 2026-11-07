@@ -80,3 +80,22 @@ def run_budgeted(argv, env=None, cwd=None, budget_seconds=DEFAULT_BUDGET, label=
         with open(records, "a", encoding="utf-8") as stream:
             stream.write(json.dumps(record, sort_keys=True) + "\n")
     return record
+
+
+def verify(records_path, revision, out_path=None):
+    """Mark a source revision verified, but only on the records of runs that passed.
+
+    The validator is deterministic: it reads the records, and writes the manifest only when every record of that
+    revision passed. A run that failed, was terminated or never happened leaves the revision unverified. Returns the
+    manifest, or None when the revision is not verified.
+    """
+    records = [record for record in read_records(records_path) if record.get("revision") == revision]
+    if not records or any(record.get("outcome") != "pass" for record in records):
+        return None
+    manifest = {"revision": revision, "verified": True, "runs": len(records),
+                "artifacts": [{"label": record.get("label"), "argv": record.get("argv"),
+                               "elapsed_seconds": record.get("elapsed_seconds")} for record in records]}
+    if out_path:
+        with open(out_path, "w", encoding="utf-8") as stream:
+            json.dump(manifest, stream, indent=2, sort_keys=True)
+    return manifest
