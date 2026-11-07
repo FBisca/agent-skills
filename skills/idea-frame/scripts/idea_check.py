@@ -135,11 +135,11 @@ def check_stage(idea):
 
 def check_gate_reason(gates):
     bad = []
-    for l in gates.splitlines():
-        if re.search(r"gate[12]:", l, re.I):
-            m = GATE_LINE.match(l)
+    for line in gates.splitlines():
+        if re.search(r"gate[12]:", line, re.I):
+            m = GATE_LINE.match(line)
             if not m or (m.group(2).lower() in ("kill", "reshape") and not m.group(3)):
-                bad.append(l.strip())
+                bad.append(line.strip())
     return result(not bad, "gate-reason", "no reason or malformed: " + "; ".join(bad) if bad else "")
 
 

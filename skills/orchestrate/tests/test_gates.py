@@ -1,7 +1,6 @@
 """The gates after a worker reports: converge, a fresh reviewer, fix rounds, a fresh worker for a dead pane."""
 
 import json
-from pathlib import Path
 import unittest
 
 from fixtures import RunFixture, plan_text, report_wait, resume_id, spawn_id

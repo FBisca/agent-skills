@@ -1,6 +1,5 @@
 """ensure_agent: every spawn records an intent first, and a restart re-attaches by the stable name."""
 
-import json
 import os
 import sys
 import unittest

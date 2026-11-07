@@ -69,7 +69,7 @@ class ConvergeTests(unittest.TestCase):
         return code, out.getvalue()
 
     def line(self, out, check):
-        return next(l for l in out.splitlines() if check in l)
+        return next(line for line in out.splitlines() if check in line)
 
     # S17a
     def test_S17a_reports_scenario_without_test(self):

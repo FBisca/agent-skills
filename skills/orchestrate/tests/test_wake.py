@@ -9,7 +9,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import contracts  # noqa: E402
-from fixtures import SCRIPT, assignment, load_script, plan_text, report_wait, resume_id, spawn_id, wait_result
+from fixtures import SCRIPT, assignment, load_script, plan_text, report_wait, resume_id, wait_result
 from test_gates import GateFixture
 
 PR = "https://github.com/o/r/pull/7"
@@ -239,7 +239,7 @@ class QueueTests(WakeFixture, unittest.TestCase):
                     self.decide_step("t1", "skip"), self.decide_step("t3", "skip")])
         self.run_driver()
         lines = self.wake_lines("decision")
-        self.assertEqual([l.split(":")[0] for l in lines], ["decision t1", "decision t3"])
+        self.assertEqual([line.split(":")[0] for line in lines], ["decision t1", "decision t3"])
         printed = [self.cli("await", str(self.plan), "--state-dir", str(self.state_dir)).stdout for _ in range(3)]
         self.assertEqual(printed, [lines[0] + "\n", lines[1] + "\n", "finished -> %s\n" % (self.run_dir / "retro.md")])
 

@@ -22,7 +22,8 @@ def measure(path):
     in_box = [len(t["text"].split()) for t in texts
               if t.get("containerId") in by_id and by_id[t["containerId"]]["type"] in SHAPES
               and by_id[t["containerId"]]["height"] > PILL_MAX_H]
-    roles = lambda t: (t.get("customData") or {}).get("role")
+    def roles(t):
+        return (t.get("customData") or {}).get("role")
     free = [len(t["text"].split()) for t in texts if not t.get("containerId") and roles(t) not in ("headline", "zone", "mark")]
     arrows = [e for e in els if e["type"] == "arrow"]
     labelled = sum(any(b["type"] == "text" for b in (a.get("boundElements") or [])) for a in arrows)

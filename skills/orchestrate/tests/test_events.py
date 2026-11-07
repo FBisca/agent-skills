@@ -1,7 +1,6 @@
 """events.jsonl: one line per state change, finding, decision and idle tick; metrics.json rebuilt from it."""
 
 import json
-import os
 import subprocess
 import sys
 import unittest

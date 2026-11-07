@@ -5,7 +5,6 @@ import subprocess
 import sys
 import unittest
 
-import fixtures
 from fixtures import SCRIPT
 from test_gates import DEFERRED, GateFixture, MAJOR
 

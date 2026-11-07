@@ -33,7 +33,7 @@ _FIXED = {"r": [1.03, .5], "l": [-.03, .5], "t": [.5, -.06], "b": [.5, 1.06]}
 
 def tsize(s, fs):
     lines = s.split("\n")
-    return max(len(l) for l in lines) * fs * CW, len(lines) * fs * 1.25
+    return max(len(line) for line in lines) * fs * CW, len(lines) * fs * 1.25
 
 
 def vault_dir():
@@ -170,7 +170,8 @@ class Sketch:
         """Elbow arrow from side sa of a to side sb of b. Same-side pairs loop out by d; mx/my force the bend."""
         x1, y1 = self._anchor(a, sa)
         x2, y2 = self._anchor(b, sb)
-        horiz = lambda s: s in "rl"
+        def horiz(s):
+            return s in "rl"
         if horiz(sa) and horiz(sb):
             if mx is None:
                 mx = (max(x1, x2) + d if sa == "r" else min(x1, x2) - d) if sa == sb else (x1 + x2) / 2
