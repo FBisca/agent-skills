@@ -10,8 +10,14 @@ a turn that ended with no report at all still needs the Lead.
 import shlex
 import unittest
 
+import pytest
+
 from fixtures import assignment, wait_result
 from test_gates import GateFixture
+
+
+# Every test here runs the driver: these are integration tests.
+pytestmark = pytest.mark.integration
 
 
 class ReportTimingTests(GateFixture, unittest.TestCase):

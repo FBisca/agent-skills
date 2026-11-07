@@ -20,6 +20,8 @@ import subprocess
 import sys
 import unittest
 
+import pytest
+
 from fixtures import SCRIPT
 import bench
 from test_gates import GateFixture
@@ -27,6 +29,9 @@ from test_gates import GateFixture
 
 ROOT = Path(__file__).resolve().parents[3]  # the repository under test: the source revision the run is pinned to
 PR = "https://github.com/o/r/pull/7"
+
+# Every test here runs the driver in a subprocess: these are integration tests.
+pytestmark = pytest.mark.integration
 
 
 class BaselineTests(GateFixture, unittest.TestCase):
