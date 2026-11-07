@@ -80,6 +80,17 @@ class PiDiscoveryTests(unittest.TestCase):
         """S1: Pi finds the planning skill, so `/skill:start-planning` exists."""
         self.assertIn("start-planning", self.result["names"])
 
+    def test_pi_discovers_every_skill_of_this_repo(self):
+        """Every skill in the repo loads in Pi: a frontmatter Pi cannot parse hides the skill."""
+        expected = {path.name for path in (ROOT / "skills").iterdir() if path.is_dir()}
+        self.assertEqual(expected - set(self.result["names"]), set())
+
+    def test_pi_reports_no_problem_with_any_skill_of_this_repo(self):
+        """Pi's frontmatter parser accepts every skill here (a quoted description counts)."""
+        problems = [d for d in self.result["diagnostics"]
+                    if str(d.get("path", "")).startswith(str(ROOT / "skills"))]
+        self.assertEqual(problems, [], problems)
+
     def test_pi_reads_the_planning_skill_description(self):
         """S1: the description Pi routes on is the one in the frontmatter."""
         skill = next(s for s in self.result["skills"] if s["name"] == "start-planning")

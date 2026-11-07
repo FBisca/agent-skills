@@ -50,7 +50,7 @@ scripts/install-upstream.sh grilling
 - **The Pi gatherer cannot run commands by default.** Counts that need a live database or script are either run by the parent or opted into with `--allow-bash`, which widens the subprocess's powers.
 - **Pi has no plan mode and no review subagent.** Steps that rely on a second opinion must go through the gatherer script or an explicit `/skill:` command.
 - **`grilling` must be installed separately.** The plan refuses to continue without it; it does not install it.
-- **Two other skills do not load in Pi.** `assemble-crew` and `deep-prompt` put a colon in an unquoted `description`, which Pi's YAML parser rejects ("Nested mappings are not allowed in compact mappings"), so Pi skips them. The fix is one line each: quote the description. Out of scope for T1/T2, and still open.
+- **Frontmatter must be quoted when it holds a colon.** Pi's YAML parser rejects an unquoted `description:` with a colon inside it ("Nested mappings are not allowed in compact mappings") and skips the skill without failing loudly. `assemble-crew` and `deep-prompt` hit this; both descriptions are quoted now, and `tests/test_pi_discovery.py` fails if any skill in this repo stops loading in Pi.
 - **T3 is manual.** Nothing here proves a real plan was produced with MiniMax M3.1 inside Pi; that is the acceptance test in the plan.
 
 ## Verification
