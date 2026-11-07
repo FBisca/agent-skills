@@ -2732,7 +2732,7 @@ def main(argv=None):
         return decide(args)
     if args.command == "inspect":
         return {**checkout_snapshot(args.checkout),
-                "executables": {c: shutil.which(c) for c in ("codex", "claude")},
+                "executables": {c: shutil.which(c) for c in ("codex", "claude", "pi")},
                 "agent_runtime": resolve_runtime(),
                 "native_agent_capabilities": "inspect this session's tool schema",
                 "context": "unknown; supply current child runtime telemetry"}
