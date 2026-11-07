@@ -21,6 +21,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import contracts  # noqa: E402
+import evidence  # noqa: E402
 import events  # noqa: E402
 
 
@@ -2428,6 +2429,13 @@ class Driver:
         print(metrics_table(metrics), file=sys.stderr, flush=True)
         return metrics
 
+    def report_evidence(self):
+        """The run's attempt evidence: one schema-versioned record per attempt, written beside metrics.json (which
+        keeps its own shape). A measurement that was not taken is null, never 0."""
+        with ledger(self.ledger_path) as data:
+            records = evidence.attempts(data, events.read(self.run_dir / "events.jsonl"), self.slug)
+        return evidence.write(self.run_dir / "attempts.jsonl", records)
+
     def dispatch_ready(self, plan):
         with self.book() as data:
             tasks = data["tasks"]
@@ -2630,6 +2638,21 @@ def rebuild_metrics(args):
     return result
 
 
+def rebuild_evidence(args):
+    """`evidence <plan>`: the run's attempts.jsonl rebuilt from its ledger and its events.jsonl, which survive a crash.
+    The old metrics.json is left alone: the evidence is written beside it."""
+    plan = parse_plan(Path(args.plan).resolve(strict=True).read_text(encoding="utf-8"))
+    state_dir = Path(args.state_dir).expanduser()
+    run_dir = state_dir / plan["slug"]
+    ledger_path = state_dir / (plan["slug"] + ".json")
+    require(ledger_path.exists(), "no ledger for %s under %s" % (plan["slug"], state_dir))
+    with ledger(ledger_path) as data:
+        records = evidence.attempts(data, events.read(run_dir / "events.jsonl"), plan["slug"])
+    run_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    evidence.write(run_dir / "attempts.jsonl", records)
+    return records
+
+
 def write_atomic(path, text):
     tmp_fd, tmp_path = tempfile.mkstemp(prefix=".orchestrate-", dir=path.parent)
     try:
@@ -2746,7 +2769,10 @@ def drive(args):
         driver.loop()
         driver.log("finish")
     finally:
-        driver.report_metrics()
+        try:
+            driver.report_metrics()
+        finally:
+            driver.report_evidence()
     return {"slug": driver.slug, "lead": driver.lead, "spawned": driver.spawned, "errors": driver.errors}
 
 
@@ -2780,6 +2806,9 @@ def main(argv=None):
     sub = commands.add_parser("metrics", help="Rebuild a run's metrics.json from its events.jsonl, or normalize --samples")
     sub.add_argument("plan", nargs="?", help="Plan file of the run to rebuild")
     sub.add_argument("--samples", help="A file of per-request usage records to normalize")
+    sub.add_argument("--state-dir", default="~/.local/state/orchestrate", help="Holds <slug>.json and the <slug>/ run directory")
+    sub = commands.add_parser("evidence", help="Rebuild a run's attempts.jsonl (the per-attempt evidence) from its ledger")
+    sub.add_argument("plan", help="Plan file of the run to rebuild")
     sub.add_argument("--state-dir", default="~/.local/state/orchestrate", help="Holds <slug>.json and the <slug>/ run directory")
     sub = commands.add_parser("run", help="Dispatch an approved plan's ready agent tickets and wait for them")
     sub.add_argument("plan")
@@ -2842,6 +2871,8 @@ def main(argv=None):
                 "context": "unknown; supply current child runtime telemetry"}
     if args.command == "context":
         return context_verdict(read_json(args.sample), args.reserve_tokens, args.max_age_seconds)
+    if args.command == "evidence":
+        return rebuild_evidence(args)
     if args.command == "metrics":
         if args.plan:
             return rebuild_metrics(args)
