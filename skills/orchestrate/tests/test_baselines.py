@@ -1,0 +1,139 @@
+"""The baseline regressions: an end-to-end dispatch -> edit -> verification -> completion run, and the budget that
+stops a run that stalls.
+
+S0: WHEN a known orchestration failure is reproduced on an isolated fixture, THEN the test fails before the repair
+and passes afterwards under the same fixed acceptance criteria; only a deterministic validator marks the source
+revision verified. The failure reproduced here is the report timing one: the worker writes its report and its turn
+ends (`runtime state idle`) before the runtime delivers the completion message. The driver must not park the ticket
+as `ended without a report` and ask a human for a decision about a report it already has.
+
+S3: WHEN a test run stalls or exceeds a declared budget, THEN the benchmark terminates it and records a failure
+instead of running indefinitely.
+
+Everything runs on the offline fixture: the fake runtime and the fake `gh` answer in process, and the driver runs
+under `bench.run_budgeted`, so a stalled run is killed with its whole process group and leaves a record behind.
+"""
+
+import json
+from pathlib import Path
+import subprocess
+import sys
+import unittest
+
+from fixtures import SCRIPT
+import bench
+from test_gates import GateFixture
+
+
+ROOT = Path(__file__).resolve().parents[3]  # the repository under test: the source revision the run is pinned to
+PR = "https://github.com/o/r/pull/7"
+
+
+class BaselineTests(GateFixture, unittest.TestCase):
+    """One ticket, scripted worker and reviewer, the driver run under a budget."""
+
+    def revision(self):
+        """The source revision the run is pinned to: the commit the driver under test came from."""
+        result = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True)
+        return result.stdout.strip()
+
+    def commit(self):
+        """The wait-step commands that commit and push the worker's edit in its checkout."""
+        git = ["git", "-C", str(self.worktree), "-c", "user.name=T", "-c", "user.email=t@example.invalid"]
+        return [git + ["add", "."], git + ["commit", "-q", "-m", "work"],
+                ["git", "-C", str(self.worktree), "push", "-q", "origin", "HEAD:feat/demo-t1"]]
+
+    def worker_turn_ended(self, report=True, stall=None, complete=False, commit=True):
+        """A wait step: the worker edited its checkout and wrote its report, and its turn ended (`runtime state idle`)
+        without the runtime delivering the completion message yet.
+
+        With `complete` the runtime delivers the message in the same step: the worker that reports and says so in
+        one go is the flow that already works.
+        """
+        step = {"agents": ["demo-t1"], "runtime_state": "idle", "write": [], "run": []}
+        if complete:
+            step.pop("agents")
+            step["complete"] = ["demo-t1"]
+        if report:
+            step["write"].append([str(self.run_dir / "t1" / "report.json"), self.report("t1")])
+        step["write"].append([str(self.worktree / "src" / "a" / "x.py"), "def x():\n    return 1\n"])
+        step["write"].append([str(self.worktree / "src" / "a" / "test_a.py"), 'def test_a():\n    """S1"""\n'])
+        step["run"] = self.commit() if commit else []
+        if stall:
+            step["run"].append(stall)
+        return step
+
+    def worker_complete(self):
+        """A wait step: the runtime delivers the worker's completion message."""
+        return {"complete": ["demo-t1"], "runtime_state": "idle"}
+
+    def reviewer_complete(self):
+        """A wait step: the reviewer wrote its review and the runtime delivered the completion message."""
+        return {"complete": ["demo-t1-review"], "runtime_state": "idle",
+                "write": [[str(self.run_dir / "t1" / "review.json"), self.review()]]}
+
+    def drive(self, budget=25.0, label="", records=None):
+        """The driver run under a budget: a run that overruns it is terminated and recorded as a failure."""
+        argv = [sys.executable, "-B", str(SCRIPT), "run", str(self.plan), "--state-dir", str(self.state_dir),
+                "--models-file", str(self.models), "--wait-seconds", "1", "--idle-interval", "0.05"]
+        return bench.run_budgeted(argv, env=self.env(), cwd=str(self.root), budget_seconds=budget, label=label,
+                                  revision=self.revision(), records=records)
+
+    def request(self):
+        """The unit's open request, or None: the driver asked nobody anything."""
+        path = self.run_dir / "t1" / "request.json"
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+    def task(self):
+        return self.ledger()["tasks"].get("t1") or {}
+
+    def test_S0_a_report_that_landed_before_the_turn_ended_reaches_a_verified_terminal_state(self):
+        """P3.T1/S0: the report is on disk and the runtime says the turn ended; the ticket still gets verified."""
+        self.prs(["OPEN", "MERGED"])
+        self.waits([self.worker_turn_ended(), self.worker_complete(), self.reviewer_complete()])
+        record = self.drive(budget=15.0, label="S0-report-timing")
+        self.assertEqual(record["outcome"], "pass",
+                         "the run did not reach a verified terminal state: %s\n%s" % (record["reason"], record["stderr"]))
+        self.assertIsNone(self.request(), "the driver asked a human about a report it already had")
+        task = self.task()
+        self.assertEqual(task.get("status"), "COMPLETE", task)
+        self.assertEqual(task.get("gate"), "done", task)
+        self.assertIn("| COMPLETE ", self.plan.read_text(encoding="utf-8"))
+
+    def test_S0_a_restart_after_the_report_landed_still_finishes_the_ticket(self):
+        """P3.T1/S0: the driver died with the report on disk; the restart finishes the ticket, nobody is asked."""
+        self.prs(["OPEN", "MERGED"])
+        self.waits([self.worker_turn_ended(stall=["sleep", "60"])])
+        first = self.drive(budget=10.0, label="S0-restart-killed")
+        self.assertEqual(first["outcome"], "failure", "the stalled run should have overrun its budget")
+        self.waits([self.worker_turn_ended(commit=False), self.worker_complete(), self.reviewer_complete()])
+        second = self.drive(budget=15.0, label="S0-restart")
+        self.assertEqual(second["outcome"], "pass",
+                         "the restart did not reach a verified terminal state: %s\n%s" % (second["reason"], second["stderr"]))
+        self.assertIsNone(self.request(), "the driver asked a human about a report it already had")
+        self.assertEqual(self.task().get("status"), "COMPLETE", self.task())
+
+    def test_S3_a_run_that_stalls_is_terminated_and_recorded_as_a_failure(self):
+        """P3.T1/S3: the run exceeds its declared budget; the benchmark kills it and records the failure."""
+        records = self.root / "records.jsonl"
+        self.waits([self.worker_turn_ended(stall=["sleep", "120"])])
+        record = self.drive(budget=8.0, label="S3-stall", records=str(records))
+        self.assertEqual(record["outcome"], "failure", record)
+        self.assertIn("budget", record["reason"])
+        self.assertLess(record["elapsed_seconds"], 30.0, "the run was not terminated when its budget ran out")
+        self.assertEqual([r["label"] for r in bench.read_records(str(records))], ["S3-stall"])
+        self.assertEqual(bench.read_records(str(records))[0]["outcome"], "failure")
+
+    def test_S3_a_run_that_finishes_is_recorded_as_a_pass_with_its_revision(self):
+        """P3.T1/S3: the record says which revision ran, so only that revision can be called verified."""
+        records = self.root / "records.jsonl"
+        self.prs(["OPEN", "MERGED"])
+        self.waits([self.worker_turn_ended(complete=True), self.reviewer_complete()])
+        record = self.drive(budget=25.0, label="S3-pass", records=str(records))
+        self.assertEqual(record["outcome"], "pass", record["reason"])
+        self.assertEqual(record["revision"], self.revision())
+        self.assertEqual(bench.read_records(str(records))[0]["outcome"], "pass")
+
+
+if __name__ == "__main__":
+    unittest.main()
