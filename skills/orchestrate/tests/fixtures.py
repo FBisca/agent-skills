@@ -1,107 +1,43 @@
-"""Shared fixtures for the driver tests: a fake agent-runtime, a temp git repo with an origin, a temp plan."""
+"""Shared fixtures for the driver tests: a fake agent-runtime, a temp git repo with an origin, a temp plan.
 
-from contextlib import contextmanager
+The fakes are modules (`fake_runtime`, `fake_gh`, `fake_wait_checks`): the driver asks the runtime, `gh` and the CI
+gate through seams, so a test run answers them in process and starts no process per call. The fixture also puts thin
+wrappers for the same modules on PATH, for a driver run outside the tests.
+"""
+
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
+import io
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 from unittest import mock
+
+import fake_gh
+import fake_runtime
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "orchestrate.py"
+TESTS = Path(__file__).resolve().parent
+if str(TESTS) not in sys.path:
+    sys.path.insert(0, str(TESTS))  # the fakes are imported by name
+if str(SCRIPT.parent) not in sys.path:
+    sys.path.insert(0, str(SCRIPT.parent))  # the driver's own modules are imported by name
 
-FAKE_RUNTIME = '''#!/usr/bin/env python3
-"""Records every call; spawn answers a canned worker, wait pops the next scripted answer."""
-import json, os, subprocess, sys
-home = os.environ["FAKE_RUNTIME_HOME"]
-argv = sys.argv[1:]
-tool = argv[1]
-lead = argv[argv.index("--lead") + 1] if "--lead" in argv else None
-args = json.loads(argv[argv.index("--json") + 1]) if "--json" in argv else {}
-events_path = os.environ.get("FAKE_EVENTS", "")
-seen = open(events_path).read().splitlines() if events_path and os.path.exists(events_path) else []
-with open(os.path.join(home, "calls.jsonl"), "a") as log:
-    log.write(json.dumps({"tool": tool, "lead": lead, "args": args, "events": seen}) + "\\n")
-rows = [json.loads(line) for line in open(os.path.join(home, "calls.jsonl"))]
-nth = sum(1 for r in rows if r["tool"] == tool and r["args"].get("name") == args.get("name"))
-if tool == "spawn":
-    if args["name"] in json.load(open(os.path.join(home, "refuse.json"))):
-        print(json.dumps({"content": [{"type": "text", "text": "name_taken"}], "isError": True}))
-        sys.exit(1)
-    stopped_path = os.path.join(home, "stopped.json")  # a name the driver stopped is live again once it is spawned
-    stopped = json.load(open(stopped_path)) if os.path.exists(stopped_path) else []
-    if args["name"] in stopped:
-        states = json.load(open(os.path.join(home, "states.json")))
-        states.pop(args["name"], None)
-        json.dump(states, open(os.path.join(home, "states.json"), "w"))
-        json.dump([n for n in stopped if n != args["name"]], open(stopped_path, "w"))
-    print(json.dumps({"worker_id": "w-" + args["name"], "assignment_id": "a-%s%s" % (args["name"], "" if nth == 1 else "-%d" % nth),
-                      "name": args["name"], "address": "term-" + args["name"], "parent": "driver"}))
-elif tool == "wait":
-    queue_path = os.path.join(home, "waits.json")
-    queue = json.load(open(queue_path))
-    step = queue.pop(0) if queue else {}
-    json.dump(queue, open(queue_path, "w"))
-    for path, text in step.pop("write", []):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        if "@HEAD" in text:  # the sha the unit's checkout is at now, as a reviewer would read it
-            text = text.replace("@HEAD", subprocess.run(["git", "-C", os.environ["FAKE_CHECKOUT"], "rev-parse", "HEAD"],
-                                                        capture_output=True, text=True).stdout.strip())
-        open(path, "w").write(text)
-    for path, old, new in step.pop("replace", []):
-        text = open(path).read()
-        assert old in text, old
-        open(path, "w").write(text.replace(old, new, 1))
-    for argv in step.pop("run", []):
-        subprocess.run(argv, check=True, capture_output=True)
-    print(json.dumps(dict({"reason": "empty", "reports": [], "unfinished": []}, **step)))
-elif tool == "status":
-    states = json.load(open(os.path.join(home, "states.json")))
-    state = states.get(args["name"], "idle")
-    if state == "error":
-        sys.exit(1)
-    print(json.dumps({"name": args["name"], "state": state}))
-elif tool == "stop":
-    states = json.load(open(os.path.join(home, "states.json")))
-    states[args["name"]] = "exited"
-    json.dump(states, open(os.path.join(home, "states.json"), "w"))
-    stopped_path = os.path.join(home, "stopped.json")
-    stopped = json.load(open(stopped_path)) if os.path.exists(stopped_path) else []
-    json.dump(stopped + [args["name"]], open(stopped_path, "w"))
-    print(json.dumps({"name": args["name"], "state": "exited"}))
-elif tool == "resume":
-    print(json.dumps({"worker_id": "w-" + args["name"], "assignment_id": "r%d-%s" % (nth, args["name"]),
-                      "name": args["name"], "address": "term-" + args["name"], "parent": "driver"}))
-else:
-    print(json.dumps({}))
-'''
 
-FAKE_WAIT_CHECKS = '''#!/usr/bin/env python3
-"""Logs its argument; answers from checks.json: a list of [exit code, stdout], popped per call (last one repeats)."""
-import json, os, sys
-home = os.environ["FAKE_RUNTIME_HOME"]
-with open(os.path.join(home, "wait-checks.log"), "a") as log:
-    log.write(sys.argv[1] + "\\n")
-queue = json.load(open(os.path.join(home, "checks.json")))
-code, out = queue.pop(0) if len(queue) > 1 else queue[0]
-json.dump(queue, open(os.path.join(home, "checks.json"), "w"))
-print(out)
-sys.exit(code)
-'''
+def wrapper(module):
+    """The executable the fixture puts on PATH: a fake module run as a program."""
+    return ('#!/usr/bin/env python3\n'
+            '"""The fake %s: the module the tests answer in process, as a program."""\n'
+            'import sys\n'
+            'sys.path.insert(0, %r)\n'
+            'import %s\n'
+            'sys.exit(%s.main(sys.argv[1:]))\n' % (module, str(TESTS), module, module))
 
-FAKE_GH = '''#!/usr/bin/env python3
-"""`gh pr view`: logs the plan as it stands at each call, answers the next PR state from prs.json (last repeats)."""
-import json, os, sys
-home = os.environ["FAKE_RUNTIME_HOME"]
-with open(os.path.join(home, "gh.log"), "a") as log:
-    log.write(json.dumps({"argv": sys.argv[1:], "plan": open(os.environ["FAKE_PLAN"]).read()}) + "\\n")
-queue = json.load(open(os.path.join(home, "prs.json")))
-state = queue.pop(0) if len(queue) > 1 else queue[0]
-json.dump(queue, open(os.path.join(home, "prs.json"), "w"))
-print(json.dumps({"state": state, "mergeCommit": {"oid": "f" * 40} if state == "MERGED" else None}))
-'''
 
 HEADER = """# Plan: demo
 
@@ -210,6 +146,30 @@ def plan_text(rows=("T1", "T2", "T3", "T4", "T5"), status="APPROVED"):
     return HEADER.format(status=status) + "\n".join(ROWS[r] for r in rows) + "\n"
 
 
+TEMPLATE = None
+
+
+def template_repo():
+    """A bare origin and a repo with one commit, built once for the whole suite.
+
+    Every test copies it instead of running git seven times: the setup was a quarter of a test's time."""
+    global TEMPLATE
+    if TEMPLATE is None:
+        TEMPLATE = tempfile.TemporaryDirectory()
+        root = Path(TEMPLATE.name)
+        origin = root / "origin.git"
+        repo = root / "repo"
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True, capture_output=True)
+        subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "remote", "add", "origin", str(origin)], check=True, capture_output=True)
+        (repo / "README.md").write_text("fixture\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(repo), "add", "."], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "-c", "user.name=T", "-c", "user.email=t@example.invalid",
+                        "commit", "-q", "-m", "fixture"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "push", "-q", "origin", "main"], check=True, capture_output=True)
+    return Path(TEMPLATE.name)
+
+
 class RunFixture:
     """Mixin for TestCase classes: temp repo with an origin, a plan, a fake agent-runtime on PATH."""
 
@@ -219,13 +179,10 @@ class RunFixture:
         self.root = Path(self.temp.name).resolve()
         self.origin = self.root / "origin.git"
         self.repo = self.root / "repo"
-        self.git(self.root, "init", "-q", "--bare", "-b", "main", str(self.origin))
-        self.git(self.root, "init", "-q", "-b", "main", str(self.repo))
-        self.git(self.repo, "remote", "add", "origin", str(self.origin))
-        (self.repo / "README.md").write_text("fixture\n", encoding="utf-8")
-        self.git(self.repo, "add", ".")
-        self.git(self.repo, "-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "fixture")
-        self.git(self.repo, "push", "-q", "origin", "main")
+        template = template_repo()
+        shutil.copytree(template / "origin.git", self.origin)
+        shutil.copytree(template / "repo", self.repo)
+        self.git(self.repo, "remote", "set-url", "origin", str(self.origin))
         self.base = self.git(self.repo, "rev-parse", "HEAD")
         self.plan = self.repo / "docs" / "plans" / "demo.plan.md"
         self.plan.parent.mkdir(parents=True)
@@ -234,11 +191,11 @@ class RunFixture:
         self.home = self.root / "fake"
         self.home.mkdir()
         fake = self.home / "agent-runtime"
-        fake.write_text(FAKE_RUNTIME, encoding="utf-8")
+        fake.write_text(wrapper("fake_runtime"), encoding="utf-8")
         fake.chmod(0o755)
-        for name, body in (("wait-checks", FAKE_WAIT_CHECKS), ("gh", FAKE_GH)):
+        for name, module in (("wait-checks", "fake_wait_checks"), ("gh", "fake_gh")):
             tool = self.home / name
-            tool.write_text(body, encoding="utf-8")
+            tool.write_text(wrapper(module), encoding="utf-8")
             tool.chmod(0o755)
         self.checks([[0, "PASS o/r#7"]])
         self.prs(["MERGED"])
@@ -262,12 +219,32 @@ class RunFixture:
     def checks(self, answers):
         (self.home / "checks.json").write_text(json.dumps(answers), encoding="utf-8")
 
+    def pr_checks(self, answers):
+        """What `gh pr checks` answers on its next calls ([exit code, stdout, stderr]; the last repeats)."""
+        (self.home / "checks-pr.json").write_text(json.dumps(answers), encoding="utf-8")
+
     def prs(self, states):
         (self.home / "prs.json").write_text(json.dumps(states), encoding="utf-8")
+
+    def early(self, states):
+        """PR states `gh pr view` answers before and regardless of `gh pr ready` (a merge by hand)."""
+        (self.home / "view-early.json").write_text(json.dumps(states), encoding="utf-8")
+
+    def updates(self, answers):
+        """What `gh pr update-branch` answers: [exit code, stderr] per call (the last repeats)."""
+        (self.home / "update.json").write_text(json.dumps(answers), encoding="utf-8")
+
+    def born_ready(self):
+        """The worker opened the PR ready for review, not as a draft."""
+        (self.home / "ready.flag").write_text("1", encoding="utf-8")
 
     def gh_log(self):
         path = self.home / "gh.log"
         return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
+
+    def gh_calls(self, *prefix):
+        """The argv of every logged gh call that starts with `prefix`."""
+        return [c["argv"] for c in self.gh_log() if c["argv"][:len(prefix)] == list(prefix)]
 
     def wait_checks_log(self):
         path = self.home / "wait-checks.log"
@@ -286,9 +263,44 @@ class RunFixture:
 
     def env(self):
         return dict(os.environ, PATH=str(self.home) + os.pathsep + os.environ["PATH"],
+                    PYTHONPATH=str(TESTS) + os.pathsep + os.environ.get("PYTHONPATH", ""),
                     FAKE_RUNTIME_HOME=str(self.home), FAKE_PLAN=str(self.plan),
                     FAKE_CHECKOUT=str(self.root / "repo.worktrees" / "demo-t1"),
-                    FAKE_EVENTS=str(self.state_dir / "demo" / "events.jsonl"))
+                    FAKE_EVENTS=str(self.state_dir / "demo" / "events.jsonl"),
+                    ORCHESTRATE_WAIT_CHECKS="fake_wait_checks")
+
+    def runtime_process(self, argv, timeout=None):
+        """The fake runtime's answer, in process: a driver run starts no process per call."""
+        return fake_runtime.process(argv[1:], timeout=timeout)  # the fake reads the argv without the program name
+
+    def gh_process(self, argv, timeout=None):
+        """The fake `gh`'s answer, in process."""
+        return fake_gh.process(argv, timeout=timeout)
+
+    def in_process(self, spec, argv, timeout=60):
+        """The script run in this process, with the fakes answering in process.
+
+        The run happens in a thread so a driver that never ends fails the test instead of hanging the suite."""
+        out, err = io.StringIO(), io.StringIO()
+        codes, errors = [], []
+
+        def work():
+            try:
+                with mock.patch.dict(os.environ, self.env()), redirect_stdout(out), redirect_stderr(err), \
+                        mock.patch.object(spec, "runtime_process", self.runtime_process), \
+                        mock.patch.object(spec, "gh_process", self.gh_process):
+                    codes.append(spec.run_cli(argv))
+            except BaseException as error:  # the run's own failure belongs to the test that asked for it
+                errors.append(error)
+
+        thread = threading.Thread(target=work, daemon=True)
+        thread.start()
+        thread.join(timeout)
+        if errors:
+            raise errors[0]
+        if thread.is_alive():
+            raise AssertionError("the driver did not finish in %ss: a fake that never answers" % timeout)
+        return subprocess.CompletedProcess(argv, codes[0] if codes else 1, out.getvalue(), err.getvalue())
 
     def cli(self, *args, timeout=60):
         """A subcommand of the script run as the Lead would run it; the caller checks the exit code."""
@@ -312,11 +324,11 @@ class RunFixture:
         return [w["text"] for w in self.wakes() if kind in (None, w["kind"])]
 
     def run_driver(self, *extra, plan=None, expect=0):
-        env = self.env()
-        result = subprocess.run(
-            [sys.executable, "-B", str(SCRIPT), "run", str(plan or self.plan), "--state-dir", str(self.state_dir),
-             "--models-file", str(self.models), "--wait-seconds", "1", "--idle-interval", "0", *extra],
-            capture_output=True, text=True, env=env, timeout=60)
+        """The driver run in this process: the fakes answer in process, so the run starts no process of its own."""
+        spec = load_script()
+        argv = ["run", str(plan or self.plan), "--state-dir", str(self.state_dir),
+                "--models-file", str(self.models), "--wait-seconds", "1", "--idle-interval", "0", *extra]
+        result = self.in_process(spec, argv)
         self.assertEqual(result.returncode, expect, result.stderr)
         return result
 
