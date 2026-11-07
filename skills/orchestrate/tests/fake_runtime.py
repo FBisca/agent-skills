@@ -6,7 +6,13 @@ contract, two ways to reach it.
 
 The state lives in files under `FAKE_RUNTIME_HOME`, so a run can be scripted before it starts and read after it ends:
 `calls.jsonl` (every call), `waits.json` (the scripted wait steps), `states.json` (the agents' states), `refuse.json`
-(the names the runtime refuses to spawn) and `stopped.json` (the names the driver stopped).
+(the names the runtime refuses to spawn), `stopped.json` (the names the driver stopped) and `assignments.json` (the
+assignment ids each agent was given).
+
+A wait step may name the agents it reports for: `agents` lists the agents the runtime still holds open, `complete`
+lists the agents that finished their turn with a `complete` message, and `runtime_state` is the state the runtime
+observed for them (`idle` when the turn ended without a message). The ids come from the assignments the runtime gave
+out, so a step keeps naming the right agent after a resume.
 """
 
 import json
@@ -47,6 +53,21 @@ def write_json(path, value):
         json.dump(value, stream)
 
 
+def assignment_ids(home):
+    """The assignment ids each agent was given, oldest first: name -> [id, ...]."""
+    return read_json(os.path.join(home, "assignments.json"), {}) or {}
+
+
+def remember_assignment(home, name, assignment_id):
+    """The agent's assignment ids, for the wait steps that name it."""
+    ids = assignment_ids(home)
+    known = list(ids.get(name) or [])
+    if assignment_id not in known:
+        known.append(assignment_id)
+    ids[name] = known[-5:]
+    write_json(os.path.join(home, "assignments.json"), ids)
+
+
 def answer(name, assignment_id):
     """The agent's answer: its worker id, assignment id, name, address and parent."""
     return {"worker_id": "w-" + name, "assignment_id": assignment_id, "name": name,
@@ -75,7 +96,9 @@ def process(argv, timeout=None):
             states.pop(args["name"], None)
             write_json(os.path.join(home, "states.json"), states)
             write_json(stopped_path, [n for n in stopped if n != args["name"]])
-        return Completed(argv, 0, json.dumps(answer(args["name"], "a-%s%s" % (args["name"], "" if nth == 1 else "-%d" % nth))))
+        assignment = answer(args["name"], "a-%s%s" % (args["name"], "" if nth == 1 else "-%d" % nth))
+        remember_assignment(home, args["name"], assignment["assignment_id"])
+        return Completed(argv, 0, json.dumps(assignment))
     if tool == "wait":
         queue_path = os.path.join(home, "waits.json")
         queue = read_json(queue_path)
@@ -96,7 +119,7 @@ def process(argv, timeout=None):
                 stream.write(text.replace(old, new, 1))
         for command in step.pop("run", []):
             subprocess.run(command, check=True, capture_output=True)
-        return Completed(argv, 0, json.dumps(dict({"reason": "empty", "reports": [], "unfinished": []}, **step)))
+        return Completed(argv, 0, json.dumps(wait_answer(home, step)))
     if tool == "status":
         states = read_json(os.path.join(home, "states.json"))
         state = states.get(args["name"], "idle")
@@ -111,8 +134,45 @@ def process(argv, timeout=None):
         write_json(stopped_path, read_json(stopped_path) + [args["name"]])
         return Completed(argv, 0, json.dumps({"name": args["name"], "state": "exited"}))
     if tool == "resume":
-        return Completed(argv, 0, json.dumps(answer(args["name"], "r%d-%s" % (nth, args["name"]))))
+        assignment = answer(args["name"], "r%d-%s" % (nth, args["name"]))
+        remember_assignment(home, args["name"], assignment["assignment_id"])
+        return Completed(argv, 0, json.dumps(assignment))
     return Completed(argv, 0, json.dumps({}))
+
+
+def wait_answer(home, step):
+    """What one wait answers: the step's own fields, plus the agents it names.
+
+    `agents` lists the agents the runtime still holds open, `complete` the ones that finished their turn with a
+    `complete` message, and `runtime_state` the state the runtime observed for them (`idle` when the turn ended
+    without a message). The ids are the ones the runtime gave out, so a step keeps naming the right agent after a
+    resume.
+    """
+    result = dict({"reason": "empty", "reports": [], "unfinished": []}, **step)
+    runtime_state = result.pop("runtime_state", None)
+    complete = [name for name in result.pop("complete", []) or []]
+    agents = [name for name in result.pop("agents", []) or [] if name not in complete]
+    if not complete and not agents:
+        return result
+    known = assignment_ids(home)
+    entries = list(result.get("assignments") or [])
+    messages = list(result.get("messages") or [])
+    for name in agents + complete:
+        ids = list(known.get(name) or []) or ["a-" + name]
+        entry = {"assignment_id": ids[-1], "worker_id": "w-" + name, "state": "working", "name": name}
+        if runtime_state:
+            entry["runtime_state"] = runtime_state
+        if name in complete:
+            entry["state"] = "complete"
+            for assignment_id in ids:  # the message names every id the agent had: the driver keeps the one it knows
+                messages.append({"message_id": "m-fake-%s-%s" % (name, assignment_id), "team_id": "team",
+                                 "worker_id": "w-" + name, "assignment_id": assignment_id, "sender": "w-" + name,
+                                 "recipient": "lead", "kind": "complete", "text": "complete - see run directory"})
+        entries.append(entry)
+    result["assignments"] = entries
+    result["messages"] = messages
+    result["unfinished"] = [entry["assignment_id"] for entry in entries if entry["state"] != "complete"]
+    return result
 
 
 def main(argv):
