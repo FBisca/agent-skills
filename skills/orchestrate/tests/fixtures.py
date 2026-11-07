@@ -11,6 +11,8 @@ from unittest import mock
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "orchestrate.py"
+if str(SCRIPT.parent) not in sys.path:
+    sys.path.insert(0, str(SCRIPT.parent))  # the driver's own modules are imported by name
 
 FAKE_RUNTIME = '''#!/usr/bin/env python3
 """Records every call; spawn answers a canned worker, wait pops the next scripted answer."""
@@ -76,19 +78,6 @@ elif tool == "resume":
                       "name": args["name"], "address": "term-" + args["name"], "parent": "driver"}))
 else:
     print(json.dumps({}))
-'''
-
-FAKE_WAIT_CHECKS = '''#!/usr/bin/env python3
-"""Logs its argument; answers from checks.json: a list of [exit code, stdout], popped per call (last one repeats)."""
-import json, os, sys
-home = os.environ["FAKE_RUNTIME_HOME"]
-with open(os.path.join(home, "wait-checks.log"), "a") as log:
-    log.write(sys.argv[1] + "\\n")
-queue = json.load(open(os.path.join(home, "checks.json")))
-code, out = queue.pop(0) if len(queue) > 1 else queue[0]
-json.dump(queue, open(os.path.join(home, "checks.json"), "w"))
-print(out)
-sys.exit(code)
 '''
 
 FAKE_GH = '''#!/usr/bin/env python3
@@ -285,10 +274,11 @@ class RunFixture:
         fake = self.home / "agent-runtime"
         fake.write_text(FAKE_RUNTIME, encoding="utf-8")
         fake.chmod(0o755)
-        for name, body in (("wait-checks", FAKE_WAIT_CHECKS), ("gh", FAKE_GH)):
+        for name, body in (("gh", FAKE_GH),):
             tool = self.home / name
             tool.write_text(body, encoding="utf-8")
             tool.chmod(0o755)
+        self.mock_wait_checks_on_path()
         self.checks([[0, "PASS o/r#7"]])
         self.prs(["MERGED"])
         self.refuse([])
@@ -299,6 +289,18 @@ class RunFixture:
                           "| small | `model: \"haiku\"` | `gpt-s` |\n| medium | `model: \"sonnet\"` | `gpt-m` |\n"
                           "| large | `model: \"opus\"` | `gpt-l` |\n", encoding="utf-8")
         self.models = models
+
+    def mock_wait_checks_on_path(self):
+        """The mock CI gate as a program on PATH: the driver answers the wait with the mock module, but a driver run
+        outside the tests finds the same mock as an executable."""
+        tool = self.home / "wait-checks"
+        tool.write_text('''#!/usr/bin/env python3
+import sys
+sys.path.insert(0, %r)
+import fake_wait_checks
+sys.exit(fake_wait_checks.main(sys.argv[1:]))
+''' % str(Path(__file__).resolve().parent), encoding="utf-8")
+        tool.chmod(0o755)
 
     def git(self, cwd, *args):
         result = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True)
@@ -355,9 +357,11 @@ class RunFixture:
 
     def env(self):
         return dict(os.environ, PATH=str(self.home) + os.pathsep + os.environ["PATH"],
+                    PYTHONPATH=str(Path(__file__).resolve().parent) + os.pathsep + os.environ.get("PYTHONPATH", ""),
                     FAKE_RUNTIME_HOME=str(self.home), FAKE_PLAN=str(self.plan),
                     FAKE_CHECKOUT=str(self.root / "repo.worktrees" / "demo-t1"),
-                    FAKE_EVENTS=str(self.state_dir / "demo" / "events.jsonl"))
+                    FAKE_EVENTS=str(self.state_dir / "demo" / "events.jsonl"),
+                    ORCHESTRATE_WAIT_CHECKS="fake_wait_checks")
 
     def cli(self, *args, timeout=60):
         """A subcommand of the script run as the Lead would run it; the caller checks the exit code."""

@@ -7,6 +7,7 @@ import argparse
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import fcntl
+import importlib
 import json
 import math
 import os
@@ -535,6 +536,19 @@ def runtime_call(lead, tool, arguments, timeout=120):
         raise ValueError("agent-runtime %s failed (exit %d): %s"
                          % (tool, result.returncode, (result.stderr.strip() or result.stdout.strip())[:500]))
     return json.loads(result.stdout)
+
+
+def wait_checks(ref, timeout=600):
+    """The CI gate's wait for a pull request's checks.
+
+    The wait is a module (`wait_checks`), not a program: the driver imports it, so the tests answer it with a mock
+    module (`ORCHESTRATE_WAIT_CHECKS`) instead of starting a process per call."""
+    name = os.environ.get("ORCHESTRATE_WAIT_CHECKS") or "wait_checks"
+    try:
+        module = importlib.import_module(name)
+    except ImportError as error:
+        raise ValueError("no wait-checks module to answer the CI gate (%s): %s" % (name, error))
+    return module.wait(ref, timeout=timeout)
 
 
 def assignment_of(result):
@@ -1439,9 +1453,8 @@ class Driver:
             return self.request(task_id, "ci", str(error))
         waiting = (task.get("answers") or {}).get("state") in ("working", "reported")
         if not task.get("ci_green"):
-            try:
-                result = subprocess.run(["wait-checks", ref], capture_output=True, text=True, timeout=self.args.ci_seconds)
-            except subprocess.TimeoutExpired:
+            result = wait_checks(ref, timeout=self.args.ci_seconds)
+            if result.timed_out:
                 event("%s checks of %s still running; polling again" % (task_id, ref))
                 return False
             if result.returncode != 0:
