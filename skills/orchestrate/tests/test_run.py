@@ -1,10 +1,14 @@
 """The dispatch loop against a fake agent-runtime, a temp git repo with an origin, and a temp plan."""
 
+import pytest
 import json
 from pathlib import Path
 import unittest
 
 from fixtures import ROWS, RunFixture, assignment, load_script, plan_text, wait_result
+
+
+pytestmark = pytest.mark.integration
 
 
 class RunTests(RunFixture, unittest.TestCase):

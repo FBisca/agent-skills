@@ -1,10 +1,14 @@
 """An implementer or reviewer short of context is swapped for a fresh agent of the same class before a resume."""
 
+import pytest
 from datetime import datetime, timezone
 import unittest
 
 from fixtures import spawn_id
 from test_reuse import ReuseFixture
+
+
+pytestmark = pytest.mark.integration
 
 
 def sample(used, window=200000, model="opus"):

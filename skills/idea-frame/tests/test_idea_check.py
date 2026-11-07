@@ -1,5 +1,6 @@
 """idea_check.py (contract v2) against throwaway idea folders; scenario IDs name the tests."""
 
+import pytest
 import contextlib
 import hashlib
 import importlib.util
@@ -9,6 +10,9 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+
+
+pytestmark = pytest.mark.unit
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "idea_check.py"
 

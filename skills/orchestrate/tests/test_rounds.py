@@ -1,9 +1,13 @@
 """The driver counts a unit's failed gates itself; the cap is --max-fix-rounds, or a plan line per ticket."""
 
+import pytest
 import unittest
 
 from fixtures import plan_text
 from test_gates import GateFixture
+
+
+pytestmark = pytest.mark.integration
 
 
 class RoundCapTests(GateFixture, unittest.TestCase):

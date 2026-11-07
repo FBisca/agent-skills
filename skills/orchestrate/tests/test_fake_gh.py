@@ -1,5 +1,6 @@
 """The fake PR view fails instead of polling a draft forever."""
 
+import pytest
 import json
 import os
 from pathlib import Path
@@ -8,6 +9,9 @@ import unittest
 from unittest import mock
 
 import fake_gh
+
+
+pytestmark = pytest.mark.unit
 
 
 class FakeGhTests(unittest.TestCase):

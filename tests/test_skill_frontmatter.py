@@ -9,10 +9,14 @@ is loud, so the gate checks it here.
 runs it over the skills of this repo, and over a set of frontmatter that must be refused.
 """
 
+import pytest
 from pathlib import Path
 import importlib.util
 import sys
 import unittest
+
+
+pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILLS = ROOT / "skills"

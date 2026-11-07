@@ -115,7 +115,7 @@ pi --model minimax/MiniMax-M3.1-Flash
 
 # 4. the plan lands in docs/plans/YYYY-MM-DD-<slug>.plan.md with Status: AWAITING APPROVAL
 # 5. the contract holds
-python3 -m unittest discover -s tests -t tests -p "test_portability.py"
+uv run pytest tests/test_portability.py
 ```
 
 Step 3 also has to show the gather step running: the plan's Sources table and decisions come from the gatherer, not from the parent session.

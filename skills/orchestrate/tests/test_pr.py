@@ -1,11 +1,15 @@
 """The pull request and CI loop: a draft PR polled during review, `gh pr ready` after the last pass, checks and merge
 polled without blocking, slots freed while a PR waits for merge, branch updates and conflicts, early merges, idle ticks."""
 
+import pytest
 import json
 import unittest
 
 from fixtures import assignment, plan_text, report_wait, spawn_id, wait_result, resume_id
 from test_gates import GateFixture, MAJOR
+
+
+pytestmark = pytest.mark.integration
 
 PR = "https://github.com/o/r/pull/7"
 PR9 = "https://github.com/o/r/pull/9"

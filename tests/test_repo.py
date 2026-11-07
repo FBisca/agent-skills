@@ -9,6 +9,8 @@ import sys
 import tempfile
 import unittest
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 SKILLS = ROOT / "skills"
 
@@ -51,6 +53,7 @@ def repo_files():
 
 
 class SkillMetadata(unittest.TestCase):
+    @pytest.mark.unit
     def test_every_skill_has_matching_name_and_description(self):
         dirs = sorted(p for p in SKILLS.iterdir() if p.is_dir())
         self.assertTrue(dirs)
@@ -60,18 +63,22 @@ class SkillMetadata(unittest.TestCase):
             self.assertEqual(meta.get("name"), d.name, f"{d.name}: name matches dir")
             self.assertTrue(meta.get("description"), f"{d.name}: description")
 
+    @pytest.mark.unit
     def test_no_skill_text_hardcodes_a_claude_skills_path(self):
         for path in SKILLS.rglob("SKILL.md"):
             self.assertNotIn("~/.claude/skills/", path.read_text(encoding="utf-8"), str(path))
 
+    @pytest.mark.unit
     def test_derived_and_copied_skills_carry_a_notice(self):
         for name in ("handoff", "zoom-out", "cold-read"):
             self.assertTrue((SKILLS / name / "NOTICE.md").is_file(), name)
         self.assertFalse((SKILLS / "frontend-design").exists())
 
+    @pytest.mark.unit
     def test_idea_frame_bundles_the_project_template(self):
         self.assertTrue((SKILLS / "idea-frame" / "templates" / "project.md").is_file())
 
+    @pytest.mark.integration
     def test_no_symlinks_or_absolute_user_paths(self):
         for path in repo_files():
             self.assertFalse(path.is_symlink(), f"symlink: {path}")
@@ -80,6 +87,7 @@ class SkillMetadata(unittest.TestCase):
 
 
 class UpstreamLock(unittest.TestCase):
+    @pytest.mark.unit
     def test_S7_public_skills_valid_and_dropped_upstreams_reinstallable(self):
         """S7: linked repo exposes every public skill; each dropped upstream reinstalls with the documented command."""
         public = {p.name for p in SKILLS.iterdir() if p.is_dir()}
@@ -103,6 +111,7 @@ class UpstreamLock(unittest.TestCase):
 
 
 class WorkflowDoc(unittest.TestCase):
+    @pytest.mark.unit
     def test_S7a_workflow_doc_exists_and_readme_links_to_it(self):
         """S7a: the repo carries the workflow doc and the README links to it."""
         doc = ROOT / "docs" / "workflow.md"
@@ -128,6 +137,7 @@ class VaultDir(unittest.TestCase):
             encoding="utf-8")
         return folder
 
+    @pytest.mark.integration
     def test_S8_idea_frame_fails_naming_vault_dir_when_unset_and_works_when_set(self):
         """S8: unset VAULT_DIR fails naming it; set, the script works (slug resolves under the vault)."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -142,6 +152,7 @@ class VaultDir(unittest.TestCase):
             self.assertNotEqual(missing.returncode, 0)
             self.assertIn("VAULT_DIR", missing.stdout + missing.stderr)
 
+    @pytest.mark.integration
     def test_S8_idea_answer_and_excalidraw_name_vault_dir(self):
         """S8: idea-answer and excalidraw read the vault from VAULT_DIR, never a hardcoded path."""
         for skill in ("idea-frame", "idea-answer", "excalidraw", "explain-video"):
@@ -162,6 +173,7 @@ class VaultDir(unittest.TestCase):
 
 
 class RemovedSkillsTest(unittest.TestCase):
+    @pytest.mark.unit
     def test_unused_skills_are_neither_carried_nor_locked(self):
         lock = json.loads((ROOT / "skills.lock.json").read_text(encoding="utf-8"))
         locked = {e["name"] for e in lock["skills"] + lock["vendored_unmodified"]}
@@ -169,6 +181,7 @@ class RemovedSkillsTest(unittest.TestCase):
             self.assertFalse((SKILLS / name).exists(), name)
             self.assertNotIn(name, locked, name)
 
+    @pytest.mark.integration
     def test_S15_gh_implement_from_issue_is_absent_from_skills_catalog_marketplace_and_tests(self):
         name = "gh-implement-" + "from-issue"  # built, so this file does not mention it either
         self.assertFalse((SKILLS / name).exists())

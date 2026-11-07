@@ -6,9 +6,13 @@ fails loudly; neither may be skipped.
 S3: the Claude Code and Codex paths are still there, unchanged in substance.
 """
 
+import pytest
 from pathlib import Path
 import re
 import unittest
+
+
+pytestmark = pytest.mark.unit
 
 SKILL = Path(__file__).resolve().parents[1] / "SKILL.md"
 TEXT = SKILL.read_text(encoding="utf-8")

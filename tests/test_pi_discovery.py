@@ -8,6 +8,7 @@ instead of failing silently in someone's terminal.
 Skipped when Pi or Node are not installed: the gate must run anywhere.
 """
 
+import pytest
 import json
 import os
 from pathlib import Path
@@ -15,6 +16,9 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+
+
+pytestmark = pytest.mark.integration
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "@earendil-works/pi-coding-agent"
