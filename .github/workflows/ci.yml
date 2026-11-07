@@ -22,6 +22,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Repo contracts and every skill's unittest suite
         run: scripts/run-tests.sh
+      - name: Every SKILL.md frontmatter is readable by every harness
+        run: python3 scripts/lint_skills.py
 
   shellcheck:
     runs-on: ubuntu-latest
