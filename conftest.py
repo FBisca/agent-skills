@@ -44,8 +44,10 @@ def pytest_collection_modifyitems(config, items):
             "every test must carry exactly one of the markers `unit` and `integration`:\n  "
             + "\n  ".join(sorted(unmarked))
         )
-    if config.invocation_params.args:
-        return  # the user chose the selection: `-m ...` or a file to run
+    if config.getoption("markexpr", None):
+        return  # an explicit marker expression wins: `-m unit`, `-m integration`
+    if any(not argument.startswith("-") for argument in config.invocation_params.args):
+        return  # a path, a node id or a marker expression was named: the caller picked the tests
     keep = [item for item in items if item.get_closest_marker("unit") is not None]
     if len(keep) == len(items):
         return
