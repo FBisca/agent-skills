@@ -129,7 +129,7 @@ def claim(data, packet):
     require(isinstance(packet, dict), "packet must be an object")
     for key in ("task_id", "worker", "plan", "objective", "checkout", "backend"):
         require(isinstance(packet.get(key), str) and packet[key].strip(), "missing " + key)
-    require(packet["backend"] in ("codex", "claude"), "backend must be codex or claude")
+    require(packet["backend"] in ("codex", "claude", "pi"), "backend must be codex, claude or pi")
     require(isinstance(packet.get("acceptance"), list) and packet["acceptance"], "acceptance is required")
     require(isinstance(packet.get("checks"), list), "checks must be a list")
     require(all(isinstance(c, str) and c.strip() for c in packet["checks"]), "invalid check command")
@@ -511,20 +511,65 @@ def set_status(plan_path, ticket_id, status):
             os.unlink(tmp_path)
 
 
-def class_models(path, backend):
-    """Resolve each class to a model from the 'Model classes' table of the instructions file."""
-    try:
-        text = Path(path).expanduser().read_text(encoding="utf-8")
-    except OSError as error:
-        raise PlanError("cannot read the Model classes table: %s" % error) from None
+MODEL_COLUMNS = {"claude": 1, "codex": 2, "pi": 3}
+SKILL_MODELS = Path(__file__).resolve().parents[1] / "references" / "models.md"
+
+
+def model_rows(path):
+    """The rows of the 'Model classes' table of `path`, with the index of every named column.
+
+    The header row names the columns (`| Class | Claude | Codex | Pi |`); a table without one keeps the
+    positional rule."""
+    text = Path(path).expanduser().read_text(encoding="utf-8")
     section = re.split(r"^## Model classes\s*$", text, maxsplit=1, flags=re.M)
-    models = {}
-    for line in (section[1].split("\n## ", 1)[0].splitlines() if len(section) > 1 else []):
+    body = section[1].split("\n## ", 1)[0] if len(section) > 1 else ""
+    rows, header = [], {}
+    for line in body.splitlines():
         cells = split_row(line)
-        if cells and len(cells) >= 3 and cells[0] in ROUTE["class"]:
-            value = cells[1 if backend == "claude" else 2].strip("`")
+        if not cells or len(cells) < 2:
+            continue
+        if set("".join(cells)) <= set("-: "):  # the separator row under the header
+            continue
+        if cells[0].lower() == "class":
+            header = {cell.lower(): index for index, cell in enumerate(cells)}
+            continue
+        rows.append(cells)
+    return header, rows
+
+
+def column_models(header, rows, backend):
+    """The class→model map one column holds. The column is read by its header name; a table without that
+    header keeps the positional rule, except for Pi: it falls back to the skill's own table."""
+    index = header.get(backend)
+    if index is None and (not header or backend != "pi"):
+        index = MODEL_COLUMNS.get(backend)
+    models = {}
+    if index is None:
+        return models
+    for cells in rows:
+        if cells[0] in ROUTE["class"] and len(cells) > index:
+            value = cells[index].strip("`")
             quoted = re.search(r'"([^"]+)"', value)
             models[cells[0]] = quoted.group(1) if quoted else value
+    return models
+
+
+def class_models(path, backend):
+    """Resolve each class to a model from the 'Model classes' table of the instructions file.
+
+    A Pi run whose file has no Pi column takes its models from the skill's own table."""
+    try:
+        header, rows = model_rows(path)
+    except OSError as error:
+        raise PlanError("cannot read the Model classes table: %s" % error) from None
+    models = column_models(header, rows, backend)
+    if backend == "pi":
+        try:
+            skill_header, skill_rows = model_rows(SKILL_MODELS)
+        except OSError as error:
+            raise PlanError("cannot read the skill's own Model classes table: %s" % error) from None
+        for klass, model in column_models(skill_header, skill_rows, "pi").items():
+            models.setdefault(klass, model)
     missing = [c for c in ROUTE["class"] if not models.get(c)]
     if missing:
         raise PlanError("%s lacks a %s model for class %s" % (path, backend, ", ".join(missing)))
@@ -725,6 +770,8 @@ class Driver:
         plan = self.last_plan = self.read_plan()
         self.slug = plan["slug"]
         self.models = class_models(self.args.models_file, self.args.cli)
+        self.brain_cli = getattr(self.args, "brain_cli", None)
+        self.brain_models = class_models(self.args.models_file, self.brain_cli) if self.brain_cli else self.models
         state_dir = Path(self.args.state_dir).expanduser()
         state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.ledger_path = state_dir / (self.slug + ".json")
@@ -1268,9 +1315,9 @@ class Driver:
             task_md.write_text(self.review_text(packet, review["path"], task.get("delta")), encoding="utf-8")
         _, assignment_id = self.ensure_agent(name, "reviewer", unit, {
             "kind": "worker", "name": name, "task": "Read %s and follow it." % task_md, "cwd": packet["checkout"],
-            "cli": self.args.cli, "model": self.models["large"], "effort": "high"})
+            "cli": self.gate_cli(), "model": self.gate_model("large"), "effort": "high"})
         self.mark(task_id, gate="reviewing", review=dict(review, assignment_id=assignment_id))
-        event("spawned %s (large, %s, high)" % (name, self.models["large"]))
+        event("spawned %s (%s, %s, high)" % (name, self.gate_label("large"), self.gate_model("large")))
 
     def review_text(self, packet, review_path, delta=None):
         checkout = Path(packet["checkout"])
@@ -1846,12 +1893,29 @@ class Driver:
         """The spawn arguments, plus the run's role and profile when the Lead named them.
 
         Without a named role the spawn carries none and the runtime's default role (the implementer) stands.
-        A named profile replaces the CLI family in the spawn: the runtime resolves it to its own CLI and env."""
+        A named profile replaces the CLI family in the spawn: the runtime resolves it to its own CLI and env.
+        A named brain backend wins over the profile for the gates that spawn on it."""
         agent = getattr(self.args, "agent", None)
         profile = getattr(self.args, "profile", None)
-        if profile:
+        brain = getattr(self, "brain_cli", None)
+        if profile and not (brain and spawn.get("cli") == brain):
             spawn = dict(spawn, cli=profile)
         return dict(spawn, agent=agent) if agent else spawn
+
+    def gate_cli(self):
+        """The backend the review gates spawn on: the brain backend when one was named, the worker backend
+        otherwise."""
+        return getattr(self, "brain_cli", None) or self.args.cli
+
+    def gate_model(self, klass):
+        """The model a review gate spawns on: the brain's medium model when a brain backend was named."""
+        if getattr(self, "brain_cli", None):
+            return self.brain_models["medium"]
+        return self.models[klass]
+
+    def gate_label(self, klass):
+        """The class a review gate runs on, for the event line."""
+        return "medium" if getattr(self, "brain_cli", None) else klass
 
     def ensure_agent(self, name, role, unit, spawn, fresh=False):
         """Put one agent under `name` and return (address, assignment_id).
@@ -2295,13 +2359,13 @@ class Driver:
         try:
             _, assignment_id = self.ensure_agent(name, "gaps", "gaps", {
                 "kind": "worker", "name": name, "task": "Read %s and follow it." % task_md, "cwd": str(self.repo),
-                "cli": self.args.cli, "model": self.models["medium"], "effort": "medium"})
+                "cli": self.gate_cli(), "model": self.gate_model("medium"), "effort": "medium"})
         except (ValueError, OSError, subprocess.TimeoutExpired) as error:
             event("gaps reviewer not started: %s" % error)
             gaps = {"name": name, "path": str(path), "ended": True, "error": str(error)}
         else:
             gaps = {"name": name, "path": str(path), "assignment_id": assignment_id, "ended": False}
-            event("spawned %s (medium, %s, medium)" % (name, self.models["medium"]))
+            event("spawned %s (%s, %s, medium)" % (name, self.gate_label("medium"), self.gate_model("medium")))
         with self.book() as data:
             data["gaps"] = gaps
 
@@ -2688,7 +2752,10 @@ def main(argv=None):
                           "`Max fix rounds: T3=3` sets it for one ticket")
     sub.add_argument("--context-reserve", type=int, default=40000,
                      help="Tokens an implementer or reviewer must have left before a resume; below it the driver swaps in a fresh agent")
-    sub.add_argument("--cli", choices=("claude", "codex"), default="claude")
+    sub.add_argument("--cli", choices=("claude", "codex", "pi"), default="claude")
+    sub.add_argument("--brain-cli", choices=("claude", "codex", "pi"),
+                     help="The backend the review gates (the reviewer and the gaps reviewer) spawn on, with its "
+                          "medium model; the implementer and the archive worker stay on --cli")
     sub.add_argument("--agent", help="Role every worker runs under; 'none' runs them without one. "
                                      "Default: the runtime's own role")
     sub.add_argument("--profile", help="Profile every worker runs under, as the runtime knows it "
