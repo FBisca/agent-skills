@@ -137,6 +137,29 @@ class BaselineTests(GateFixture, unittest.TestCase):
         self.assertEqual(record["outcome"], "pass", record["reason"])
         self.assertEqual(record["revision"], self.revision())
         self.assertEqual(bench.read_records(str(records))[0]["outcome"], "pass")
+        self.assertIsNotNone(bench.verify(str(records), self.revision()), "a passing run verifies its revision")
+
+
+    def test_S0_only_the_validator_marks_a_source_revision_verified(self):
+        """P3.T1/S0: a revision is verified only when every run of it passed."""
+        records = self.root / "records.jsonl"
+        manifest_path = self.root / "verified.json"
+        passing = {"label": "S3-pass", "revision": "abc1234", "outcome": "pass", "argv": ["true"],
+                   "elapsed_seconds": 0.1}
+        failing = {"label": "S3-stall", "revision": "abc1234", "outcome": "failure", "argv": ["false"],
+                   "elapsed_seconds": 8.0}
+        with open(records, "w", encoding="utf-8") as stream:
+            stream.write(json.dumps(passing) + "\n")
+        self.assertIsNotNone(bench.verify(str(records), "abc1234"))
+        with open(records, "a", encoding="utf-8") as stream:
+            stream.write(json.dumps(failing) + "\n")
+        self.assertIsNone(bench.verify(str(records), "abc1234"), "a failed run leaves the revision unverified")
+        self.assertFalse(manifest_path.exists())
+        with open(records, "w", encoding="utf-8") as stream:
+            stream.write(json.dumps(passing) + "\n")
+        manifest = bench.verify(str(records), "abc1234", out_path=str(manifest_path))
+        self.assertEqual((manifest["revision"], manifest["verified"]), ("abc1234", True))
+        self.assertEqual(json.loads(manifest_path.read_text(encoding="utf-8"))["revision"], "abc1234")
 
 
 if __name__ == "__main__":
