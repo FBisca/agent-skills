@@ -64,8 +64,9 @@ class BaselineTests(GateFixture, unittest.TestCase):
         return step
 
     def worker_complete(self):
-        """A wait step: the runtime delivers the worker's completion message."""
-        return {"complete": ["demo-t1"], "runtime_state": "idle"}
+        """A wait step: the runtime delivers the worker's completion message. The reviewer is already running, so
+        the runtime still holds it open: the driver must not read the run as over."""
+        return {"complete": ["demo-t1"], "agents": ["demo-t1-review"]}
 
     def reviewer_complete(self):
         """A wait step: the reviewer wrote its review and the runtime delivered the completion message."""
@@ -138,7 +139,6 @@ class BaselineTests(GateFixture, unittest.TestCase):
         self.assertEqual(record["revision"], self.revision())
         self.assertEqual(bench.read_records(str(records))[0]["outcome"], "pass")
         self.assertIsNotNone(bench.verify(str(records), self.revision()), "a passing run verifies its revision")
-
 
     def test_S0_only_the_validator_marks_a_source_revision_verified(self):
         """P3.T1/S0: a revision is verified only when every run of it passed."""
