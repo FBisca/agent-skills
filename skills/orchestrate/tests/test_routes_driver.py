@@ -63,6 +63,27 @@ class RouteDriverTests(RunFixture, unittest.TestCase):
         result = self.run_driver()
         self.assertIn("legacy routing config", result.stderr)
 
+    def test_S1_a_legacy_run_with_a_brain_backend_the_table_lacks_fails(self):
+        """P4/S1: the legacy path stays strict: a class the table does not name is an error, not a fallback."""
+        self.models.write_text("## Model classes\n\n| Class | Claude |\n|---|---|\n"
+                               "| small | `model: \"haiku\"` |\n| medium | `model: \"sonnet\"` |\n"
+                               "| large | `model: \"opus\"` |\n", encoding="utf-8")
+        result = self.run_driver("--brain-cli", "codex", expect=2)
+        self.assertIn("lacks a codex model for class", result.stderr)
+        self.assertEqual(self.calls("spawn"), [])
+
+    def test_S1_a_typed_route_config_answers_a_brain_backend_the_table_lacks(self):
+        """P4/S1: with a route config the brain model comes from the config, not from the legacy table."""
+        self.models.write_text("## Model classes\n\n| Class | Claude |\n|---|---|\n"
+                               "| small | `model: \"haiku\"` |\n| medium | `model: \"sonnet\"` |\n"
+                               "| large | `model: \"opus\"` |\n", encoding="utf-8")
+        path = self.routes_file(config(route(klass="small", backend="claude", model="haiku"),
+                                       route(klass="medium", backend="codex", model="gpt-m"),
+                                       route(klass="large", backend="claude", model="opus")))
+        self.run_driver("--brain-cli", "codex", "--routes-file", path)
+        worker = {call["args"]["name"]: call["args"] for call in self.calls("spawn")}["demo-t1"]
+        self.assertEqual((worker["cli"], worker["model"]), ("claude", "haiku"))
+
 
 if __name__ == "__main__":
     unittest.main()

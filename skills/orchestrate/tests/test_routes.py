@@ -98,4 +98,32 @@ class RouteSchemaTests(unittest.TestCase):
         legacy = routes.legacy("claude", {"small": "haiku"})
         self.assertIsNone(legacy["small"].effort)
 
+    def driver_with(self, config_data, brain_cli):
+        """A driver that answered the routes, without running anything."""
+        driver = object.__new__(orchestrate.Driver)
+        driver.brain_cli = brain_cli
+        driver.routes_file = "routes.json"
+        driver.routes = routes.resolve(routes.validate(config_data), "claude", {})
+        driver.brain_models = {}
+        driver.args = type("Args", (), {"models_file": "CLAUDE.md"})()
+        return driver
+
+    def test_S3_a_typed_route_config_supplies_the_brain_model(self):
+        """P4/S3: with a route config the brain backend's model comes from the config."""
+        config_data = config(route(klass="small", backend="claude", model="haiku"),
+                              route(klass="medium", backend="codex", model="gpt-m"),
+                              route(klass="large", backend="claude", model="opus"))
+        driver = self.driver_with(config_data, "codex")
+        self.assertEqual(driver.gate_model("large"), "gpt-m")
+
+    def test_S3_a_route_config_without_a_brain_route_fails_closed(self):
+        """P4/S3: a config that names no route on the brain backend is an error, not another backend's model."""
+        config_data = config(route(klass="small", backend="claude", model="haiku"),
+                              route(klass="medium", backend="claude", model="sonnet"),
+                              route(klass="large", backend="claude", model="opus"))
+        driver = self.driver_with(config_data, "codex")
+        with self.assertRaises(orchestrate.PlanError) as caught:
+            driver.gate_model("large")
+        self.assertIn("codex", str(caught.exception))
+
 
