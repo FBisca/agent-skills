@@ -20,13 +20,18 @@ class RunTests(RunFixture, unittest.TestCase):
         for spawn in spawns:
             self.assertEqual(spawn["args"]["agent"], "none")
 
-    def test_default_run_names_no_role(self):
-        """Without a named role, no spawn names one: the runtime's default role stands."""
+    def test_default_run_names_implementer_only_for_workers(self):
+        """Implementation workers select their role; review gates stay roleless."""
         self.run_driver()
         spawns = self.calls("spawn")
         self.assertTrue(spawns)
-        for spawn in spawns:
-            self.assertNotIn("agent", spawn["args"])
+        workers = [s["args"] for s in spawns if not s["args"]["name"].endswith(("-review", "-gaps"))]
+        reviewers = [s["args"] for s in spawns if s["args"]["name"].endswith(("-review", "-gaps"))]
+        self.assertTrue(workers)
+        for spawn in workers:
+            self.assertEqual(spawn.get("agent"), "implementer")
+        for spawn in reviewers:
+            self.assertNotIn("agent", spawn)
 
     def test_named_profile_reaches_every_spawn(self):
         """The profile the run names reaches every worker it spawns."""

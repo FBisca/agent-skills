@@ -1912,13 +1912,13 @@ class Driver:
             known = (data.get("agents") or {}).get(name)
         return bool(known) and known.get("assignment_id") is None
 
-    def spawn_args(self, spawn):
+    def spawn_args(self, spawn, role):
         """The spawn arguments, plus the run's role and profile when the Lead named them.
 
-        Without a named role the spawn carries none and the runtime's default role (the implementer) stands.
+        Without a named role, implementation workers explicitly select implementer; review gates use no role.
         A named profile replaces the CLI family in the spawn: the runtime resolves it to its own CLI and env.
         A named brain backend wins over the profile for the gates that spawn on it."""
-        agent = getattr(self.args, "agent", None)
+        agent = getattr(self.args, "agent", None) or ("implementer" if role == "worker" else None)
         profile = getattr(self.args, "profile", None)
         brain = getattr(self, "brain_cli", None)
         if profile and not (brain and spawn.get("cli") == brain):
@@ -1991,7 +1991,7 @@ class Driver:
             if live:
                 result, how = runtime_call(self.lead, "resume", {"name": name, "task": spawn["task"]}), "attach"
             else:
-                result, how = runtime_call(self.lead, "spawn", self.spawn_args(spawn)), "spawn"
+                result, how = runtime_call(self.lead, "spawn", self.spawn_args(spawn, role)), "spawn"
         except subprocess.TimeoutExpired:
             raise  # it may have started: the open intent stays, and a restart looks the name up
         except (ValueError, OSError):
@@ -2874,7 +2874,7 @@ def main(argv=None):
                      help="The backend the review gates (the reviewer and the gaps reviewer) spawn on, with its "
                           "medium model; the implementer and the archive worker stay on --cli")
     sub.add_argument("--agent", help="Role every worker runs under; 'none' runs them without one. "
-                                     "Default: the runtime's own role")
+                                     "Default: implementer for implementation workers, no role for review gates")
     sub.add_argument("--profile", help="Profile every worker runs under, as the runtime knows it "
                                        "(a configured profile such as 'minimax'); it replaces the CLI family "
                                        "in the spawn. Default: the CLI family alone")
