@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import contracts  # noqa: E402
 import evidence  # noqa: E402
 import events  # noqa: E402
+import routes  # noqa: E402
 
 
 def now():
@@ -555,13 +556,17 @@ def column_models(header, rows, backend):
     return models
 
 
-def class_models(path, backend):
+def class_models(path, backend, required=True):
     """Resolve each class to a model from the 'Model classes' table of the instructions file.
 
-    A Pi run whose file has no Pi column takes its models from the skill's own table."""
+    A Pi run whose file has no Pi column takes its models from the skill's own table. With `required` false a
+    class the table does not name is left out instead of being an error: a typed route config may answer it,
+    and a table that cannot be read at all is simply no table."""
     try:
         header, rows = model_rows(path)
     except OSError as error:
+        if not required:
+            return {}
         raise PlanError("cannot read the Model classes table: %s" % error) from None
     models = column_models(header, rows, backend)
     if backend == "pi":
@@ -572,7 +577,7 @@ def class_models(path, backend):
         for klass, model in column_models(skill_header, skill_rows, "pi").items():
             models.setdefault(klass, model)
     missing = [c for c in ROUTE["class"] if not models.get(c)]
-    if missing:
+    if missing and required:
         raise PlanError("%s lacks a %s model for class %s" % (path, backend, ", ".join(missing)))
     return models
 
@@ -770,9 +775,17 @@ class Driver:
     def start(self):
         plan = self.last_plan = self.read_plan()
         self.slug = plan["slug"]
-        self.models = class_models(self.args.models_file, self.args.cli)
+        self.routes_file = getattr(self.args, "routes_file", None)
         self.brain_cli = getattr(self.args, "brain_cli", None)
-        self.brain_models = class_models(self.args.models_file, self.brain_cli) if self.brain_cli else self.models
+        # The legacy path stays strict: a class the table does not name is an error, never a fall back. A typed
+        # route config is self-sufficient: the legacy table is a fallback, not a prerequisite, so it is not read.
+        if self.routes_file:
+            self.models, self.brain_models = {}, {}
+        else:
+            self.models = class_models(self.args.models_file, self.args.cli, required=True)
+            self.brain_models = (class_models(self.args.models_file, self.brain_cli, required=True)
+                                 if self.brain_cli else self.models)
+        self.routes = self.load_routes()
         state_dir = Path(self.args.state_dir).expanduser()
         state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.ledger_path = state_dir / (self.slug + ".json")
@@ -1913,11 +1926,32 @@ class Driver:
         otherwise."""
         return getattr(self, "brain_cli", None) or self.args.cli
 
+    def load_routes(self):
+        """The class -> route map this run uses: the typed route config when one was named, the legacy
+        'Model classes' table otherwise. An invalid route config stops the run here, before any worker."""
+        path = self.routes_file
+        if not path:
+            event(routes.legacy_warning(self.args.models_file))
+            return routes.legacy(self.args.cli, self.models)
+        try:
+            return routes.resolve(routes.load(path), self.args.cli, self.models)
+        except routes.RouteError as error:
+            raise PlanError("invalid route config %s: %s" % (path, error)) from None
+
     def gate_model(self, klass):
-        """The model a review gate spawns on: the brain's medium model when a brain backend was named."""
-        if getattr(self, "brain_cli", None):
-            return self.brain_models["medium"]
-        return self.models[klass]
+        """The model a review gate spawns on: the brain's medium model when a brain backend was named.
+
+        The legacy path reads the brain backend's own column and fails when the table has none. A typed route
+        config answers the brain model instead: its medium class must run on the brain backend."""
+        brain = getattr(self, "brain_cli", None)
+        if not brain:
+            return self.routes[klass].model
+        if self.routes_file:
+            route = self.routes.get("medium")
+            if route is None or route.backend != brain:
+                raise PlanError("the route config has no medium route on the brain backend '%s'" % brain)
+            return route.model
+        return self.brain_models["medium"]
 
     def gate_label(self, klass):
         """The class a review gate runs on, for the event line."""
@@ -2108,7 +2142,7 @@ class Driver:
         classes, efforts = ROUTE["class"], ROUTE["effort"]
         at = classes.index(packet["class"])
         if at + 1 < len(classes):
-            return {"class": classes[at + 1], "model": self.models[classes[at + 1]]}
+            return {"class": classes[at + 1], "model": self.routes[classes[at + 1]].model}
         return {"effort": efforts[min(efforts.index(packet["effort"]) + 1, len(efforts) - 1)]}
 
     def step_decided(self, task_id):
@@ -2320,7 +2354,7 @@ class Driver:
                   "objective": "Archive the plan into the living spec", "checkout": str(checkout), "backend": self.args.cli,
                   "owns": owns, "acceptance": ARCHIVE_ACCEPTANCE, "checks": list(self.args.gate), "depends_on": [],
                   "unit": ARCHIVE, "size": "small", "difficulty": "simple", "class": klass, "effort": effort,
-                  "model": self.models[klass]}
+                  "model": self.routes[klass].model}
         with self.book() as data:
             claim(data, packet)
         task_dir = self.run_dir / ARCHIVE
@@ -2522,14 +2556,16 @@ class Driver:
         task_id = task_id or "t" + number
         size, difficulty = ticket["Size"].strip(), ticket["Difficulty"].strip()
         klass, effort = MATRIX[(size, difficulty)]
+        route = self.routes[klass]
+        effort = route.effort or effort
         checkout = self.worktree(name, "feat/" + name)
         scenarios = [plan["scenarios"][sid] for sid in satisfied(ticket, plan["scenarios"])[0]]
         packet = {"task_id": task_id, "worker": name, "plan": str(self.plan_path), "objective": ticket["What it delivers"],
-                  "checkout": str(checkout), "backend": self.args.cli,
+                  "checkout": str(checkout), "backend": route.backend,
                   "owns": [p.strip() for p in ticket["Paths"].split(",") if p.strip()],
                   "acceptance": [re.sub(r"^- \*\*(S\d+[a-z]?)\*\*", r"\1:", s) for s in scenarios],
                   "checks": list(self.args.gate), "depends_on": [], "unit": "t" + number, "size": size,
-                  "difficulty": difficulty, "class": klass, "effort": effort, "model": self.models[klass]}
+                  "difficulty": difficulty, "class": klass, "effort": effort, "model": route.model}
         with self.book() as data:
             claim(data, packet)
         task_dir = self.run_dir / task_id
@@ -2539,7 +2575,7 @@ class Driver:
             task_md.write_text(self.task_text(plan, ticket, packet, scenarios, task_dir), encoding="utf-8")
         runtime_id, assignment_id = self.ensure_agent(name, "worker", packet["unit"], {
             "kind": "worker", "name": name, "task": "Read %s and follow it." % task_md, "cwd": str(checkout),
-            "cli": self.args.cli, "model": packet["model"], "effort": effort})
+            "cli": route.backend, "model": packet["model"], "effort": effort})
         with self.book() as data:
             bind(data, task_id, str(runtime_id))
             data["tasks"][task_id]["assignment_id"] = assignment_id
@@ -2832,6 +2868,8 @@ def main(argv=None):
     sub.add_argument("--gate", action="append", default=[], help="CI command a worker must pass (repeatable)")
     sub.add_argument("--state-dir", default="~/.local/state/orchestrate", help="Holds <slug>.json and the <slug>/ run directory")
     sub.add_argument("--models-file", default="~/.claude/CLAUDE.md", help="File holding the 'Model classes' table")
+    sub.add_argument("--routes-file", help="Typed route config (JSON, or YAML with PyYAML): what each model class "
+                                          "runs on. Without it the legacy 'Model classes' table answers")
     sub.add_argument("--converge", default=str(CONVERGE), help="converge.py used to gate each report")
     sub.add_argument("--wait-seconds", type=int, default=60, help="Longest one wait blocks before the plan is re-read")
     sub.add_argument("--idle-interval", type=float, default=30, help="Seconds to sleep after an iteration that made no progress")
