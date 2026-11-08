@@ -34,7 +34,34 @@ Calibration, 2026-11-06:
 
 ## Class to model
 
-The driver parses the "Model classes" table in `~/.claude/CLAUDE.md` (`--models-file`) and passes the cell's effort as `effort`. A class missing from the table is an error, not a fallback. The model is chosen at spawn, the cache boundary, so a fix round for a live worker keeps its model; a dead pane gets a fresh worker in the same cell.
+The driver resolves each class to a model, a backend and (optionally) an effort. Two configs answer that, and
+the typed one wins when it is named:
+
+- **The typed route config** (`--routes-file`): a versioned document (JSON, or YAML when PyYAML is installed)
+  that names, per model class, the backend, the model and the effort. The schema lives in
+  `scripts/routes.py` and is strict: an unknown backend, an unknown class, an unknown field, an unknown effort
+  or a class the config leaves out is an error, and the run stops **before any worker is spawned** — it never
+  falls back to another billable model.
+
+  ```json
+  {"version": 1,
+   "routes": [
+     {"class": "small",  "backend": "claude", "model": "haiku",  "effort": "low"},
+     {"class": "medium", "backend": "claude", "model": "sonnet", "effort": "medium"},
+     {"class": "large",  "backend": "codex",  "model": "gpt-l",   "effort": "high"}
+   ]}
+  ```
+
+  The backends a worker may run on are `claude` and `codex`. `pi` is **lead-only** until worker launch is
+  enabled: a route on `pi` is refused with that explanation, and neither Claude nor Codex launches in its
+  place.
+
+- **The legacy config** (the default): the "Model classes" table in `~/.claude/CLAUDE.md` (`--models-file`).
+  A run with no `--routes-file` resolves the classes exactly as it did before; the run says so, because the
+  legacy table is deprecated and will be phased out. The effort still comes from the size/difficulty matrix.
+
+The model is chosen at spawn, the cache boundary, so a fix round for a live worker keeps its model; a dead pane
+gets a fresh worker in the same cell.
 
 ## Escalation
 
