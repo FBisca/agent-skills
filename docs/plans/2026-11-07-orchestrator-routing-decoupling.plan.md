@@ -60,7 +60,7 @@ The Python driver currently resolves model classes from a Markdown table in `~/.
 | # | What it delivers | Satisfies | Blocked by | Paths | Size | Difficulty | Owner | Status |
 |---|---|---|---|---|---|---|---|---|
 | T1 | Add typed route schema/validation and legacy `CLAUDE.md` compatibility with focused tests. | S1, S3 | none | `skills/orchestrate/scripts/`, `skills/orchestrate/tests/`, `skills/orchestrate/references/routing.md` | regular | complex | agent | COMPLETE 2026-11-08 (PR #48, squash bdb2b35) |
-| T2 | Add config-driven backend/model/effort selection, route ledger fields and end-to-end regression fakes. | S2, S3, S4 | T1 | `skills/orchestrate/scripts/`, `skills/orchestrate/tests/` | regular | complex | agent | TO-DO |
+| T2 | Add config-driven backend/model/effort selection, route ledger fields and end-to-end regression fakes. | S2, S3, S4 | T1 | `skills/orchestrate/scripts/`, `skills/orchestrate/tests/` | regular | complex | agent | COMPLETE 2026-11-08 (PR #50, squash 285bd4e) |
 | T3 | Approve fail-closed routing compatibility without changing the existing size/class matrix; defer outcome-driven model-route tuning to P5. | S1, S2, S4 | T2 | `docs/`, `skills/orchestrate/references/routing.md` |  |  | user | TO-DO |
 
 **Dependency:** P3 T2 repaired vertical slice; no comparative benchmark is required for a safe typed configuration. Keep current class choices until P5 produces evidence for tuning.
