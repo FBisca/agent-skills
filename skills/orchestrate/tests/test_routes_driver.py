@@ -84,6 +84,17 @@ class RouteDriverTests(RunFixture, unittest.TestCase):
         worker = {call["args"]["name"]: call["args"] for call in self.calls("spawn")}["demo-t1"]
         self.assertEqual((worker["cli"], worker["model"]), ("claude", "haiku"))
 
+    def test_S3_a_typed_route_config_answers_the_run_without_the_legacy_table(self):
+        """P4/S3: the route config is self-sufficient; the legacy table is a fallback, not a prerequisite."""
+        self.models.unlink()
+        path = self.routes_file(config(route(klass="small", backend="claude", model="haiku"),
+                                       route(klass="medium", backend="claude", model="sonnet"),
+                                       route(klass="large", backend="claude", model="opus")))
+        self.run_driver("--routes-file", path)
+        spawns = {call["args"]["name"]: call["args"] for call in self.calls("spawn")}
+        self.assertEqual((spawns["demo-t1"]["cli"], spawns["demo-t1"]["model"]), ("claude", "haiku"))
+        self.assertEqual((spawns["demo-t3"]["cli"], spawns["demo-t3"]["model"]), ("claude", "sonnet"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -98,6 +98,14 @@ class RouteSchemaTests(unittest.TestCase):
         legacy = routes.legacy("claude", {"small": "haiku"})
         self.assertIsNone(legacy["small"].effort)
 
+    def test_S3_an_unreadable_legacy_table_is_no_table_when_it_is_only_a_fallback(self):
+        """P4/S3: with a route config the legacy table is a fallback; a missing one is not an error."""
+        with tempfile.TemporaryDirectory() as temp:
+            missing = str(Path(temp) / "no-such-CLAUDE.md")
+            self.assertEqual(orchestrate.class_models(missing, "claude", required=False), {})
+            with self.assertRaises(orchestrate.PlanError):
+                orchestrate.class_models(missing, "claude")
+
     def driver_with(self, config_data, brain_cli):
         """A driver that answered the routes, without running anything."""
         driver = object.__new__(orchestrate.Driver)
