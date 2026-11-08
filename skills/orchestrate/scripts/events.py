@@ -5,7 +5,8 @@
 `rollup` is a pure function of the lines: `metrics.json` can always be rebuilt from the log. Stdlib only.
 
 Kinds the driver writes today: `start`, `import` (a run dir written by the previous version), `state` (a unit's gate or
-ledger status changed), `intent` and `agent` (an agent is about to be started / is bound), `stop`, `finding`,
+ledger status changed), `route` (the route a worker was dispatched on: `unit`, `task`, `class`, `backend`, `model`,
+`effort`, `effort_source`, `source`), `intent` and `agent` (an agent is about to be started / is bound), `stop`, `finding`,
 `round` (a failed gate), `escalation` (a unit raised a request for the Lead), `attention` (a unit paused), `decision`, `usage`,
 `idle` (a loop iteration that made no progress), `error`, `wake` (a line for the Lead was written to `wakes.jsonl`),
 `held`, `held-acted` and `held-dropped` (a worker message that arrived while its unit had an open request), `finish`

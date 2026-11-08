@@ -7,6 +7,10 @@ an unknown class is an error, never a silent fall back to another billable model
 
 The schema is a plain dict, so the file format stays a separate question: JSON is read here, YAML when
 PyYAML is installed. The rules below are the same either way.
+
+A run finds its config in the plan's order: the file it names, then the repository's own policy, then the user's
+default. A command line may override one class outright (`--route small=codex/gpt-s@high`); the override is
+validated like a config route and wins over every file. With no config at all the legacy table answers.
 """
 
 from dataclasses import dataclass
@@ -19,6 +23,9 @@ CLASSES = ("small", "medium", "large")
 BACKENDS = ("claude", "codex")  # the worker backends; pi is lead-only until worker launch is enabled
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 ROUTE_FIELDS = ("class", "backend", "model", "effort")
+CONFIG_SUFFIXES = (".json", ".yaml", ".yml")
+REPO_POLICY = ".orchestrate"  # the repository's own policy directory
+USER_POLICY = "~/.config/orchestrate"  # the user's default directory
 LEGACY_WARNING = ("legacy routing config in use: the 'Model classes' table of %s; it is deprecated and will be "
                   "phased out, pass --routes-file to name the typed route config")
 
@@ -133,6 +140,92 @@ def load(path):
         except ValueError as error:
             raise RouteError("the route config %s is not valid JSON: %s" % (file, error)) from None
     return validate(data)
+
+
+def config_files(directory):
+    """The route config files a directory holds, in the order they are read."""
+    if not directory:
+        return []
+    base = Path(directory).expanduser()
+    return [str(base / ("routes" + suffix)) for suffix in CONFIG_SUFFIXES]
+
+
+def user_config_dir():
+    """The user's default route config directory, or nothing when there is no home to look in."""
+    try:
+        return str(Path(USER_POLICY).expanduser())
+    except RuntimeError:
+        return None
+
+
+def find_config(explicit=None, repo=None, home=None):
+    """The route config a run uses, and where it came from.
+
+    The order is the plan's: the file the run names, then the repository's policy, then the user's default.
+    (None, None) means no config was found and the legacy 'Model classes' table answers."""
+    if explicit:
+        return str(explicit), "explicit"
+    for directory, source in ((repo and str(Path(repo) / REPO_POLICY), "repo"),
+                              (home, "user")):
+        for path in config_files(directory):
+            if Path(path).exists():
+                return path, source
+    return None, None
+
+
+def override(text):
+    """One explicit route override, read from the command line: `class=backend/model[@effort]`.
+
+    It is validated like a config route: an unknown class, an unknown backend or an unknown effort is an error,
+    never a fall back to another billable model."""
+    if not isinstance(text, str) or "=" not in text:
+        raise RouteError("a route override reads 'class=backend/model[@effort]', got %r" % (text,))
+    klass, _, rest = text.partition("=")
+    model_part, _, effort_part = rest.partition("@")
+    backend, slash, model = model_part.partition("/")
+    klass, backend, model = klass.strip(), backend.strip(), model.strip()
+    effort = effort_part.strip() or None
+    if not klass:
+        raise RouteError("the route override %r names no class" % text)
+    if klass not in CLASSES:
+        raise RouteError("the route override %r names the class '%s', which is not a model class (%s)"
+                         % (text, klass, ", ".join(CLASSES)))
+    if not slash or not model:
+        raise RouteError("the route override %r names no model; it reads 'class=backend/model[@effort]'" % text)
+    if backend == "pi":
+        raise RouteError("the route override %r names the backend 'pi', which cannot run a worker yet (pi is "
+                         "lead-only); the worker backends are %s" % (text, ", ".join(BACKENDS)))
+    if backend not in BACKENDS:
+        raise RouteError("the route override %r names the backend '%s', which is not a worker backend (%s)"
+                         % (text, backend, ", ".join(BACKENDS)))
+    if effort is not None and effort not in EFFORTS:
+        raise RouteError("the route override %r names the effort '%s', which is not an effort (%s)"
+                         % (text, effort, ", ".join(EFFORTS)))
+    return Route(klass=klass, backend=backend, model=model, effort=effort)
+
+
+def overrides(texts):
+    """The route overrides a command line names, each one validated."""
+    return [override(text) for text in texts or ()]
+
+
+def apply_overrides(resolved, chosen):
+    """The resolved routes with the explicit overrides on top: an override replaces the class it names."""
+    out = dict(resolved)
+    for route in chosen or ():
+        if route.klass not in out:
+            raise RouteError("the route override names the class '%s', which the run has no route for (%s)"
+                             % (route.klass, ", ".join(sorted(out)) or "none"))
+        out[route.klass] = route
+    return out
+
+
+def record(resolved, source, path=None):
+    """The route fields the ledger keeps: where the routes came from, and what each class runs on."""
+    return {"source": source, "path": str(path) if path else None,
+            "classes": {klass: {"class": route.klass, "backend": route.backend, "model": route.model,
+                                "effort": route.effort}
+                        for klass, route in sorted(resolved.items())}}
 
 
 def legacy(backend, models):
