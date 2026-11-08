@@ -775,10 +775,12 @@ class Driver:
     def start(self):
         plan = self.last_plan = self.read_plan()
         self.slug = plan["slug"]
-        self.routes_file = getattr(self.args, "routes_file", None)
         self.brain_cli = getattr(self.args, "brain_cli", None)
-        # The legacy path stays strict: a class the table does not name is an error, never a fall back. A typed
-        # route config is self-sufficient: the legacy table is a fallback, not a prerequisite, so it is not read.
+        # The route config this run uses, in the plan's order: the file the run names, then the repository's own
+        # policy, then the user's default. With one, the legacy table is a fallback, not a prerequisite, so it is
+        # not read; with none, the legacy table answers and says it is deprecated.
+        self.routes_file, self.route_source = routes.find_config(
+            explicit=getattr(self.args, "routes_file", None), repo=self.repo, home=routes.user_config_dir())
         if self.routes_file:
             self.models, self.brain_models = {}, {}
         else:
@@ -796,10 +798,12 @@ class Driver:
             contract.write_text(CONTRACT, encoding="utf-8")
         with ledger(self.ledger_path) as data:
             self.lead = data.setdefault("lead", "orchestrate:" + self.slug)
+            data["routes"] = routes.record(self.routes, self.route_source or "legacy", self.routes_file)
             legacy = legacy_imports(data) if not (self.run_dir / "events.jsonl").exists() else []
         for row in legacy:  # a run dir written before events.jsonl: its history enters the log once
             self.log("import", **row)
-        self.log("start", pid=os.getpid(), cli=self.args.cli, max_workers=self.args.max_workers)
+        self.log("start", pid=os.getpid(), cli=self.args.cli, max_workers=self.args.max_workers,
+                 route_source=self.route_source or "legacy")
 
     def loop(self):
         idle = False
@@ -1927,16 +1931,24 @@ class Driver:
         return getattr(self, "brain_cli", None) or self.args.cli
 
     def load_routes(self):
-        """The class -> route map this run uses: the typed route config when one was named, the legacy
-        'Model classes' table otherwise. An invalid route config stops the run here, before any worker."""
+        """The class -> route map this run uses: the typed route config when one was found, the legacy
+        'Model classes' table otherwise. An invalid route config stops the run here, before any worker.
+
+        The command line's own overrides sit on top of both: they replace the class they name."""
         path = self.routes_file
         if not path:
             event(routes.legacy_warning(self.args.models_file))
-            return routes.legacy(self.args.cli, self.models)
+            resolved = routes.legacy(self.args.cli, self.models)
+        else:
+            try:
+                resolved = routes.resolve(routes.load(path), self.args.cli, self.models)
+            except routes.RouteError as error:
+                raise PlanError("invalid route config %s: %s" % (path, error)) from None
         try:
-            return routes.resolve(routes.load(path), self.args.cli, self.models)
+            resolved = routes.apply_overrides(resolved, routes.overrides(getattr(self.args, "route", None)))
         except routes.RouteError as error:
-            raise PlanError("invalid route config %s: %s" % (path, error)) from None
+            raise PlanError("invalid route override: %s" % error) from None
+        return resolved
 
     def gate_model(self, klass):
         """The model a review gate spawns on: the brain's medium model when a brain backend was named.
@@ -2568,6 +2580,9 @@ class Driver:
                   "difficulty": difficulty, "class": klass, "effort": effort, "model": route.model}
         with self.book() as data:
             claim(data, packet)
+        self.log("route", unit=packet["unit"], task=task_id, **{
+            "class": klass, "backend": route.backend, "model": route.model, "effort": effort,
+            "effort_source": "config" if route.effort else "matrix", "source": self.route_source or "legacy"})
         task_dir = self.run_dir / task_id
         task_dir.mkdir(exist_ok=True, mode=0o700)
         task_md = task_dir / "task.md"
@@ -2870,6 +2885,9 @@ def main(argv=None):
     sub.add_argument("--models-file", default="~/.claude/CLAUDE.md", help="File holding the 'Model classes' table")
     sub.add_argument("--routes-file", help="Typed route config (JSON, or YAML with PyYAML): what each model class "
                                           "runs on. Without it the legacy 'Model classes' table answers")
+    sub.add_argument("--route", action="append", default=[], metavar="CLASS=BACKEND/MODEL[@EFFORT]",
+                     help="An explicit route for one model class: 'small=codex/gpt-s@high'. It wins over the route "
+                          "config, which wins over the legacy 'Model classes' table")
     sub.add_argument("--converge", default=str(CONVERGE), help="converge.py used to gate each report")
     sub.add_argument("--wait-seconds", type=int, default=60, help="Longest one wait blocks before the plan is re-read")
     sub.add_argument("--idle-interval", type=float, default=30, help="Seconds to sleep after an iteration that made no progress")
