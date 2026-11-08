@@ -560,10 +560,13 @@ def class_models(path, backend, required=True):
     """Resolve each class to a model from the 'Model classes' table of the instructions file.
 
     A Pi run whose file has no Pi column takes its models from the skill's own table. With `required` false a
-    class the table does not name is left out instead of being an error: a typed route config may answer it."""
+    class the table does not name is left out instead of being an error: a typed route config may answer it,
+    and a table that cannot be read at all is simply no table."""
     try:
         header, rows = model_rows(path)
     except OSError as error:
+        if not required:
+            return {}
         raise PlanError("cannot read the Model classes table: %s" % error) from None
     models = column_models(header, rows, backend)
     if backend == "pi":
@@ -773,12 +776,15 @@ class Driver:
         plan = self.last_plan = self.read_plan()
         self.slug = plan["slug"]
         self.routes_file = getattr(self.args, "routes_file", None)
-        # The legacy path stays strict: a class the table does not name is an error, never a fall back. Only a
-        # typed route config may answer a class the table lacks.
-        self.models = class_models(self.args.models_file, self.args.cli, required=not self.routes_file)
         self.brain_cli = getattr(self.args, "brain_cli", None)
-        self.brain_models = (class_models(self.args.models_file, self.brain_cli, required=not self.routes_file)
-                             if self.brain_cli else self.models)
+        # The legacy path stays strict: a class the table does not name is an error, never a fall back. A typed
+        # route config is self-sufficient: the legacy table is a fallback, not a prerequisite, so it is not read.
+        if self.routes_file:
+            self.models, self.brain_models = {}, {}
+        else:
+            self.models = class_models(self.args.models_file, self.args.cli, required=True)
+            self.brain_models = (class_models(self.args.models_file, self.brain_cli, required=True)
+                                 if self.brain_cli else self.models)
         self.routes = self.load_routes()
         state_dir = Path(self.args.state_dir).expanduser()
         state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)

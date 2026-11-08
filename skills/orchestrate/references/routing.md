@@ -56,6 +56,9 @@ the typed one wins when it is named:
   enabled: a route on `pi` is refused with that explanation, and neither Claude nor Codex launches in its
   place.
 
+  A named route config is self-sufficient: the legacy table is a fallback, not a prerequisite, so it is not
+  read at all and a missing `~/.claude/CLAUDE.md` does not stop the run.
+
 - **The legacy config** (the default): the "Model classes" table in `~/.claude/CLAUDE.md` (`--models-file`).
   A run with no `--routes-file` resolves the classes exactly as it did before; the run says so, because the
   legacy table is deprecated and will be phased out. The effort still comes from the size/difficulty matrix.
