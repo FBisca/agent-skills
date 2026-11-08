@@ -56,6 +56,9 @@ class ReviewerReuseTests(ReuseFixture, unittest.TestCase):
         self.run_driver()
         base = self.git(self.repo, "rev-parse", "HEAD")
         self.assertEqual(self.spawned()[:2], ["demo-t1", "demo-t1-review"])
+        spawns = {c["args"]["name"]: c["args"] for c in self.calls("spawn")}
+        self.assertEqual(spawns["demo-t1"]["agent"], "implementer")
+        self.assertNotIn("agent", spawns["demo-t1-review"])
         self.assertEqual(self.spawned().count("demo-t1-review"), 1)
         resumes = [(c["args"]["name"], c["args"]["task"]) for c in self.calls("resume")]
         self.assertEqual([n for n, _ in resumes], ["demo-t1", "demo-t1-review"])
