@@ -59,6 +59,8 @@ the typed one wins when it is named:
 - **The legacy config** (the default): the "Model classes" table in `~/.claude/CLAUDE.md` (`--models-file`).
   A run with no `--routes-file` resolves the classes exactly as it did before; the run says so, because the
   legacy table is deprecated and will be phased out. The effort still comes from the size/difficulty matrix.
+  A class missing from the table is an error, not a fallback — including the class of a brain backend
+  (`--brain-cli`) the table has no column for.
 
 The model is chosen at spawn, the cache boundary, so a fix round for a live worker keeps its model; a dead pane
 gets a fresh worker in the same cell.

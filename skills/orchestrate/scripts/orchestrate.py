@@ -772,10 +772,12 @@ class Driver:
     def start(self):
         plan = self.last_plan = self.read_plan()
         self.slug = plan["slug"]
-        self.models = class_models(self.args.models_file, self.args.cli,
-                                   required=not getattr(self.args, "routes_file", None))
+        self.routes_file = getattr(self.args, "routes_file", None)
+        # The legacy path stays strict: a class the table does not name is an error, never a fall back. Only a
+        # typed route config may answer a class the table lacks.
+        self.models = class_models(self.args.models_file, self.args.cli, required=not self.routes_file)
         self.brain_cli = getattr(self.args, "brain_cli", None)
-        self.brain_models = (class_models(self.args.models_file, self.brain_cli, required=False)
+        self.brain_models = (class_models(self.args.models_file, self.brain_cli, required=not self.routes_file)
                              if self.brain_cli else self.models)
         self.routes = self.load_routes()
         state_dir = Path(self.args.state_dir).expanduser()
@@ -1921,7 +1923,7 @@ class Driver:
     def load_routes(self):
         """The class -> route map this run uses: the typed route config when one was named, the legacy
         'Model classes' table otherwise. An invalid route config stops the run here, before any worker."""
-        path = getattr(self.args, "routes_file", None)
+        path = self.routes_file
         if not path:
             event(routes.legacy_warning(self.args.models_file))
             return routes.legacy(self.args.cli, self.models)
@@ -1931,10 +1933,19 @@ class Driver:
             raise PlanError("invalid route config %s: %s" % (path, error)) from None
 
     def gate_model(self, klass):
-        """The model a review gate spawns on: the brain's medium model when a brain backend was named."""
-        if getattr(self, "brain_cli", None):
-            return self.brain_models.get("medium") or self.routes["medium"].model
-        return self.routes[klass].model
+        """The model a review gate spawns on: the brain's medium model when a brain backend was named.
+
+        The legacy path reads the brain backend's own column and fails when the table has none. A typed route
+        config answers the brain model instead: its medium class must run on the brain backend."""
+        brain = getattr(self, "brain_cli", None)
+        if not brain:
+            return self.routes[klass].model
+        if self.routes_file:
+            route = self.routes.get("medium")
+            if route is None or route.backend != brain:
+                raise PlanError("the route config has no medium route on the brain backend '%s'" % brain)
+            return route.model
+        return self.brain_models["medium"]
 
     def gate_label(self, klass):
         """The class a review gate runs on, for the event line."""
