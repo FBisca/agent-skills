@@ -74,7 +74,7 @@ Each ticket is a **tracer bullet**: one narrow path through every layer it needs
 - **Satisfies**: the S-IDs the ticket makes true, as a comma list or a range (`S1–S4`). Every scenario sits in some ticket's Satisfies.
 - **Blocked by**: the ticket IDs that must merge first, comma-separated, or `none`. A blocked ticket branches from main after its blockers merge; stacked branches break under squash merge.
 - **Paths**: the repo-relative files, directories (ending `/`) or globs the ticket may change, comma-separated. The build is fenced to them.
-- **Size** (`small | regular | big`) and **Difficulty** (`simple | complex`): judged by orchestrate's [routing](../orchestrate/references/routing.md), they pick the ticket's worker. A person-owned ticket leaves both empty.
+- **Size** (`small | regular`) and **Difficulty** (`simple | complex`): judged by orchestrate's [routing](../orchestrate/references/routing.md), they pick the ticket's worker. A person-owned ticket leaves both empty. `big` is not a size: the driver refuses such a ticket, so split the work into two tickets.
 - **Owner**: `agent` for code. Every step a person runs or approves (prod data apply, sign-off, deploy) is its own ticket with that person as Owner; a code PR never closes it.
 - **Status**: TO-DO, IN PROGRESS or COMPLETE.
 

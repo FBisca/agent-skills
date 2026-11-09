@@ -2,8 +2,11 @@
 
 S3: the shared skills keep the Claude Code and Codex behaviour they had.
 S4: the test suite runs offline and enforces the Markdown plan contract.
+S20: every tracked plan is read by the reader the gate uses.
+S21: the engine reads the plans this repository tracks.
 """
 
+import importlib.util
 import pytest
 from pathlib import Path
 import re
@@ -18,7 +21,26 @@ SKILLS = ROOT / "skills"
 
 PLAN_HEADINGS = ("Why now", "Sources", "Decisions", "Scenarios", "Out of scope", "Risks",
                  "Seams", "Tickets")
-TICKET_HEADER = "| # | What it delivers | Satisfies | Blocked by | Paths | Size | Difficulty | Owner | Status |"
+
+# The engine (agent-runtime's driver) reads the plan: these are the column names it requires,
+# in the order this repository writes them (Status last), and the values it accepts.
+TICKET_COLUMNS = ("#", "What it delivers", "Satisfies", "Blocked by", "Paths", "Size",
+                  "Difficulty", "Owner", "Status")
+TICKET_HEADER = "| " + " | ".join(TICKET_COLUMNS) + " |"
+SIZE_VALUES = ("small", "regular")
+DIFFICULTY_VALUES = ("simple", "complex")
+
+
+def load_converge():
+    """The gate's own plan reader, in process: `converge.py` is the reader the gate uses."""
+    script = SKILLS / "converge" / "scripts" / "converge.py"
+    spec = importlib.util.spec_from_file_location("gate_converge", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+converge = load_converge()
 
 # The harness-specific instructions each shared skill carries, and must keep.
 SHARED_CONTRACTS = {
@@ -110,25 +132,74 @@ class PlanContract(unittest.TestCase):
             scenarios = set(re.findall(r"^- \*\*S(\d+[a-z]?)\*\* WHEN .*, THEN ", text, re.M))
             self.assertTrue(scenarios, "%s: no scenario lines" % name)
             self.assertIn(TICKET_HEADER, text, "%s: ticket columns" % name)
-            covered = self._covered(text)
+            # The coverage the gate reads, with the gate's own reader.
+            ids, tickets = converge.plan_data(text)
+            covered = {identifier for satisfies, _ in tickets.values() for identifier in satisfies}
             for scenario in scenarios:
-                self.assertIn(scenario, covered, "%s: S%s is in no ticket" % (name, scenario))
+                self.assertIn("S" + scenario, covered, "%s: S%s is in no ticket" % (name, scenario))
+            self.assertEqual(covered, set(ids), "%s: a ticket satisfies an undeclared scenario" % name)
 
-    @staticmethod
-    def _covered(text):
-        """The scenario ids the tickets satisfy, ranges expanded."""
-        covered = set()
-        for line in text.splitlines():
-            if not line.startswith("| T"):
+
+class PlanReader(unittest.TestCase):
+    """S20: the plan format is read by the reader the gate uses."""
+
+    HEAD = ("# Plan: the reader\n\nSlug: `reader`. Living spec: `docs/specs/reader.md`. "
+            "Status: APPROVED 2026-11-09.\n\n## Scenarios\n\n"
+            "- **S1** WHEN the gate reads a plan, THEN it yields the scenario ids and the "
+            "ticket rows.\n\n")
+
+    def test_S20_the_gate_reader_reads_every_tracked_plan(self):
+        """S20: every tracked plan yields its scenario ids and its ticket rows; a plan
+        whose Tickets table is missing or has no rows is refused."""
+        plans = tracked_plans()
+        self.assertTrue(plans)
+        for plan in plans:
+            text = plan.read_text(encoding="utf-8")
+            ids, tickets = converge.plan_data(text)
+            self.assertTrue(ids, "%s: no scenario ids" % plan.name)
+            self.assertTrue(tickets, "%s: no ticket rows" % plan.name)
+            rows = converge.plan_rows(text)
+            self.assertEqual(len(rows), len(tickets), "%s: the reader's rows disagree" % plan.name)
+        missing = self.HEAD + "## Tickets\n\nno table here\n"
+        empty = self.HEAD + ("## Tickets\n\n" + TICKET_HEADER + "\n"
+                             + "|---|---|---|---|---|---|---|---|---|\n")
+        for text in (missing, empty):
+            self.assertTrue(converge.refusal(text), "a plan without ticket rows is refused")
+
+
+class EnginePlanContract(unittest.TestCase):
+    """S21: the engine reads the plans this repository tracks."""
+
+    def test_S21_the_engine_reads_every_tracked_plan(self):
+        """S21: the engine's contract, asserted by name, holds for every plan it reads."""
+        for plan in tracked_plans():
+            text = plan.read_text(encoding="utf-8")
+            columns = converge.ticket_table(text)[0]
+            self.assertEqual(columns, list(TICKET_COLUMNS), "%s: ticket columns" % plan.name)
+            self.assertEqual(columns[-1], "Status", "%s: Status is the last column" % plan.name)
+            for row in converge.plan_rows(text):
+                size = (row.get("Size") or "").strip()
+                difficulty = (row.get("Difficulty") or "").strip()
+                if (row.get("Owner") or "").strip().lower() != "agent":
+                    # A person-owned ticket leaves both empty; the engine reads no route for it.
+                    self.assertEqual((size, difficulty), ("", ""),
+                                     "%s: %s is not a code ticket" % (plan.name, row.get("#")))
+                    continue
+                self.assertIn(size, SIZE_VALUES, "%s: %s Size" % (plan.name, row.get("#")))
+                self.assertIn(difficulty, DIFFICULTY_VALUES,
+                              "%s: %s Difficulty" % (plan.name, row.get("#")))
+            head = converge.plan_head(text)
+            if head["status"] != "APPROVED":
+                # The engine reads no status out of this head; the gate refuses the plan too,
+                # so it never reaches the engine.
+                self.assertTrue(converge.refusal(text),
+                                "%s: the gate accepts a plan the engine cannot read" % plan.name)
                 continue
-            cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
-            if len(cells) < 3:
-                continue
-            for identifier in re.findall(r"S\d+[a-z]?", cells[2]):
-                covered.add(identifier[1:])
-            for first, last in re.findall(r"S(\d+)[–-]S(\d+)", cells[2]):
-                covered.update(str(number) for number in range(int(first), int(last) + 1))
-        return covered
+            lines = head["head"].splitlines()
+            self.assertTrue(any(re.match(r"^Slug: `[^`]+`", line) for line in lines),
+                            "%s: no backticked Slug" % plan.name)
+            self.assertTrue(any(re.match(r"^[^*]*Status: APPROVED\b", line) for line in lines),
+                            "%s: no unbolded Status: APPROVED" % plan.name)
 
 
 if __name__ == "__main__":
