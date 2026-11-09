@@ -38,8 +38,8 @@ The driver resolves each class to a model, a backend and (optionally) an effort.
 the typed one wins when it is named:
 
 - **The typed route config** (`--routes-file`): a versioned document (JSON, or YAML when PyYAML is installed)
-  that names, per model class, the backend, the model and the effort. The schema lives in
-  `scripts/routes.py` and is strict: an unknown backend, an unknown class, an unknown field, an unknown effort
+  that names, per model class, the backend, the model and the effort. The schema lives in the engine's
+  `routes.py` and is strict: an unknown backend, an unknown class, an unknown field, an unknown effort
   or a class the config leaves out is an error, and the run stops **before any worker is spawned** — it never
   falls back to another billable model.
 
@@ -70,7 +70,7 @@ gets a fresh worker in the same cell.
 
 ## Escalation
 
-A **unit** keeps one ID across every attempt at it: the first build and each fix round. The driver handles a known gate failure itself, up to two fix rounds. The unit's third failed gate, a worker that blocks or exits without a report, or conflicting reports go to a fresh large-class **decider**, which writes `decision.json` with one action from a fixed menu (the menu and schema live in `scripts/contracts.py`). The driver validates and applies it. A unit gets at most two decider calls; after that, and for any scope or product question, the ticket pauses for the user (`needs you: …` in its Status, and `attention.md`).
+A **unit** keeps one ID across every attempt at it: the first build and each fix round. The driver handles a known gate failure itself, up to two fix rounds. The unit's third failed gate, a worker that blocks or exits without a report, or conflicting reports go to a fresh large-class **decider**, which writes `decision.json` with one action from a fixed menu (the menu and schema live in the engine's `contracts.py`). The driver validates and applies it. A unit gets at most two decider calls; after that, and for any scope or product question, the ticket pauses for the user (`needs you: …` in its Status, and `attention.md`).
 
 The user picks among the options in `attention.md`: one class up, re-plan, or split the unit. They answer by setting the ticket's Status in the plan (TO-DO retries it as a fresh attempt of the same unit; COMPLETE marks it done by hand).
 

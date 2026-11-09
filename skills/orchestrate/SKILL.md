@@ -26,6 +26,17 @@ You are a launcher. A Python driver runs the build, so the loop costs no model t
 
 Do not run the loop, wait on workers, write `task.md`, review or gate tickets, merge, or archive. The driver does all of it through the `agent-runtime` tools: dispatch, converge, review, fix rounds, CI, unblocking once you merge, archive. It never merges a PR. For its options and behavior: `orchestrate.py run --help`.
 
+## The engine
+
+The driver is not in this skill. It is the `agent-orchestrator` member of [agent-runtime](https://github.com/FBisca/agent-runtime), and `scripts/orchestrate.py` is a shim: it resolves that member's CLI and hands it the command. The engine's behaviour and its suite live in that repository, in `docs/specs/orchestrator-engine.md`.
+
+The member is resolved in this order:
+
+1. `$AGENT_RUNTIME_HOME` — the checkout of agent-runtime. Its `.venv/bin/agent-orchestrator` when the environment is synced, else `uv run` inside that checkout.
+2. `agent-orchestrator` on `PATH`.
+
+The checkout wins: a checkout the user named is never shadowed by an older install on `PATH`. When neither answers, the script exits 2 and names the way out — `uv sync --frozen --all-packages` in a checkout of agent-runtime, then `export AGENT_RUNTIME_HOME=<that checkout>`, or the member on `PATH`. It never falls back to a second engine: two copies drift.
+
 The pane is named `orchestrate-<slug>` and nests under the Lead's terminal when launched inside Herdr, falling back to top-level if nesting fails. Herdr names allow only `a-z 0-9 - _`, so the hyphen replaces the colon.
 
 ## What the user sees
@@ -52,7 +63,7 @@ Every agent-to-driver handoff is a versioned JSON file, validated in code; the d
 | `<run>/<task>/decision.json` | decider |
 | `<run>/attention.md`, `<run>/deferred.md`, `<run>/gaps.md`, `<run>/metrics.json` | driver (gaps.md: the gaps reviewer), for people |
 
-The schemas and field lists live in `scripts/contracts.py` only.
+The schemas and field lists live in the member's `contracts.py` only.
 
 ## When the run pauses
 

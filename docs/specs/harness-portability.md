@@ -81,7 +81,7 @@ scripts/install-upstream.sh grilling
 
 ## Known limitations
 
-- **`/orchestrate` does not run under Pi yet.** The driver needs the agent-runtime tools, which Pi does not expose. P1 keeps the driver untouched; the Pi path for orchestration is later work (out of scope in this plan).
+- **`/orchestrate` does not run under Pi yet.** The driver needs the agent-runtime tools, which Pi does not expose. The driver itself now lives in [agent-runtime](https://github.com/FBisca/agent-runtime), in the `agent-orchestrator` member, and this skill's script hands the command to it; the Pi path for orchestration is later work (out of scope in this plan).
 - **The Pi gatherer cannot run commands by default.** Counts that need a live database or script are either run by the parent or opted into with `--allow-bash`, which widens the subprocess's powers.
 - **Pi has no plan mode and no review subagent.** Steps that rely on a second opinion must go through a delegation: the harness's own, or the adapter the skill ships.
 - **`grilling` must be installed separately.** The plan refuses to continue without it; it does not install it.
