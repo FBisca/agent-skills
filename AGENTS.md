@@ -40,7 +40,7 @@ reads the same text back.
 
 ## Test fakes are contracts
 
-`skills/orchestrate/scripts/orchestrate.py` polls whatever the fakes answer. A fake with no terminal answer — a PR that
+The engine polls whatever the fakes answer. A fake with no terminal answer — a PR that
 stays OPEN, a check that never reports, a worker that never finishes — makes the driver poll forever, so the suite
 hangs instead of failing.
 
@@ -52,10 +52,15 @@ hangs instead of failing.
 
 ## The fakes are modules, not programs
 
-The fakes live in `skills/orchestrate/tests/`: `fake_runtime.py` (the agent-runtime)
-and `fake_gh.py` (the GitHub CLI). The driver reaches them through seams — `runtime_process` and `gh_process` —
-so a test run answers them in process and starts no process per call. The fixture also puts thin wrappers for the
-same modules on PATH, for a driver run outside the tests.
+The engine — and with it its fakes — lives in [agent-runtime](https://github.com/FBisca/agent-runtime), in the
+`agent-orchestrator` member: `fake_runtime.py` (the agent-runtime) and `fake_gh.py` (the GitHub CLI) sit in that
+repository's `packages/agent-orchestrator/tests/`. The driver reaches them through seams — `runtime_process` and
+`gh_process` — so a test run answers them in process and starts no process per call. The fixture also puts thin
+wrappers for the same modules on PATH, for a driver run outside the tests.
+
+This repository keeps the skill's own suite and the skill's script, and the script is a shim: it resolves the member's
+CLI and hands it the command. A fake or a seam of the engine changes in that repository, next to the driver that
+answers it.
 
 A new seam follows the same shape: the driver calls a function it could have called directly, and the tests answer
 that function. A fake that needs a process of its own has to earn it.

@@ -91,3 +91,13 @@ One orchestrate run spent 220M cache-read tokens in the lead: 1,232 Opus turns a
 | T5 | Archive unit, gaps at archive, `converge --final` (accepts the plan being archived: ARCHIVED status and its own plan file in scope), run metrics | S15, S16 | T3, T4 | skills/orchestrate/scripts/, skills/orchestrate/tests/, skills/converge/ | regular | simple | agent | COMPLETE 2026-11-06 · merged #13 (0304dd6) |
 | T6 | `launch` subcommand; SKILL.md and references rewritten to the launcher + driver contract | S17 | T5 | skills/orchestrate/ | small | simple | agent | COMPLETE 2026-11-06 · merged #14 (ece48fd) |
 | T7 | Live run in Herdr on a 1–2 ticket plan: driver pane + nested workers + Plans panel; lead tokens measured against D11 | none | T0, T6 | | | | Felippe | IN PROGRESS · needs you: run `/orchestrate` on a 1–2 ticket plan in Herdr |
+
+## Moved
+
+The engine this plan built lives in [agent-runtime](https://github.com/FBisca/agent-runtime), in the
+`agent-orchestrator` member. Its behaviour is archived there, in that repository's
+`docs/specs/orchestrator-engine.md`, under the ids of the scenarios this plan wrote.
+
+This repository no longer carries the engine: `skills/orchestrate/scripts/orchestrate.py` is a shim that
+resolves the member's CLI and hands it the command. The plan stays as the record of how the engine was
+built. T7 is still a person's gate, and the run it asks for happens against the member.

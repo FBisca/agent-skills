@@ -190,3 +190,12 @@ This plan is built by the current driver. The Lead logs any driver friction it o
 | T18 | The run records the profile its workers ran under, and every spawn path is pinned by a test | S54, S57, S58 | T7 | skills/orchestrate/scripts/, skills/orchestrate/tests/ | small | simple | agent | TO-DO |
 | T19 | A profile whose CLI family differs from `--cli` is refused | S55 | T7 | skills/orchestrate/scripts/, skills/orchestrate/tests/ | small | simple | agent | TO-DO |
 | T20 | An unknown profile name fails the run before it touches the repo | S56 | T7 | skills/orchestrate/scripts/, skills/orchestrate/tests/ | small | simple | agent | TO-DO |
+
+## Moved
+
+The engine this plan builds lives in [agent-runtime](https://github.com/FBisca/agent-runtime), in the
+`agent-orchestrator` member. The scenarios it already delivered are archived there, in that repository's
+`docs/specs/orchestrator-engine.md`, next to the tests that answer them.
+
+The tickets below that are still `TO-DO` are the engine's backlog, and they belong to that repository:
+this one no longer carries the driver. The plan stays as the record of the loop's design.
