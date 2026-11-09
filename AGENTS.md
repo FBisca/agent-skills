@@ -30,6 +30,10 @@ frontmatter, full suite) and is what CI runs. If the suite hangs, `scripts/run-t
 process (`JOBS` limits the workers, `TEST_TIMEOUT` the seconds per file) and names the file that never finished: a
 suite that hangs is a failing suite, and the cause is a fake that never answers, not a slow test.
 
+The run polices itself (`conftest.py`). It ends with a failing status, and names the cause, when the fast suite takes
+3 seconds or more, when it leaves a temporary entry behind, or when a `unit` test is skipped. Every skip prints its
+reason, so a skip names the dependency it lacks.
+
 ## A skill's frontmatter is read by YAML, not by us
 
 Every harness reads a `SKILL.md` frontmatter as YAML. A value that is not quoted and holds a colon is read as a nested

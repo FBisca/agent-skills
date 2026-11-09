@@ -8,9 +8,13 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
+from types import SimpleNamespace
 
 import pytest
+
+import conftest
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILLS = ROOT / "skills"
@@ -243,6 +247,170 @@ class RemovedSkillsTest(unittest.TestCase):
             self.assertNotIn(name, text, path)
         for entry in json.loads((ROOT / ".claude-plugin/marketplace.json").read_text())["plugins"]:
             self.assertNotIn(name, json.dumps(entry))
+
+
+class SuiteGuard(unittest.TestCase):
+    """conftest.py ends a run that is over the fast-suite budget, one that leaves a temporary entry behind, or one
+    that skipped a unit test. Each check is tested through the function its session hook calls."""
+
+    @pytest.mark.unit
+    def test_S27_a_fast_run_at_or_over_the_budget_fails_and_one_under_it_passes(self):
+        self.assertIsNone(conftest.budget_problem(2.99))
+        problem = conftest.budget_problem(3.25)
+        self.assertIsNotNone(problem)
+        self.assertIn("3.25", problem)
+        self.assertIsNotNone(conftest.budget_problem(3.0), "under 3 seconds: exactly 3 is not under")
+
+    @pytest.mark.unit
+    def test_S28_a_run_that_leaves_a_temporary_entry_fails_and_its_directory_is_removed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            clean = conftest.open_session_temp(root)
+            self.assertIsNone(conftest.close_session_temp(clean))
+            self.assertFalse(clean.exists())
+            leaky = conftest.open_session_temp(root)
+            (leaky / "left-behind").mkdir()
+            problem = conftest.close_session_temp(leaky)
+            self.assertIn("left-behind", problem)
+            self.assertFalse(leaky.exists())
+
+    @pytest.mark.unit
+    def test_S29_a_skipped_unit_test_fails_the_run_and_every_skip_is_reported_with_its_reason(self):
+        unit = conftest.Skip("tests/test_x.py::T::test_one", "Pi is not installed", True)
+        integration = conftest.Skip("tests/test_y.py::T::test_two", "Node is not installed", False)
+        self.assertIn("test_one", conftest.skip_problem([unit, integration]))
+        self.assertNotIn("test_two", conftest.skip_problem([unit, integration]))
+        self.assertIsNone(conftest.skip_problem([integration]))
+        self.assertIsNotNone(conftest.skip_problem([conftest.Skip("tests/test_z.py::T::test_three", "", False)]))
+        self.assertEqual(conftest.skip_lines([integration]),
+                         ["SKIPPED tests/test_y.py::T::test_two: Node is not installed"])
+
+
+class SuiteHooks(unittest.TestCase):
+    """The session hooks of conftest.py, called in process with fakes: the run state and the temporary-directory
+    settings are swapped for each test and restored after it, so the run that executes these tests is untouched."""
+
+    ENV = ("TMPDIR", conftest.TEMP_ENV, "PYTEST_DEBUG_TEMPROOT")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)  # runs last
+        self.saved_run = conftest.RUN
+        self.saved_tempdir = tempfile.tempdir
+        self.saved_env = {name: os.environ.get(name) for name in self.ENV}
+        self.addCleanup(self.restore)  # runs before the cleanup above
+        for name in self.ENV:
+            os.environ.pop(name, None)
+        tempfile.tempdir = self.tmp.name
+        conftest.RUN = conftest.Run()
+
+    def restore(self):
+        conftest.RUN = self.saved_run
+        tempfile.tempdir = self.saved_tempdir
+        for name, value in self.saved_env.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+    def own_run(self):
+        """Start a run that owns a temporary directory, as pytest does; it is ended after the test."""
+        conftest.pytest_configure(None)
+        self.addCleanup(conftest.pytest_unconfigure, None)
+
+    @staticmethod
+    def session(exitstatus=pytest.ExitCode.OK):
+        config = SimpleNamespace(getoption=lambda name, default=None: default,
+                                 invocation_params=SimpleNamespace(dir=str(ROOT), args=()))
+        return SimpleNamespace(config=config, exitstatus=exitstatus)
+
+    @staticmethod
+    def skipped(nodeid, longrepr, unit):
+        return SimpleNamespace(skipped=True, nodeid=nodeid, longrepr=longrepr,
+                               keywords={"unit": True} if unit else {})
+
+    @pytest.mark.unit
+    def test_S27_the_session_end_fails_an_over_budget_fast_run(self):
+        self.own_run()
+        session = self.session()
+        conftest.RUN.started = time.perf_counter() - 3.5
+        conftest.pytest_sessionfinish(session)
+        self.assertEqual(session.exitstatus, pytest.ExitCode.TESTS_FAILED)
+        self.assertIn("budget", conftest.RUN.problems[0])
+
+    @pytest.mark.unit
+    def test_S27_the_session_end_keeps_an_under_budget_fast_run_green(self):
+        self.own_run()
+        session = self.session()
+        conftest.RUN.started = time.perf_counter() - 0.1
+        conftest.pytest_sessionfinish(session)
+        self.assertEqual(session.exitstatus, pytest.ExitCode.OK)
+        self.assertEqual(conftest.RUN.problems, [])
+
+    @pytest.mark.unit
+    def test_S27_a_failing_run_keeps_its_own_failing_status(self):
+        self.own_run()
+        session = self.session(pytest.ExitCode.TESTS_FAILED)
+        conftest.RUN.started = time.perf_counter() - 3.5
+        conftest.pytest_sessionfinish(session)
+        self.assertEqual(session.exitstatus, pytest.ExitCode.TESTS_FAILED)
+
+    @pytest.mark.unit
+    def test_S28_configure_hands_the_run_its_own_directory_and_unconfigure_restores_the_temp_settings(self):
+        before = tempfile.tempdir
+        conftest.pytest_configure(None)
+        self.assertTrue(conftest.RUN.owner)
+        self.assertTrue(conftest.RUN.temp.is_dir())
+        self.assertEqual(tempfile.tempdir, str(conftest.RUN.temp))
+        self.assertEqual(os.environ["TMPDIR"], str(conftest.RUN.temp))
+        self.assertEqual(os.environ[conftest.TEMP_ENV], str(conftest.RUN.temp))
+        self.assertIn(Path(self.tmp.name), conftest.RUN.temp.parents)
+        temp = conftest.RUN.temp
+        conftest.pytest_unconfigure(None)
+        self.assertEqual(tempfile.tempdir, before)
+        self.assertNotIn(conftest.TEMP_ENV, os.environ)
+        self.assertFalse(temp.exists())
+
+    @pytest.mark.unit
+    def test_S28_the_session_end_fails_a_run_that_left_an_entry_behind(self):
+        self.own_run()
+        (conftest.RUN.temp / "left-behind").mkdir()
+        session = self.session()
+        conftest.RUN.started = None
+        conftest.pytest_sessionfinish(session)
+        self.assertEqual(session.exitstatus, pytest.ExitCode.TESTS_FAILED)
+        self.assertIn("left-behind", " ".join(conftest.RUN.problems))
+
+    @pytest.mark.unit
+    def test_S29_a_skipped_unit_test_is_recorded_and_fails_the_session_end(self):
+        self.own_run()
+        conftest.pytest_runtest_logreport(self.skipped("tests/x.py::T::test_one", ("tests/x.py", 3, "Skipped: needs pi"), True))
+        self.assertEqual(conftest.RUN.skips, [conftest.Skip("tests/x.py::T::test_one", "needs pi", True)])
+        session = self.session()
+        conftest.RUN.started = None
+        conftest.pytest_sessionfinish(session)
+        self.assertEqual(session.exitstatus, pytest.ExitCode.TESTS_FAILED)
+
+    @pytest.mark.unit
+    def test_S29_an_integration_skip_with_a_reason_is_recorded_and_does_not_fail(self):
+        self.own_run()
+        conftest.pytest_runtest_logreport(self.skipped("tests/y.py::T::test_two", ("tests/y.py", 4, "Skipped: no node"), False))
+        self.assertEqual(conftest.RUN.skips, [conftest.Skip("tests/y.py::T::test_two", "no node", False)])
+        session = self.session()
+        conftest.RUN.started = None
+        conftest.pytest_sessionfinish(session)
+        self.assertEqual(session.exitstatus, pytest.ExitCode.OK)
+
+    @pytest.mark.unit
+    def test_S29_a_bare_skip_with_no_message_is_a_skip_without_a_reason(self):
+        self.own_run()
+        conftest.pytest_runtest_logreport(self.skipped("tests/z.py::T::test_bare", ("tests/z.py", 5, "Skipped"), False))
+        self.assertEqual(conftest.RUN.skips[0].reason, "")
+        self.assertIsNotNone(conftest.skip_problem(conftest.RUN.skips))
+        session = self.session()
+        conftest.RUN.started = None
+        conftest.pytest_sessionfinish(session)
+        self.assertEqual(session.exitstatus, pytest.ExitCode.TESTS_FAILED)
 
 
 if __name__ == "__main__":
