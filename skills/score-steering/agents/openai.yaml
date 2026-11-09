@@ -1,0 +1,5 @@
+interface:
+  display_name: "Score Steering"
+  short_description: "Coach the human on steering a coding agent"
+policy:
+  allow_implicit_invocation: false
