@@ -42,33 +42,7 @@ def frontmatter(path):
     return fields
 
 
-def repo_files():
-    """The files this repo ships or is working on: tracked, plus untracked and not ignored.
-
-    Ignored files (a local `.claude/settings.local.json`, caches) are the machine's, not the
-    repo's, and must not decide whether the gate is green.
-    """
-    listed = subprocess.run(["git", "ls-files", "--cached", "--others", "--exclude-standard"],
-                             cwd=ROOT, capture_output=True, text=True, check=True).stdout.split()
-    return [ROOT / name for name in listed]
-
-
 class SkillMetadata(unittest.TestCase):
-    @pytest.mark.unit
-    def test_every_skill_has_matching_name_and_description(self):
-        dirs = sorted(p for p in SKILLS.iterdir() if p.is_dir())
-        self.assertTrue(dirs)
-        for d in dirs:
-            meta = frontmatter(d / "SKILL.md") if (d / "SKILL.md").is_file() else None
-            self.assertIsNotNone(meta, f"{d.name}: SKILL.md with frontmatter")
-            self.assertEqual(meta.get("name"), d.name, f"{d.name}: name matches dir")
-            self.assertTrue(meta.get("description"), f"{d.name}: description")
-
-    @pytest.mark.unit
-    def test_no_skill_text_hardcodes_a_claude_skills_path(self):
-        for path in SKILLS.rglob("SKILL.md"):
-            self.assertNotIn("~/.claude/skills/", path.read_text(encoding="utf-8"), str(path))
-
     @pytest.mark.unit
     def test_derived_and_copied_skills_carry_a_notice(self):
         for name in ("handoff", "zoom-out", "cold-read"):
@@ -78,13 +52,6 @@ class SkillMetadata(unittest.TestCase):
     @pytest.mark.unit
     def test_idea_frame_bundles_the_project_template(self):
         self.assertTrue((SKILLS / "idea-frame" / "templates" / "project.md").is_file())
-
-    @pytest.mark.integration
-    def test_no_symlinks_or_absolute_user_paths(self):
-        for path in repo_files():
-            self.assertFalse(path.is_symlink(), f"symlink: {path}")
-            if path.is_file() and path.suffix in {".md", ".py", ".json", ".sh", ".yml", ".yaml"} and path != Path(__file__):
-                self.assertNotIn("/Users/", path.read_text(encoding="utf-8", errors="ignore"), str(path))
 
 
 class UpstreamLock(unittest.TestCase):

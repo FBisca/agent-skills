@@ -9,6 +9,7 @@ Skipped when Pi or Node are not installed: the gate must run anywhere.
 """
 
 import pytest
+import inspect
 import json
 import os
 from pathlib import Path
@@ -80,32 +81,28 @@ class PiDiscoveryTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.tmp.cleanup()
 
-    def test_pi_discovers_start_planning(self):
-        """S1: Pi finds the planning skill, so `/skill:start-planning` exists."""
-        self.assertIn("start-planning", self.result["names"])
+    def test_S35_pi_discovers_every_skill_of_this_repo(self):
+        """S35: Pi discovers every skill of this repository and reports no problem with any of them.
 
-    def test_pi_discovers_every_skill_of_this_repo(self):
-        """Every skill in the repo loads in Pi: a frontmatter Pi cannot parse hides the skill."""
+        One test over every skill: a skill Pi cannot parse disappears from the list without a
+        word, so the whole set is checked at once, and the description Pi routes on is the one
+        the frontmatter holds.
+        """
         expected = {path.name for path in (ROOT / "skills").iterdir() if path.is_dir()}
         self.assertEqual(expected - set(self.result["names"]), set())
 
-    def test_pi_reports_no_problem_with_any_skill_of_this_repo(self):
-        """Pi's frontmatter parser accepts every skill here (a quoted description counts)."""
         problems = [d for d in self.result["diagnostics"]
                     if str(d.get("path", "")).startswith(str(ROOT / "skills"))]
         self.assertEqual(problems, [], problems)
 
-    def test_pi_reads_the_planning_skill_description(self):
-        """S1: the description Pi routes on is the one in the frontmatter."""
-        skill = next(s for s in self.result["skills"] if s["name"] == "start-planning")
-        expected = (ROOT / "skills" / "start-planning" / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn(skill["description"], expected)
+        for skill in self.result["skills"]:
+            text = Path(skill["filePath"]).read_text(encoding="utf-8")
+            self.assertIn(skill["description"], text, skill["name"])
 
-    def test_pi_reports_no_problem_with_the_planning_skill(self):
-        """S1: Pi's frontmatter parser accepts the planning skill."""
-        problems = [d for d in self.result["diagnostics"]
-                    if "start-planning" in str(d.get("path", ""))]
-        self.assertEqual(problems, [], problems)
+        # The guarantee is asserted once, over every skill: this module holds no second test.
+        self.assertEqual(
+            [name for name, _ in inspect.getmembers(self, inspect.ismethod) if name.startswith("test")],
+            ["test_S35_pi_discovers_every_skill_of_this_repo"])
 
 
 if __name__ == "__main__":

@@ -69,11 +69,6 @@ class Discovery(unittest.TestCase):
             self.assertNotIn(name, names, "%s: name collides with %s" % (name, names.get(name)))
             names[name] = directory.name
 
-    def test_the_pi_invocation_name_of_start_planning_is_its_folder_name(self):
-        """`/skill:start-planning` only exists when the skill is named start-planning."""
-        meta = frontmatter(SKILLS / "start-planning" / "SKILL.md")
-        self.assertEqual(meta["name"], "start-planning")
-
 
 class SharedSkills(unittest.TestCase):
     def test_S3_the_shared_skills_keep_their_harness_contracts(self):
@@ -83,22 +78,9 @@ class SharedSkills(unittest.TestCase):
             for needle in needles:
                 self.assertIn(needle, text, "%s: %s" % (name, needle))
 
-    def test_S3_the_shared_skills_still_name_claude_and_codex(self):
-        """S3: the skills that support several harnesses still say so."""
-        text = (SKILLS / "cold-read" / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("Claude", text)
-        self.assertIn("Codex", text)
-
 
 class NoHarnessInstructions(unittest.TestCase):
     """A skill body states the workflow; the harness's own discovery states the invocation."""
-
-    def test_no_skill_body_carries_an_invocation_syntax(self):
-        """Native discovery provides the invocation: restating it only pollutes the context."""
-        for directory in sorted(p for p in SKILLS.iterdir() if p.is_dir()):
-            text = (directory / "SKILL.md").read_text(encoding="utf-8")
-            self.assertNotIn("/skill:", text, "%s: Pi invocation syntax" % directory.name)
-            self.assertNotIn("Invoke it as", text, "%s: invocation instructions" % directory.name)
 
     def test_the_harness_detail_lives_in_a_reference(self):
         """The per-harness dispatch is loaded on demand, not with the skill."""

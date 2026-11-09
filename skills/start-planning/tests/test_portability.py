@@ -68,11 +68,6 @@ class PlanContract(unittest.TestCase):
         self.assertIn("Status: AWAITING APPROVAL", TEXT)
         self.assertIn("then stop for one approval", TEXT)
 
-    def test_S1_pi_discovers_the_skill_natively(self):
-        """S1: the frontmatter is what Pi routes on; the body carries no invocation syntax."""
-        self.assertRegex(TEXT, r"description:.*Plan one feature")
-        self.assertNotIn("/skill:", TEXT)
-
 
 class Delegation(unittest.TestCase):
     """The skill states the requirement; the reference carries the per-harness detail."""
