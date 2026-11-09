@@ -37,6 +37,8 @@ Own = written for this repo. Derivative = modified from an upstream, with attrib
 | [`start-planning`](skills/start-planning) | Plans one feature from its sources to WHEN/THEN scenarios and vertical tickets, then stops for approval | Own |
 | [`orchestrate`](skills/orchestrate) | Builds an approved plan with implementer agents and gates each ticket on its scenarios | Own |
 | [`converge`](skills/converge) | Deterministic check of a ticket or plan against its scenarios, tests and paths | Own |
+| [`score-agent`](skills/score-agent) | Scores a finished coding session from its trace, diff and test evidence, against the four rubrics it ships | Own |
+| [`score-steering`](skills/score-steering) | Scores how the human steered a coding session, advisory only, against the one rubric it ships | Own |
 | [`excalidraw`](skills/excalidraw) | Hand-drawn Excalidraw diagrams written as a Python spec, linted and checked by rendering | Own |
 | [`explain-video`](skills/explain-video) | Narrated tutorial videos built as HyperFrames films with a local voice | Own |
 | [`assemble-crew`](skills/assemble-crew) | Proposes a crew for a task, including an adversary who tries to break the result | Own |

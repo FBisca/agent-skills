@@ -1,0 +1,5 @@
+interface:
+  display_name: "Score Agent"
+  short_description: "Score a finished coding session from its trace, diff and tests"
+policy:
+  allow_implicit_invocation: false
