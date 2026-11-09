@@ -21,8 +21,13 @@ the author wrote. YAML 1.1 (PyYAML) and YAML 1.2 (the "yaml" npm package Pi uses
 plain scalars like "yes", "12:30" and "2026-11-07" - one reads a boolean, the other a string -
 so a value is only accepted when every dialect reads the same text back.
 
+A quoted value, a flow collection and a block scalar are checked too: a quote that is never
+closed, an escape YAML does not define, text after the closing quote, a bracket that closes
+another bracket, a collection that is never closed - none of them is text a harness can read,
+and every one of them is named with the file, the line and the reason.
+
 Usage: python3 scripts/lint_skills.py [DIR ...]     (no DIR = this repo's skills/)
-Exit code: 0 when every skill is clean, 1 when any skill is not.
+Exit code: 0 when every skill is clean, 1 when any skill is not, 2 when a path is not a folder.
 """
 
 from pathlib import Path
@@ -53,7 +58,8 @@ COMMENT_IN_PLAIN = re.compile(r"\s#")
 
 # Characters YAML reserves at the start of a plain scalar. Each one either fails to parse
 # ("%", "@", "`"), starts a structure (",", "[", "]", "{", "}"), or names an anchor, an alias or
-# a tag ("&", "*", "!").
+# a tag ("&", "*", "!"). A value that starts with a flow indicator ("[", "{", "]", "}") is
+# checked as a flow value instead, and a quote is checked as a quoted value.
 RESERVED_START = set(",[]{}#&*!|>'\"%@`")
 
 # A plain scalar may not start with these when a space follows: YAML reads a sequence entry,
@@ -159,8 +165,18 @@ def _flow_problem(value, line_no, path):
     """The problem with a flow collection, or None when it holds together."""
     depth = 0
     quote = None
+    opened = []
     end = -1
     for index, char in enumerate(value):
+        if end != -1:
+            break  # the flow value ended: whatever follows is trailing text
+        if depth == 0:
+            if char in "[{":
+                depth = 1
+                opened.append(char)
+            elif char in "]}":
+                return Problem(path, line_no, "the flow value closes a bracket it never opened")
+            continue
         if quote:
             if char == quote:
                 quote = None
@@ -169,18 +185,17 @@ def _flow_problem(value, line_no, path):
             quote = char
         elif char in "[{":
             depth += 1
+            opened.append(char)
         elif char in "]}":
+            if opened[-1] != ("[" if char == "]" else "{"):
+                return Problem(path, line_no, "the flow value closes a bracket it did not open")
+            opened.pop()
             depth -= 1
-            if depth < 0:
-                return Problem(path, line_no, "the flow value closes a bracket it never opened")
             if depth == 0:
                 end = index
-                break
-    if depth:
-        return Problem(path, line_no, "the flow value is not closed")
     if quote:
         return Problem(path, line_no, "the flow value carries an unclosed quote")
-    if end == -1:
+    if depth:
         return Problem(path, line_no, "the flow value is not closed")
     trailing = value[end + 1:].strip()
     if trailing:
@@ -192,8 +207,6 @@ def _flow_problem(value, line_no, path):
 
 def _plain_problem(value, line_no, path):
     """The problem with a plain scalar, or None when every dialect reads it faithfully."""
-    if "\t" in value:
-        return Problem(path, line_no, "the value holds a tab, which YAML cannot read")
     if COLON_IN_PLAIN.search(value):
         return Problem(path, line_no,
                        "the value is not quoted and holds a colon, so YAML reads it as a nested "
@@ -226,8 +239,14 @@ def _split_fields(lines, path, problems):
         index += 1
         if not raw.strip() or raw.lstrip().startswith("#"):
             continue
-        if "\t" in raw:
+        indentation = raw[:len(raw) - len(raw.lstrip())]
+        if "\t" in indentation:
+            # YAML cannot indent with a tab.
             problems.append(Problem(path, line_no, "the frontmatter holds a tab, which YAML cannot read"))
+            continue
+        if "\t" in raw[len(indentation):]:
+            # A tab anywhere else lands inside the value, and YAML cannot read it there either.
+            problems.append(Problem(path, line_no, "the value holds a tab, which YAML cannot read"))
             continue
         match = KEY_LINE.match(raw)
         if not match:
@@ -292,7 +311,7 @@ def lint_skill(path):
             continue
         if value[:1] in ("'", '"'):
             problem = _quoted_problem(value, line_no, path)
-        elif value[:1] in ("[", "{"):
+        elif value[:1] in ("[", "{", "]", "}"):
             problem = _flow_problem(value, line_no, path)
         else:
             problem = _plain_problem(value, line_no, path)
@@ -311,27 +330,33 @@ def lint_skill(path):
         problems.append(Problem(path, 1, "the frontmatter has no '%s'" % NAME_KEY))
     else:
         name, line_no = seen[NAME_KEY]
-        text_name = _value_text(name)
-        if text_name is None and name is not None:
-            text_name = name
-        if text_name != path.parent.name:
-            problems.append(Problem(path, line_no,
-                                    "the '%s' is '%s' but the folder is '%s'"
-                                    % (NAME_KEY, text_name, path.parent.name)))
+        if name is None or name == "":
+            pass  # already reported: a block scalar or an empty name
+        else:
+            text_name = _value_text(name)
+            if text_name is None:
+                text_name = name
+            if text_name != path.parent.name:
+                problems.append(Problem(path, line_no,
+                                        "the '%s' is '%s' but the folder is '%s'"
+                                        % (NAME_KEY, text_name, path.parent.name)))
 
     if DESCRIPTION_KEY not in seen:
         problems.append(Problem(path, 1, "the frontmatter has no '%s'" % DESCRIPTION_KEY))
     else:
         description, line_no = seen[DESCRIPTION_KEY]
-        text_description = _value_text(description)
-        if text_description is None:
-            pass  # already reported: a block scalar or a flow collection
-        elif not text_description.strip():
-            problems.append(Problem(path, line_no, "the '%s' is empty" % DESCRIPTION_KEY))
-        elif len(text_description) > MAX_DESCRIPTION:
-            problems.append(Problem(path, line_no,
-                                    "the '%s' is %d characters, over the %d a harness takes"
-                                    % (DESCRIPTION_KEY, len(text_description), MAX_DESCRIPTION)))
+        if description is None or description == "":
+            pass  # already reported: a block scalar or an empty description
+        else:
+            text_description = _value_text(description)
+            if text_description is None:
+                pass  # already reported: a flow collection
+            elif not text_description.strip():
+                problems.append(Problem(path, line_no, "the '%s' is empty" % DESCRIPTION_KEY))
+            elif len(text_description) > MAX_DESCRIPTION:
+                problems.append(Problem(path, line_no,
+                                        "the '%s' is %d characters, over the %d a harness takes"
+                                        % (DESCRIPTION_KEY, len(text_description), MAX_DESCRIPTION)))
     return problems
 
 
