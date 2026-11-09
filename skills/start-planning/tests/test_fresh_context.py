@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "fresh_context.py"
@@ -29,6 +30,11 @@ class GathererTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
+        # The gatherer's session dir is made under the temp root: point that root at this test's
+        # own directory, so nothing the test writes lands outside it.
+        patcher = unittest.mock.patch.object(tempfile, "tempdir", self.tmp.name)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.dir = Path(self.tmp.name)
         self.packet = self.dir / "packet.md"
         self.packet.write_text("# Request\n\nplan the thing\n\n## Sources\n\n- the request\n",
