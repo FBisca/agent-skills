@@ -478,6 +478,7 @@ class ConvergeTests(unittest.TestCase):
     # S17k
     @pytest.mark.integration
     def test_S17k_tagging_check_sees_next_line_docstring(self):
+        """S31: the tagging check reads the docstring's first text line."""
         self.write("tests/test_a.py", GOOD_TEST + '\ndef test_ok():\n    """\n    S1 next line\n    """\n')
         _, out = self.run_converge()
         self.assertTrue(self.line(out, "tagged").startswith("PASS"), out)
@@ -498,6 +499,7 @@ class PureLogicTests(unittest.TestCase):
 
     @pytest.mark.unit
     def test_rust_names_require_test_attributes(self):
+        """S31: the Rust test names are the functions that carry a test attribute."""
         names = app.names_in([
             "fn helper() {}", "#[test_case(1)]", "fn parameterized() {}",
             "#[test]", "fn S1_plain() {}",
@@ -508,6 +510,7 @@ class PureLogicTests(unittest.TestCase):
 
     @pytest.mark.unit
     def test_rust_doc_comment_first_line_carries_stable_id(self):
+        """S31: a Rust doc comment's first line carries the stable ID."""
         self.assertEqual(app.names_in([
             "/// evidence/R4: search shows citations", "/// S12 later does not count",
             "#[ignore]", "#[test]", "#[should_panic]", "fn search_citations() {}",
@@ -517,6 +520,7 @@ class PureLogicTests(unittest.TestCase):
 
     @pytest.mark.unit
     def test_rust_test_file_discovery(self):
+        """S31: a Rust file is a test file when it is under tests/ or holds cfg(test)."""
         for path, source, expected in (
                 ("tests/cli.rs", "", True),
                 ("crates/x/tests/cli.rs", "", True),
