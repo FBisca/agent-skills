@@ -1,6 +1,6 @@
 # Plan: Decouple Orchestrator Model Routing From Claude
 
-Slug: `orchestrator-routing-decoupling`. Living spec: `docs/specs/orchestration-routing.md`. Status: **APPROVED — READY FOR EXECUTION**.
+Slug: `orchestrator-routing-decoupling`. Living spec: `docs/specs/orchestration-routing.md`. Status: APPROVED.
 
 ## Why now
 
@@ -73,4 +73,13 @@ The Python driver currently resolves model classes from a Markdown table in `~/.
 - WHEN a route's risk tier requires review, THEN model suggestion cannot lower it and CI/gates cannot be bypassed.
 - WHEN the future monorepo extraction runs, THEN the schema and config golden fixtures remain byte-for-byte compatible and no duplicate routing implementation survives.
 
-**Dependency:** P3 T2 verified vertical slice, not P3 T4 comparative study. **Status: APPROVED — READY FOR EXECUTION.**
+**Dependency:** P3 T2 verified vertical slice, not P3 T4 comparative study. **Status: APPROVED.**
+
+## Moved
+
+The route schema, the route ledger and the fail-closed refusals live in [agent-runtime](https://github.com/FBisca/agent-runtime),
+in the `agent-orchestrator` member, and the suite that answers this plan's scenarios is there too — under that
+repository's `docs/specs/orchestrator-engine.md`. This repository keeps the skill that drives the member, and the
+documentation of the route it uses.
+
+T3 is still a person's gate: the owner answers it in this plan, and the driver archives the plan.
