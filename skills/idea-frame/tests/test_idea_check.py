@@ -336,6 +336,16 @@ class IdeaCheckTests(unittest.TestCase):
         (self.dir / "answers.md").unlink()
         self.assertIn("PASS answers-sourced", self.run_check("--gate", "2")[1])
 
+    # --- S30
+    def test_S30_the_date_the_gate_compares_against_is_injected(self):
+        """S30: IDEA_CHECK_TODAY is the today the gate compares against, so crossing midnight changes nothing."""
+        with patch.dict(os.environ, {"IDEA_CHECK_TODAY": "2026-10-20"}):
+            self.assertIn("PASS answers-sourced", self.run_check("--gate", "2")[1])
+        with patch.dict(os.environ, {"IDEA_CHECK_TODAY": "2026-10-19"}):
+            code, out, _ = self.run_check("--gate", "2")
+            self.assertEqual(code, 1)
+            self.assertIn("FAIL answers-sourced", out)
+
     # --- S45
     def test_S45_latest_gate2_line_must_be_pass_by_decider(self):
         bad = (GATES.replace("pass by CFO", "pass by CPO"),

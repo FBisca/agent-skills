@@ -12,6 +12,17 @@ disable-model-invocation: true
 
 The vault root is the `VAULT_DIR` environment variable; if it is unset, stop and tell the user to set it. The folder contract is the docstring of `scripts/idea_check.py` of the sibling `idea-frame` skill (`../idea-frame/` relative to this skill's folder; call it `<idea-frame>`); read it before writing any file. This skill never sends anything.
 
+## The gate's vocabulary
+
+The gate accepts exactly these values and rejects anything else:
+
+```
+stages: framing | gate1 | answering | gate2 | prd | killed | reshaped
+answer fields: Owner | Date | Link | Summary
+test types: interview | prototype | data | survey | spike
+result values: confirmed | killed | changed: <what> | accepted by <role>: <reason>; revisit: <trigger>
+```
+
 **Owner guidance** (who can answer, by what the row is about): finance and compliance for money, legal, security and data rules (ask the owner of that rule); operator/user for how people work or react; decider for scope and priority, and for product-behaviour rules that are a product call; engineering for how the system behaves (read-only lookup in code, no one is asked).
 
 ## Steps
