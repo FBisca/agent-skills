@@ -12,6 +12,16 @@ disable-model-invocation: true
 
 The vault root is the `VAULT_DIR` environment variable; if it is unset, stop and tell the user to set it (the script fails naming it too). The folder contract (file formats, allowed values, check rules) is the docstring of `scripts/idea_check.py` in this skill's folder. Read it before writing any file; the gate fails on anything it does not allow. Vault rules apply: no client or investor names, no message bodies, no secrets.
 
+## The gate's vocabulary
+
+The gate accepts exactly these values and rejects anything else:
+
+```
+stages: framing | gate1 | answering | gate2 | prd | killed | reshaped
+columns: id | assumption | if wrong | owner | source | test | result
+test types: interview | prototype | data | survey | spike
+```
+
 ## Steps
 
 1. **Folder.** Derive a short `<Title>` from the sentence and a kebab `<slug>` from the title. If the folder exists, stop and ask. Create the index note `<Title>.md` (the only root-level note with `type: project`) from the vault's `90-templates/project.md` if it has one, else this skill's bundled `templates/project.md`, keeping its sections (Outcome, `## Now`, a Tasks section (a base embed in the vault template), `## Notes`, `## Decisions`). Frontmatter: `type: project`, `status: idea`, `stage: framing`, `entry: raw`, `decider: <role>` (ask the user which role decides; a role, never a name), `area`, `created`, `updated`, `tags: []`. Outcome = the sentence. Add `## Hours` and `## Gates`. Under `## Notes` list `[[frame]] [[assumptions]]`. Each side note gets frontmatter `type: note`, `area`, `project: "[[<Title>]]"`, `created`, `updated`, `tags: []`.

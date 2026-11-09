@@ -4,6 +4,7 @@ r"""Deterministic idea-folder gate (converge-style). This docstring is the idea-
 Usage: idea_check.py <folder> [--gate 1|2]
 VAULT_DIR must name the vault root (a directory). `<folder>` is a path, or a slug under `$VAULT_DIR/01-projects/`.
 With VAULT_DIR unset or not a directory the script prints an error naming it and exits 3.
+IDEA_CHECK_TODAY, when set, is the date the gate compares against (YYYY-MM-DD); unset, it is the real today.
 Output: one `PASS|FAIL|SKIPPED <check>: detail` line per check. Exit 0 if nothing FAILs, 1 on any FAIL,
 2 on `REFUSED <path>: <what>` (not exactly one index note; printed to stdout and stderr, no checks run).
 
@@ -59,13 +60,22 @@ from pathlib import Path
 
 VALID_STAGES = ["framing", "gate1", "answering", "gate2", "prd", "killed", "reshaped"]
 COLUMNS = ("id", "assumption", "if wrong", "owner", "source", "test", "result")
+ANSWER_FIELDS = ("Owner", "Date", "Link", "Summary")
 TEST_TYPES = ("interview", "prototype", "data", "survey", "spike")
+# The results a closed row may carry, each with the pattern that accepts it.
+RESULT_VALUES = {
+    "confirmed": r"confirmed",
+    "killed": r"killed",
+    "changed: <what>": r"changed:\s*\S.*",
+    "accepted by <role>: <reason>; revisit: <trigger>":
+        r"accepted by\s+[^:;\s][^:;]*:\s*[^;\s][^;]*;\s*revisit:\s*\S.*",
+}
 SIDE_FILES = {"assumptions.md", "answers.md", "frame.md", "brief.md"}  # compared lowercased
 GATE_LINE = re.compile(
     r"^\s*[-*]\s+\d{4}-\d\d-\d\d\s+gate([12]):\s*(kill|reshape|continue|pass by [^:]+?)\s*(?::\s*(.*?))?\s*$", re.I)
 COLD_LINE = re.compile(r"^\s*[-*]\s+\d{4}-\d\d-\d\d\s+cold-read:(.*)$")
 HOURS_LINE = re.compile(r"^\s*[-*]\s+\d{4}-\d\d-\d\d\s+\S+\s+(\d+(?:\.\d+)?)h\b", re.M)
-CLOSED = re.compile(r"confirmed|killed|changed:\s*\S.*|accepted by\s+[^:;\s][^:;]*:\s*[^;\s][^;]*;\s*revisit:\s*\S.*", re.I)
+CLOSED = re.compile("|".join(RESULT_VALUES.values()), re.I)
 
 
 def load(path):
@@ -177,18 +187,39 @@ def field(body, name):
     return m.group(1) if m else ""
 
 
-def real_past_date(value):
+def today():
+    """The date the gate compares against: IDEA_CHECK_TODAY (YYYY-MM-DD) when it is set, else the real today."""
+    raw = os.environ.get("IDEA_CHECK_TODAY", "").strip()
+    if raw:
+        try:
+            return datetime.date.fromisoformat(raw)
+        except ValueError:
+            print(f"WARNING: IDEA_CHECK_TODAY is not a YYYY-MM-DD date: {raw}", file=sys.stderr)
+    return datetime.date.today()
+
+
+def real_past_date(value, now):
+    """A real YYYY-MM-DD date, no later than `now`."""
     try:
-        return datetime.date.fromisoformat(value) <= datetime.date.today() and bool(re.fullmatch(r"\d{4}-\d\d-\d\d", value))
+        return datetime.date.fromisoformat(value) <= now and bool(re.fullmatch(r"\d{4}-\d\d-\d\d", value))
     except ValueError:
         return False
 
 
-def check_answers(text):
+def check_answers(text, now=None):
+    """Every entry carries every answer field; the Date is a real date, no later than today."""
+    now = now or today()
     bad = []
     for head, body in sections(text or ""):
-        miss = [f for f in ("Owner", "Date", "Link", "Summary")
-                if not (real_past_date(field(body, f)) if f == "Date" else field(body, f))]
+        miss = []
+        for name in ANSWER_FIELDS:
+            value = field(body, name)
+            if name == "Date":
+                ok = bool(value) and real_past_date(value, now)
+            else:
+                ok = bool(value)
+            if not ok:
+                miss.append(name)
         if miss:
             bad.append(f"{head.split()[0] if head else '?'} lacks " + "/".join(miss))
     return result(not bad, "answers-sourced", "; ".join(bad))
