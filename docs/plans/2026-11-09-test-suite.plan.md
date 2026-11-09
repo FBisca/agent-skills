@@ -1,6 +1,6 @@
 # Plan: the test suite earns its keep
 
-Slug: `test-suite`. Living spec: `docs/specs/test-suite.md`. Status: APPROVED 2026-11-09.
+Slug: `test-suite`. Living spec: `docs/specs/test-suite.md`. Status: ARCHIVED 2026-11-09.
 
 ## Why now
 

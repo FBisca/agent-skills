@@ -2,8 +2,8 @@
 
 S3: the shared skills keep the Claude Code and Codex behaviour they had.
 S4: the test suite runs offline and enforces the Markdown plan contract.
-S20: every tracked plan is read by the reader the gate uses.
-S21: the engine reads the plans this repository tracks.
+test-suite/R1: every tracked plan is read by the reader the gate uses.
+test-suite/R2: the engine reads the plans this repository tracks.
 """
 
 import importlib.util
@@ -18,11 +18,11 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 SKILLS = ROOT / "skills"
 
-# These read the plans through `git ls-files`: a subprocess, so an integration boundary (S31).
+# These read the plans through `git ls-files`: a subprocess, so an integration boundary (test-suite/R12).
 GIT_READERS = {
     "test_S4_every_tracked_plan_keeps_the_plan_contract",
-    "test_S20_the_gate_reader_reads_every_tracked_plan",
-    "test_S21_the_engine_reads_every_tracked_plan",
+    "test_the_gate_reader_reads_every_tracked_plan",
+    "test_the_engine_reads_every_tracked_plan",
 }
 
 PLAN_HEADINGS = ("Why now", "Sources", "Decisions", "Scenarios", "Out of scope", "Risks",
@@ -151,7 +151,7 @@ class PlanContract(unittest.TestCase):
 
 
 class PlanReader(unittest.TestCase):
-    """S20: the plan format is read by the reader the gate uses."""
+    """test-suite/R1: the plan format is read by the reader the gate uses."""
 
     HEAD = ("# Plan: the reader\n\nSlug: `reader`. Living spec: `docs/specs/reader.md`. "
             "Status: APPROVED 2026-11-09.\n\n## Scenarios\n\n"
@@ -159,8 +159,8 @@ class PlanReader(unittest.TestCase):
             "ticket rows.\n\n")
 
     @pytest.mark.integration
-    def test_S20_the_gate_reader_reads_every_tracked_plan(self):
-        """S20: every tracked plan yields its scenario ids and its ticket rows; a plan
+    def test_the_gate_reader_reads_every_tracked_plan(self):
+        """test-suite/R1: every tracked plan yields its scenario ids and its ticket rows; a plan
         whose Tickets table is missing or has no rows is refused."""
         plans = tracked_plans()
         self.assertTrue(plans)
@@ -179,11 +179,11 @@ class PlanReader(unittest.TestCase):
 
 
 class EnginePlanContract(unittest.TestCase):
-    """S21: the engine reads the plans this repository tracks."""
+    """test-suite/R2: the engine reads the plans this repository tracks."""
 
     @pytest.mark.integration
-    def test_S21_the_engine_reads_every_tracked_plan(self):
-        """S21: the engine's contract, asserted by name, holds for every plan it reads."""
+    def test_the_engine_reads_every_tracked_plan(self):
+        """test-suite/R2: the engine's contract, asserted by name, holds for every plan it reads."""
         for plan in tracked_plans():
             text = plan.read_text(encoding="utf-8")
             columns = converge.ticket_table(text)[0]
@@ -215,7 +215,7 @@ class EnginePlanContract(unittest.TestCase):
 
 
 class MarkerMeaning(unittest.TestCase):
-    """S31: the marker text and the suite agree on what `unit` and `integration` mean."""
+    """test-suite/R12: the marker text and the suite agree on what `unit` and `integration` mean."""
 
     @staticmethod
     def kinds(function):
@@ -230,8 +230,8 @@ class MarkerMeaning(unittest.TestCase):
         return module
 
     @pytest.mark.unit
-    def test_S31_the_marker_text_and_the_suite_agree(self):
-        """S31: `unit` is in-process, inside the test's own temporary directory; `integration`
+    def test_the_marker_text_and_the_suite_agree(self):
+        """test-suite/R12: `unit` is in-process, inside the test's own temporary directory; `integration`
         is a real boundary; the tests that guard pure logic carry `unit`."""
         config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         markers = {text.split(":", 1)[0]: text for text in config["tool"]["pytest"]["ini_options"]["markers"]}
