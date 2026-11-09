@@ -11,13 +11,19 @@ import pytest
 from pathlib import Path
 import re
 import subprocess
+import tomllib
 import unittest
 
 
-pytestmark = pytest.mark.integration
-
 ROOT = Path(__file__).resolve().parents[1]
 SKILLS = ROOT / "skills"
+
+# These read the plans through `git ls-files`: a subprocess, so an integration boundary (S31).
+GIT_READERS = {
+    "test_S4_every_tracked_plan_keeps_the_plan_contract",
+    "test_S20_the_gate_reader_reads_every_tracked_plan",
+    "test_S21_the_engine_reads_every_tracked_plan",
+}
 
 PLAN_HEADINGS = ("Why now", "Sources", "Decisions", "Scenarios", "Out of scope", "Risks",
                  "Seams", "Tickets")
@@ -74,6 +80,7 @@ def tracked_plans():
 class Discovery(unittest.TestCase):
     """Pi and the other harnesses discover a skill the same way: a directory with a SKILL.md."""
 
+    @pytest.mark.unit
     def test_every_skill_is_discoverable_and_portable(self):
         names = {}
         for directory in sorted(p for p in SKILLS.iterdir() if p.is_dir()):
@@ -93,6 +100,7 @@ class Discovery(unittest.TestCase):
 
 
 class SharedSkills(unittest.TestCase):
+    @pytest.mark.unit
     def test_S3_the_shared_skills_keep_their_harness_contracts(self):
         """S3: the Pi work did not change what the other harnesses do."""
         for name, needles in SHARED_CONTRACTS.items():
@@ -104,6 +112,7 @@ class SharedSkills(unittest.TestCase):
 class NoHarnessInstructions(unittest.TestCase):
     """A skill body states the workflow; the harness's own discovery states the invocation."""
 
+    @pytest.mark.unit
     def test_the_harness_detail_lives_in_a_reference(self):
         """The per-harness dispatch is loaded on demand, not with the skill."""
         reference = SKILLS / "start-planning" / "references" / "delegation.md"
@@ -116,6 +125,7 @@ class NoHarnessInstructions(unittest.TestCase):
 class PlanContract(unittest.TestCase):
     """S4: the Markdown plan format other skills parse is enforced on the plans in this repo."""
 
+    @pytest.mark.integration
     def test_S4_every_tracked_plan_keeps_the_plan_contract(self):
         plans = tracked_plans()
         self.assertTrue(plans)
@@ -148,6 +158,7 @@ class PlanReader(unittest.TestCase):
             "- **S1** WHEN the gate reads a plan, THEN it yields the scenario ids and the "
             "ticket rows.\n\n")
 
+    @pytest.mark.integration
     def test_S20_the_gate_reader_reads_every_tracked_plan(self):
         """S20: every tracked plan yields its scenario ids and its ticket rows; a plan
         whose Tickets table is missing or has no rows is refused."""
@@ -170,6 +181,7 @@ class PlanReader(unittest.TestCase):
 class EnginePlanContract(unittest.TestCase):
     """S21: the engine reads the plans this repository tracks."""
 
+    @pytest.mark.integration
     def test_S21_the_engine_reads_every_tracked_plan(self):
         """S21: the engine's contract, asserted by name, holds for every plan it reads."""
         for plan in tracked_plans():
@@ -200,6 +212,44 @@ class EnginePlanContract(unittest.TestCase):
                             "%s: no backticked Slug" % plan.name)
             self.assertTrue(any(re.match(r"^[^*]*Status: APPROVED\b", line) for line in lines),
                             "%s: no unbolded Status: APPROVED" % plan.name)
+
+
+class MarkerMeaning(unittest.TestCase):
+    """S31: the marker text and the suite agree on what `unit` and `integration` mean."""
+
+    @staticmethod
+    def kinds(function):
+        """The partition markers a test function carries."""
+        return {mark.name for mark in getattr(function, "pytestmark", [])} & {"unit", "integration"}
+
+    @staticmethod
+    def load(path):
+        spec = importlib.util.spec_from_file_location("s31_" + path.stem, path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    @pytest.mark.unit
+    def test_S31_the_marker_text_and_the_suite_agree(self):
+        """S31: `unit` is in-process, inside the test's own temporary directory; `integration`
+        is a real boundary; the tests that guard pure logic carry `unit`."""
+        config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        markers = {text.split(":", 1)[0]: text for text in config["tool"]["pytest"]["ini_options"]["markers"]}
+        self.assertIn("in process", markers["unit"])
+        self.assertIn("temporary directory", markers["unit"])
+        self.assertIn("a temporary directory is not a boundary", markers["unit"].lower())
+        self.assertIn("real component boundary", markers["integration"])
+        self.assertIn("A temporary directory is not a boundary.", (ROOT / "AGENTS.md").read_text(encoding="utf-8"))
+
+        gatherer = self.load(SKILLS / "start-planning" / "tests" / "test_fresh_context.py").GathererTests
+        for name in unittest.TestLoader().getTestCaseNames(gatherer):
+            expected = {"integration"} if name.startswith("test_printed_answer") else {"unit"}
+            self.assertEqual(self.kinds(getattr(gatherer, name)), expected, name)
+
+        for case in (Discovery, SharedSkills, NoHarnessInstructions, PlanContract, PlanReader, EnginePlanContract):
+            for name in unittest.TestLoader().getTestCaseNames(case):
+                expected = {"integration"} if name in GIT_READERS else {"unit"}
+                self.assertEqual(self.kinds(getattr(case, name)), expected, "%s.%s" % (case.__name__, name))
 
 
 if __name__ == "__main__":
