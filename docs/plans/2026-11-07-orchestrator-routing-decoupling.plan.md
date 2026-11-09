@@ -1,6 +1,6 @@
 # Plan: Decouple Orchestrator Model Routing From Claude
 
-Slug: `orchestrator-routing-decoupling`. Living spec: `docs/specs/orchestration-routing.md`. Status: APPROVED.
+Slug: `orchestrator-routing-decoupling`. Living spec: `docs/specs/orchestrator-engine.md` in agent-runtime (R4, R19–R21). Status: ARCHIVED 2026-11-09.
 
 ## Why now
 
@@ -32,8 +32,8 @@ The Python driver currently resolves model classes from a Markdown table in `~/.
 
 - **Format ownership:** YAML only for human-authored `routes`/risk policies. JSON/JSONL for worker packets, terminal results, events and state; TOML for Python package metadata. No global JSON→YAML conversion.
 - **Schema:** versioned strict Pydantic v2 contracts belong to the prospective orchestrator package; while in `agent-skills`, introduce a small typed compatibility seam and explicit schema tests without creating parallel sources of truth. Route resolution order: explicit CLI override → repo policy → user default → built-in safe default; **invalid explicit routes fail**, never silently select another billable model.
-- **Route capability:** separate provider/harness/model ID from quota, company-use eligibility and capabilities; Pi is a **lead only** until Pi worker launch is separately enabled. A `--cli pi` worker route must fail clearly if unsupported.
-- **Risk:** objective high-risk triggers for auth, payments, destructive operations, migrations and permission boundaries; human approval at sensitive transitions. Unknown risk defaults medium; model can only raise risk.
+- **Route capability:** separate provider/harness/model ID from quota, company-use eligibility and capabilities; Pi is a **lead only** until Pi worker launch is separately enabled. A `--cli pi` worker route must fail clearly if unsupported. (Superseded per D3: agent-runtime #68 enabled Pi workers, so `pi` is a valid worker backend.)
+- **Risk:** objective high-risk triggers for auth, payments, destructive operations, migrations and permission boundaries; human approval at sensitive transitions. Unknown risk defaults medium; model can only raise risk. (Superseded by D5–D8: two tiers, built in P5.)
 - **Task packet:** versioned objective, allowed/forbidden paths, acceptance, constraints, source refs/revision, output contract and verification. Reject unrecognised machine fields and protect source revisions.
 - **Compatibility:** maintain the legacy driver CLI and reading of its existing policy for a bounded transition period, but produce an explicit warning and test that the new config, when chosen, wins; phase out legacy only after callers migrate.
 
@@ -78,7 +78,7 @@ The Python driver currently resolves model classes from a Markdown table in `~/.
 - WHEN a route's risk tier requires review, THEN model suggestion cannot lower it and CI/gates cannot be bypassed.
 - WHEN the future monorepo extraction runs, THEN the schema and config golden fixtures remain byte-for-byte compatible and no duplicate routing implementation survives.
 
-**Dependency:** P3 T2 verified vertical slice, not P3 T4 comparative study. **Status: APPROVED.**
+**Dependency:** P3 T2 verified vertical slice, not P3 T4 comparative study. **Status: ARCHIVED 2026-11-09.**
 
 ## Moved
 
@@ -87,4 +87,4 @@ in the `agent-orchestrator` member, and the suite that answers this plan's scena
 repository's `docs/specs/orchestrator-engine.md`. This repository keeps the skill that drives the member, and the
 documentation of the route it uses.
 
-T3 is still a person's gate: the owner answers it in this plan, and the driver archives the plan.
+T3 was approved on 2026-11-09. The scenarios were archived by hand into that spec: S1 → R19, S2 → R20, S3 → R4, S4 → R21.
