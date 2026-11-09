@@ -17,6 +17,7 @@ import io
 import pytest
 from pathlib import Path
 import importlib.util
+import os
 import re
 import sys
 import tempfile
@@ -254,6 +255,76 @@ class RefusedFrontmatter(unittest.TestCase):
         self.assert_refused('---\nname: probe\ndescription: "A\ttab."\n---\n\nbody\n', "tab")
 
 
+GOOD_SKILL = '---\nname: probe\ndescription: "A description."\n---\n\nbody\n'
+
+
+def make_skill(root, files):
+    """A skill folder named probe under root, holding the given files; returns its SKILL.md."""
+    directory = Path(root) / "probe"
+    for relative, text in {"SKILL.md": GOOD_SKILL, **files}.items():
+        target = directory / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+    return directory / "SKILL.md"
+
+
+def symlinked_file(root):
+    """A skill whose reference is a symlink to a file outside the folder."""
+    skill = make_skill(root, {})
+    target = Path(root) / "elsewhere.md"
+    target.write_text("text\n", encoding="utf-8")
+    os.symlink(target, skill.parent / "link.md")
+    return skill
+
+
+def symlinked_folder(root):
+    """A skill whose whole folder is a symlink to a folder elsewhere."""
+    real = make_skill(Path(root) / "real", {}).parent
+    link = Path(root) / "probe"
+    os.symlink(real, link)
+    return link / "SKILL.md"
+
+
+# Every hygiene defect the lint names: a hardcoded skill path, an invocation syntax, an absolute
+# user path, a symlink, and a copied skill whose NOTICE names no upstream or no licence. Each case
+# builds a skill under a temp root, and names the message and the line the lint must give.
+HYGIENE = [
+    ("a hardcoded Claude skill path",
+     lambda root: make_skill(root, {"SKILL.md": GOOD_SKILL + "Install into ~/.claude/skills/probe.\n"}),
+     "the skill hardcodes a skill path", 7),
+    ("a hardcoded Codex and Pi skill path",
+     lambda root: make_skill(root, {"SKILL.md": GOOD_SKILL + "Install into ~/.agents/skills/probe.\n"}),
+     "the skill hardcodes a skill path", 7),
+    ("a Pi invocation syntax",
+     lambda root: make_skill(root, {"SKILL.md": GOOD_SKILL + "Run /skill:probe first.\n"}),
+     "the skill carries an invocation syntax", 7),
+    ("an invocation instruction",
+     lambda root: make_skill(root, {"SKILL.md": GOOD_SKILL + "Invoke it as probe.\n"}),
+     "the skill carries an invocation syntax", 7),
+    ("an absolute user path in a reference",
+     lambda root: make_skill(root, {"references/notes.md": "Read /Users/someone/notes.md first.\n"}),
+     "the file holds an absolute user path", 1),
+    ("a symlinked file",
+     symlinked_file,
+     "is a symlink", 1),
+    ("a symlinked skill folder",
+     symlinked_folder,
+     "is a symlink", 1),
+    ("a NOTICE that names no upstream",
+     lambda root: make_skill(root, {"NOTICE.md": "Derived by hand. MIT License.\n"}),
+     "NOTICE.md does not name its upstream", 1),
+    ("a NOTICE that names no licence",
+     lambda root: make_skill(root, {"NOTICE.md": "Derived from https://github.com/example/skills.\n"}),
+     "NOTICE.md does not name its licence", 1),
+]
+
+
+def hygiene_problems(build):
+    """The problems the lint finds in one skill a case builds under a temp root."""
+    with tempfile.TemporaryDirectory() as tmp:
+        return LINTER.lint_skill(build(Path(tmp)))
+
+
 class Refusals(unittest.TestCase):
     """Every defect the lint names is refused, and every refusal it can produce is asserted."""
 
@@ -285,9 +356,32 @@ class Refusals(unittest.TestCase):
                                     "the refusal does not name the file: %s" % problem)
                     self.assertIn(":%d: " % problem.line, str(problem),
                                   "the refusal does not name the line: %s" % problem)
+        for label, build, _, _ in HYGIENE:
+            said.extend(problem.message for problem in hygiene_problems(build))
         for template in sorted(problem_templates()):
             self.assertTrue(any(re.search(template_pattern(template), message) for message in said),
                             "the lint can refuse %r and nothing proves it" % template)
+
+
+class Hygiene(unittest.TestCase):
+    """The hygiene rules are lint problems: each names the file and the line it found the defect on."""
+
+    def test_S32_a_skill_that_hardcodes_a_path_or_a_syntax_or_a_user_path_or_is_a_symlink_is_named(self):
+        """S32: WHEN a skill hardcodes a skill path, carries an invocation syntax, holds an absolute user
+        path or is a symlink, THEN the lint names the file and the line."""
+        for label, build, expected, line in HYGIENE:
+            with self.subTest(defect=label):
+                problems = hygiene_problems(build)
+                messages = [problem.message for problem in problems]
+                self.assertTrue(any(expected in message for message in messages),
+                                "the lint refused %s with %r, not %r" % (label, messages, expected))
+                for problem in problems:
+                    self.assertTrue(str(problem).startswith(str(problem.path)),
+                                    "the refusal does not name the file: %s" % problem)
+                    self.assertIn(":%d: " % problem.line, str(problem),
+                                  "the refusal does not name the line: %s" % problem)
+                self.assertIn(line, [problem.line for problem in problems if expected in problem.message],
+                              "the lint names the wrong line for %s" % label)
 
 
 class ExitCodes(unittest.TestCase):

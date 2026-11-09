@@ -45,6 +45,15 @@ Quote a description that holds a colon or a `#`. The lint is stdlib-only on purp
 and the YAML dialects the harnesses use disagree about plain scalars, so it accepts a value only when every dialect
 reads the same text back.
 
+## Skill hygiene
+
+The same lint refuses a skill folder that hardcodes a skill path (`~/.claude/skills/`, `~/.agents/skills/`), carries an
+invocation syntax (`/skill:`, "Invoke it as"), holds an absolute user path (`/Users/...`), is a symlink, or is a copied
+skill whose `NOTICE.md` does not name its upstream and its licence. It names the file and the line of each defect.
+
+Skills name roles, never people: write "the CFO" or "the decider", not a person's name. No check enforces this, because
+a check would need a list of names; a reviewer enforces it.
+
 ## Test fakes are contracts
 
 The engine polls whatever the fakes answer. A fake with no terminal answer — a PR that
