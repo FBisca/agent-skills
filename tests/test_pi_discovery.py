@@ -81,8 +81,8 @@ class PiDiscoveryTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.tmp.cleanup()
 
-    def test_S35_pi_discovers_every_skill_of_this_repo(self):
-        """S35: Pi discovers every skill of this repository and reports no problem with any of them.
+    def test_pi_discovers_every_skill_of_this_repo(self):
+        """test-suite/R16: Pi discovers every skill of this repository and reports no problem with any of them.
 
         One test over every skill: a skill Pi cannot parse disappears from the list without a
         word, so the whole set is checked at once, and the description Pi routes on is the one
@@ -102,7 +102,7 @@ class PiDiscoveryTests(unittest.TestCase):
         # The guarantee is asserted once, over every skill: this module holds no second test.
         self.assertEqual(
             [name for name, _ in inspect.getmembers(self, inspect.ismethod) if name.startswith("test")],
-            ["test_S35_pi_discovers_every_skill_of_this_repo"])
+            ["test_pi_discovers_every_skill_of_this_repo"])
 
 
 if __name__ == "__main__":

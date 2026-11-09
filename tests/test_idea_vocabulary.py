@@ -1,4 +1,4 @@
-"""The vocabulary the idea skills document against the vocabulary the gate enforces (S22).
+"""The vocabulary the idea skills document against the vocabulary the gate enforces (test-suite/R3).
 
 The gate is the machine that decides; the two skills are the documents an agent reads. A value the
 script accepts and no document names is a trap for the agent, and a value a document names and the
@@ -54,8 +54,8 @@ def vocabulary(text):
 
 
 class IdeaVocabulary(unittest.TestCase):
-    def test_S22_the_skills_document_exactly_the_gate_vocabulary(self):
-        """S22: the documented vocabulary is the script's, in both directions."""
+    def test_the_skills_document_exactly_the_gate_vocabulary(self):
+        """test-suite/R3: the documented vocabulary is the script's, in both directions."""
         script = load()
         documented = set()
         for path in DOCS:

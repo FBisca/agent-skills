@@ -119,3 +119,7 @@ uv run pytest tests/test_portability.py
 ```
 
 Step 3 also has to show the gather step running: the plan's Sources table and decisions come from the gatherer, not from the parent session.
+
+## Tests
+
+The portability contracts are enforced by `tests/test_portability.py` (the plan reader and the engine's plan contract, `test-suite/R1`, `test-suite/R2`, `test-suite/R12`), `tests/test_pi_discovery.py` (`test-suite/R16`) and `skills/start-planning/tests/test_portability.py` (`test-suite/R2`). Their living spec is `docs/specs/test-suite.md`.

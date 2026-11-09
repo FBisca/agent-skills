@@ -176,8 +176,8 @@ class VaultDir(unittest.TestCase):
             self.assertIn("VAULT_DIR", missing.stdout + missing.stderr)
 
     @pytest.mark.integration
-    def test_S26_idea_check_exits_3_naming_vault_dir_when_unset_or_not_a_directory(self):
-        """S26: WHEN VAULT_DIR is unset or is not a directory, THEN idea_check.py exits 3 and names VAULT_DIR."""
+    def test_idea_check_exits_3_naming_vault_dir_when_unset_or_not_a_directory(self):
+        """test-suite/R7: WHEN VAULT_DIR is unset or is not a directory, THEN idea_check.py exits 3 and names VAULT_DIR."""
         with tempfile.TemporaryDirectory() as tmp:
             folder = self.make_vault(tmp)
             not_a_dir = Path(tmp) / "file.txt"
@@ -207,8 +207,8 @@ class VaultDir(unittest.TestCase):
             self.assertEqual(ok.returncode, 0, ok.stderr)
 
     @pytest.mark.integration
-    def test_S26_excalidraw_vault_dir_exits_3_naming_vault_dir_when_unset_or_not_a_directory(self):
-        """S26: WHEN VAULT_DIR is unset or is not a directory, THEN excali.vault_dir() exits 3 and names VAULT_DIR."""
+    def test_excalidraw_vault_dir_exits_3_naming_vault_dir_when_unset_or_not_a_directory(self):
+        """test-suite/R7: WHEN VAULT_DIR is unset or is not a directory, THEN excali.vault_dir() exits 3 and names VAULT_DIR."""
         code = ("import sys; sys.dont_write_bytecode = True; sys.path.insert(0, %r); import excali; excali.vault_dir()"
                 % str(SKILLS / "excalidraw" / "scripts"))
         base = {k: v for k, v in os.environ.items() if k != "VAULT_DIR"}
@@ -251,7 +251,8 @@ class RemovedSkillsTest(unittest.TestCase):
 
 class ProseOnlySkills(unittest.TestCase):
     @pytest.mark.unit
-    def test_S33_readme_names_exactly_the_skills_without_a_scripts_folder(self):
+    def test_readme_names_exactly_the_skills_without_a_scripts_folder(self):
+        """test-suite/R14: readme names exactly the skills without a scripts folder."""
         # The fact: a skill has executable behaviour exactly when it ships a scripts/ folder.
         in_tree = {p.parent.name for p in SKILLS.glob("*/scripts") if p.is_dir()}
         without = {p.name for p in SKILLS.iterdir() if p.is_dir()} - in_tree
@@ -274,7 +275,8 @@ class SuiteGuard(unittest.TestCase):
     that skipped a unit test. Each check is tested through the function its session hook calls."""
 
     @pytest.mark.unit
-    def test_S27_a_fast_run_at_or_over_the_budget_fails_and_one_under_it_passes(self):
+    def test_a_fast_run_at_or_over_the_budget_fails_and_one_under_it_passes(self):
+        """test-suite/R8: a fast run at or over the budget fails and one under it passes."""
         self.assertIsNone(conftest.budget_problem(2.99))
         problem = conftest.budget_problem(3.25)
         self.assertIsNotNone(problem)
@@ -282,7 +284,8 @@ class SuiteGuard(unittest.TestCase):
         self.assertIsNotNone(conftest.budget_problem(3.0), "under 3 seconds: exactly 3 is not under")
 
     @pytest.mark.unit
-    def test_S28_a_run_that_leaves_a_temporary_entry_fails_and_its_directory_is_removed(self):
+    def test_a_run_that_leaves_a_temporary_entry_fails_and_its_directory_is_removed(self):
+        """test-suite/R9: a run that leaves a temporary entry fails and its directory is removed."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             clean = conftest.open_session_temp(root)
@@ -295,7 +298,8 @@ class SuiteGuard(unittest.TestCase):
             self.assertFalse(leaky.exists())
 
     @pytest.mark.unit
-    def test_S29_a_skipped_unit_test_fails_the_run_and_every_skip_is_reported_with_its_reason(self):
+    def test_a_skipped_unit_test_fails_the_run_and_every_skip_is_reported_with_its_reason(self):
+        """test-suite/R10: a skipped unit fails the run and every skip is reported with its reason."""
         unit = conftest.Skip("tests/test_x.py::T::test_one", "Pi is not installed", True)
         integration = conftest.Skip("tests/test_y.py::T::test_two", "Node is not installed", False)
         self.assertIn("test_one", conftest.skip_problem([unit, integration]))
@@ -350,7 +354,8 @@ class SuiteHooks(unittest.TestCase):
                                keywords={"unit": True} if unit else {})
 
     @pytest.mark.unit
-    def test_S27_the_session_end_fails_an_over_budget_fast_run(self):
+    def test_the_session_end_fails_an_over_budget_fast_run(self):
+        """test-suite/R8: the session end fails an over budget fast run."""
         self.own_run()
         session = self.session()
         conftest.RUN.started = time.perf_counter() - 3.5
@@ -359,7 +364,8 @@ class SuiteHooks(unittest.TestCase):
         self.assertIn("budget", conftest.RUN.problems[0])
 
     @pytest.mark.unit
-    def test_S27_the_session_end_keeps_an_under_budget_fast_run_green(self):
+    def test_the_session_end_keeps_an_under_budget_fast_run_green(self):
+        """test-suite/R8: the session end keeps an under budget fast run green."""
         self.own_run()
         session = self.session()
         conftest.RUN.started = time.perf_counter() - 0.1
@@ -368,7 +374,8 @@ class SuiteHooks(unittest.TestCase):
         self.assertEqual(conftest.RUN.problems, [])
 
     @pytest.mark.unit
-    def test_S27_a_failing_run_keeps_its_own_failing_status(self):
+    def test_a_failing_run_keeps_its_own_failing_status(self):
+        """test-suite/R8: a failing run keeps its own failing status."""
         self.own_run()
         session = self.session(pytest.ExitCode.TESTS_FAILED)
         conftest.RUN.started = time.perf_counter() - 3.5
@@ -376,7 +383,8 @@ class SuiteHooks(unittest.TestCase):
         self.assertEqual(session.exitstatus, pytest.ExitCode.TESTS_FAILED)
 
     @pytest.mark.unit
-    def test_S28_configure_hands_the_run_its_own_directory_and_unconfigure_restores_the_temp_settings(self):
+    def test_configure_hands_the_run_its_own_directory_and_unconfigure_restores_the_temp_settings(self):
+        """test-suite/R9: configure hands the run its own directory and unconfigure restores the temp settings."""
         before = tempfile.tempdir
         conftest.pytest_configure(None)
         self.assertTrue(conftest.RUN.owner)
@@ -392,7 +400,8 @@ class SuiteHooks(unittest.TestCase):
         self.assertFalse(temp.exists())
 
     @pytest.mark.unit
-    def test_S28_the_session_end_fails_a_run_that_left_an_entry_behind(self):
+    def test_the_session_end_fails_a_run_that_left_an_entry_behind(self):
+        """test-suite/R9: the session end fails a run that left an entry behind."""
         self.own_run()
         (conftest.RUN.temp / "left-behind").mkdir()
         session = self.session()
@@ -402,7 +411,8 @@ class SuiteHooks(unittest.TestCase):
         self.assertIn("left-behind", " ".join(conftest.RUN.problems))
 
     @pytest.mark.unit
-    def test_S29_a_skipped_unit_test_is_recorded_and_fails_the_session_end(self):
+    def test_a_skipped_unit_test_is_recorded_and_fails_the_session_end(self):
+        """test-suite/R10: a skipped unit is recorded and fails the session end."""
         self.own_run()
         conftest.pytest_runtest_logreport(self.skipped("tests/x.py::T::test_one", ("tests/x.py", 3, "Skipped: needs pi"), True))
         self.assertEqual(conftest.RUN.skips, [conftest.Skip("tests/x.py::T::test_one", "needs pi", True)])
@@ -412,7 +422,8 @@ class SuiteHooks(unittest.TestCase):
         self.assertEqual(session.exitstatus, pytest.ExitCode.TESTS_FAILED)
 
     @pytest.mark.unit
-    def test_S29_an_integration_skip_with_a_reason_is_recorded_and_does_not_fail(self):
+    def test_an_integration_skip_with_a_reason_is_recorded_and_does_not_fail(self):
+        """test-suite/R10: an integration skip with a reason is recorded and does not fail."""
         self.own_run()
         conftest.pytest_runtest_logreport(self.skipped("tests/y.py::T::test_two", ("tests/y.py", 4, "Skipped: no node"), False))
         self.assertEqual(conftest.RUN.skips, [conftest.Skip("tests/y.py::T::test_two", "no node", False)])
@@ -422,7 +433,8 @@ class SuiteHooks(unittest.TestCase):
         self.assertEqual(session.exitstatus, pytest.ExitCode.OK)
 
     @pytest.mark.unit
-    def test_S29_a_bare_skip_with_no_message_is_a_skip_without_a_reason(self):
+    def test_a_bare_skip_with_no_message_is_a_skip_without_a_reason(self):
+        """test-suite/R10: a bare skip with no message is a skip without a reason."""
         self.own_run()
         conftest.pytest_runtest_logreport(self.skipped("tests/z.py::T::test_bare", ("tests/z.py", 5, "Skipped"), False))
         self.assertEqual(conftest.RUN.skips[0].reason, "")

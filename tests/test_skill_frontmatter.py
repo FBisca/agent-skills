@@ -346,8 +346,8 @@ class Refusals(unittest.TestCase):
                 skill.write_text(body, encoding="utf-8")
             return LINTER.lint_skill(skill)
 
-    def test_S23_the_lint_refuses_every_defect_it_names(self):
-        """Every refusal the lint can produce is exercised, and names the file, the line and the reason."""
+    def test_the_lint_refuses_every_defect_it_names(self):
+        """test-suite/R4: Every refusal the lint can produce is exercised, and names the file, the line and the reason."""
         said = []
         for label, body, expected in DEFECTS:
             with self.subTest(defect=label):
@@ -372,8 +372,8 @@ class Refusals(unittest.TestCase):
 class Hygiene(unittest.TestCase):
     """The hygiene rules are lint problems: each names the file and the line it found the defect on."""
 
-    def test_S32_a_skill_that_hardcodes_a_path_or_a_syntax_or_a_user_path_or_is_a_symlink_is_named(self):
-        """S32: WHEN a skill hardcodes a skill path, carries an invocation syntax, holds an absolute user
+    def test_a_skill_that_hardcodes_a_path_or_a_syntax_or_a_user_path_or_is_a_symlink_is_named(self):
+        """test-suite/R13: WHEN a skill hardcodes a skill path, carries an invocation syntax, holds an absolute user
         path or is a symlink, THEN the lint names the file and the line."""
         for label, build, expected, line in HYGIENE:
             with self.subTest(defect=label):
@@ -400,8 +400,8 @@ class ExitCodes(unittest.TestCase):
             code = LINTER.main(["lint_skills.py", *directories])
         return code, out.getvalue(), err.getvalue()
 
-    def test_S24_the_lint_exits_one_for_problems_two_for_a_bad_path_and_zero_for_a_clean_folder(self):
-        """The gate reads the exit code, so every outcome has its own."""
+    def test_the_lint_exits_one_for_problems_two_for_a_bad_path_and_zero_for_a_clean_folder(self):
+        """test-suite/R5: The gate reads the exit code, so every outcome has its own."""
         with tempfile.TemporaryDirectory() as tmp:
             clean = Path(tmp) / "clean"
             (clean / "skill-a").mkdir(parents=True)
@@ -439,8 +439,8 @@ class RepoSkills(unittest.TestCase):
                 fields[key.strip()] = value.strip()
         return fields
 
-    def test_S34_every_skill_of_this_repo_names_its_folder_and_describes_itself_in_text(self):
-        """One test over every skill: the name is the folder and the description is text."""
+    def test_every_skill_of_this_repo_names_its_folder_and_describes_itself_in_text(self):
+        """test-suite/R15: One test over every skill: the name is the folder and the description is text."""
         skills = sorted(SKILLS.glob("*/SKILL.md"))
         self.assertTrue(skills, "the repository holds no skill")
         for skill in skills:

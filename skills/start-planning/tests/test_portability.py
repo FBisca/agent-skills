@@ -4,7 +4,7 @@ S1: the planning contract survives the portability work, and Pi has a native inv
 S2: the two steps that need another context (gather, grill) have a Pi path that runs or
 fails loudly; neither may be skipped.
 S3: the Claude Code and Codex paths are still there, unchanged in substance.
-S21: the plan the skill documents is the plan the engine reads.
+test-suite/R2: the plan the skill documents is the plan the engine reads.
 """
 
 import pytest
@@ -78,10 +78,10 @@ class PlanContract(unittest.TestCase):
 
 
 class EngineContract(unittest.TestCase):
-    """S21: the plan the skill documents is the plan the engine reads."""
+    """test-suite/R2: the plan the skill documents is the plan the engine reads."""
 
-    def test_S21_the_documented_plan_carries_the_engine_contract(self):
-        """S21: the documented plan is the plan the engine reads."""
+    def test_the_documented_plan_carries_the_engine_contract(self):
+        """test-suite/R2: the documented plan is the plan the engine reads."""
         columns = [cell.strip() for cell in TICKET_HEADER.strip("|").split("|")]
         self.assertEqual(columns, list(ENGINE_COLUMNS), "the nine column names")
         self.assertEqual(columns[-1], "Status", "Status is the last column")
