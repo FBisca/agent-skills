@@ -318,12 +318,12 @@ def hygiene_problems(path):
             problems.extend(_hygiene_lines(item, ABSOLUTE_USER_PATH,
                                            "the file holds an absolute user path; name it relative "
                                            "to the skill"))
-    problems.extend(_hygiene_lines(path, HARDCODED_SKILL_PATH,
-                                   "the skill hardcodes a skill path; name the skill, not its "
-                                   "install folder"))
-    problems.extend(_hygiene_lines(path, INVOCATION_SYNTAX,
-                                   "the skill carries an invocation syntax; the harness's own "
-                                   "discovery states the invocation"))
+            problems.extend(_hygiene_lines(item, HARDCODED_SKILL_PATH,
+                                           "the skill hardcodes a skill path; name the skill, not "
+                                           "its install folder"))
+            problems.extend(_hygiene_lines(item, INVOCATION_SYNTAX,
+                                           "the skill carries an invocation syntax; the harness's "
+                                           "own discovery states the invocation"))
     notice = folder / NOTICE
     if notice.is_file() and not notice.is_symlink():
         text = notice.read_text(encoding="utf-8", errors="ignore")
