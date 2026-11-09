@@ -155,7 +155,8 @@ def skip_lines(skips):
 def skip_reason(report):
     longrepr = report.longrepr
     text = longrepr[2] if isinstance(longrepr, tuple) and len(longrepr) == 3 else longrepr
-    return str(text or "").removeprefix("Skipped: ")
+    text = str(text or "").removeprefix("Skipped: ")
+    return "" if text == "Skipped" else text  # a bare pytest.skip() says only "Skipped": it gives no reason
 
 
 def pytest_configure(config):
