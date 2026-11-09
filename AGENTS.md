@@ -10,6 +10,9 @@ Instructions for agents working in this repo.
   dependencies are faked.
 - A temporary directory is not a boundary. A test that writes only in its own temporary directory is still `unit`;
   a test that starts a process, or talks to a server or the network, is `integration`.
+- A Markdown document is not a test. Prose assertions (a sentence, a heading, a line count) do not check behaviour;
+  test the machine-read contract or the script that behaves, and leave skills with no script without a test of their
+  prose (see the README's list of them).
 - Prefer unit tests for fast feedback; use integration tests to verify contracts.
 - Classify tests by behaviour, not filename. Never weaken or reclassify tests just to improve speed.
 

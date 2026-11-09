@@ -4,7 +4,7 @@ Agent skills for [Claude Code](https://claude.com/claude-code), [Codex](https://
 
 - **Deterministic gates.** `idea_check.py` and `converge.py` read files and exit non-zero; an agent cannot talk its way past them.
 - **Agents that disagree on purpose.** `cold-read` asks a fresh reader to paraphrase a document; `orchestrate` builds with separate implementer agents and accepts a ticket only when its scenarios pass.
-- **Tested.** The gate and orchestration scripts (`idea-frame`, `idea-answer`, `converge`, `cold-read`, `orchestrate`) have test suites that run in CI on Python 3.11 to 3.13, and a repo-level test lints every `SKILL.md`. `excalidraw` and `explain-video` are checked by their own render loops, not by unit tests.
+- **Tested.** The gate and orchestration scripts (`idea-frame`, `converge`, `orchestrate`) have test suites that run in CI on Python 3.11 to 3.13, and a repo-level test lints every `SKILL.md`. `idea-answer` and `cold-read` have only Markdown contract checks, no scripts. `excalidraw` and `explain-video` are checked by their own render loops, not by unit tests.
 
 ## The pipeline
 
@@ -47,6 +47,21 @@ Own = written for this repo. Derivative = modified from an upstream, with attrib
 | [`git-commit`](skills/git-commit) | Conventional Commits with project conventions | Own |
 | [`handoff`](skills/handoff) | Compacts a conversation into a handoff document for another agent | Derivative (Matt Pocock, MIT) |
 | [`zoom-out`](skills/zoom-out) | Asks for broader context on unfamiliar code | Upstream copy (Matt Pocock, MIT) |
+
+### Skills with no executable behaviour
+
+These skills ship no `scripts/` folder: their behaviour is instructions for an agent, and a Markdown document is not a test of it.
+
+- `assemble-crew`
+- `cold-read`
+- `deep-prompt`
+- `gh-pr-create`
+- `git-commit`
+- `handoff`
+- `idea-answer`
+- `score-agent`
+- `score-steering`
+- `zoom-out`
 
 ## Install
 

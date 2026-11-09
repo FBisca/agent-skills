@@ -249,6 +249,26 @@ class RemovedSkillsTest(unittest.TestCase):
             self.assertNotIn(name, json.dumps(entry))
 
 
+class ProseOnlySkills(unittest.TestCase):
+    @pytest.mark.unit
+    def test_S33_readme_names_exactly_the_skills_without_a_scripts_folder(self):
+        # The fact: a skill has executable behaviour exactly when it ships a scripts/ folder.
+        in_tree = {p.parent.name for p in SKILLS.glob("*/scripts") if p.is_dir()}
+        without = {p.name for p in SKILLS.iterdir() if p.is_dir()} - in_tree
+        # The README's list: the bullets under its "no executable behaviour" heading.
+        lines = (ROOT / "README.md").read_text(encoding="utf-8").splitlines()
+        start = next(i for i, line in enumerate(lines) if line.startswith("### ") and "executable behaviour" in line)
+        named = set()
+        for line in lines[start + 1:]:
+            if line.startswith("#"):
+                break
+            match = re.match(r"- `([a-z0-9-]+)`\s*$", line)
+            if match:
+                named.add(match.group(1))
+        self.assertEqual(named - without, set(), "README names a skill that has a scripts/ folder")
+        self.assertEqual(without - named, set(), "README omits a skill that has no scripts/ folder")
+
+
 class SuiteGuard(unittest.TestCase):
     """conftest.py ends a run that is over the fast-suite budget, one that leaves a temporary entry behind, or one
     that skipped a unit test. Each check is tested through the function its session hook calls."""
