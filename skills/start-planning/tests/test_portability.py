@@ -63,6 +63,11 @@ class PlanContract(unittest.TestCase):
         self.assertIn("- **S1** WHEN <condition>, THEN <observable outcome>.", TEXT)
         self.assertRegex(TEXT, r"`S<n>`")
 
+    def test_S1_the_status_starts_as_awaiting_approval(self):
+        """S1: the plan stops for one approval before anything is built."""
+        self.assertIn("Status: AWAITING APPROVAL", TEXT)
+        self.assertIn("then stop for one approval", TEXT)
+
 
 class Delegation(unittest.TestCase):
     """The skill states the requirement; the reference carries the per-harness detail."""
@@ -109,6 +114,14 @@ class Delegation(unittest.TestCase):
         """The skill names scripts that exist: a broken path is a broken step."""
         for name in set(re.findall(r"scripts/[A-Za-z_]+\.py", TEXT)):
             self.assertTrue((SKILL.parent / name).is_file(), name)
+
+    def test_the_reference_carries_the_harness_detail_not_the_skill(self):
+        """The per-harness dispatch lives in the reference, so the main context stays small."""
+        reference = (SKILL.parent / "references" / "delegation.md").read_text(encoding="utf-8")
+        self.assertIn("Claude Code", reference)
+        self.assertIn("Pi", reference)
+        self.assertNotIn("Task subagent", TEXT)
+        self.assertNotIn("Claude Code", TEXT)
 
 
 if __name__ == "__main__":

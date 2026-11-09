@@ -79,6 +79,18 @@ class SharedSkills(unittest.TestCase):
                 self.assertIn(needle, text, "%s: %s" % (name, needle))
 
 
+class NoHarnessInstructions(unittest.TestCase):
+    """A skill body states the workflow; the harness's own discovery states the invocation."""
+
+    def test_the_harness_detail_lives_in_a_reference(self):
+        """The per-harness dispatch is loaded on demand, not with the skill."""
+        reference = SKILLS / "start-planning" / "references" / "delegation.md"
+        self.assertTrue(reference.is_file())
+        text = reference.read_text(encoding="utf-8")
+        for harness in ("Claude Code", "Codex", "Pi"):
+            self.assertIn(harness, text)
+
+
 class PlanContract(unittest.TestCase):
     """S4: the Markdown plan format other skills parse is enforced on the plans in this repo."""
 
