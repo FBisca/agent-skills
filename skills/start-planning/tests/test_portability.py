@@ -4,6 +4,7 @@ S1: the planning contract survives the portability work, and Pi has a native inv
 S2: the two steps that need another context (gather, grill) have a Pi path that runs or
 fails loudly; neither may be skipped.
 S3: the Claude Code and Codex paths are still there, unchanged in substance.
+S21: the plan the skill documents is the plan the engine reads.
 """
 
 import pytest
@@ -21,6 +22,13 @@ PLAN_HEADINGS = ("Why now", "Sources", "Decisions", "Scenarios", "Out of scope",
                  "Seams", "Tickets")
 TICKET_HEADER = ("| # | What it delivers | Satisfies | Blocked by | Paths | Size | Difficulty "
                   "| Owner | Status |")
+
+# The engine (agent-runtime's driver) reads the plan the skill writes: the nine column names
+# it requires, and the values it accepts for Size and Difficulty.
+ENGINE_COLUMNS = ("#", "What it delivers", "Satisfies", "Blocked by", "Paths", "Size",
+                  "Difficulty", "Owner", "Status")
+SIZE_VALUES = ("small", "regular")
+DIFFICULTY_VALUES = ("simple", "complex")
 
 # The contract the skill had before the portability work, sentence by sentence. A sentence
 # that disappears is a behaviour that changed under Claude Code or Codex.
@@ -67,6 +75,26 @@ class PlanContract(unittest.TestCase):
         """S1: the plan stops for one approval before anything is built."""
         self.assertIn("Status: AWAITING APPROVAL", TEXT)
         self.assertIn("then stop for one approval", TEXT)
+
+
+class EngineContract(unittest.TestCase):
+    """S21: the plan the skill documents is the plan the engine reads."""
+
+    def test_S21_the_documented_plan_carries_the_engine_contract(self):
+        """S21: the documented plan is the plan the engine reads."""
+        columns = [cell.strip() for cell in TICKET_HEADER.strip("|").split("|")]
+        self.assertEqual(columns, list(ENGINE_COLUMNS), "the nine column names")
+        self.assertEqual(columns[-1], "Status", "Status is the last column")
+        self.assertIn(TICKET_HEADER, TEXT, "the documented ticket table")
+        self.assertRegex(TEXT, r"Slug: `<slug>`", "a backticked Slug")
+        self.assertRegex(TEXT, r"`Status: APPROVED", "the unbolded Status: APPROVED")
+        self.assertNotRegex(TEXT, r"\*\*APPROVED", "a bolded Status")
+        for column, values in (("Size", SIZE_VALUES), ("Difficulty", DIFFICULTY_VALUES)):
+            found = re.search(r"\*\*%s\*\* \(`([^`]+)`\)" % column, TEXT)
+            self.assertIsNotNone(found, "the documented %s vocabulary" % column)
+            documented = [value.strip() for value in found.group(1).split("|")]
+            self.assertEqual(documented, list(values),
+                             "%s: the documented vocabulary is the engine's" % column)
 
 
 class Delegation(unittest.TestCase):

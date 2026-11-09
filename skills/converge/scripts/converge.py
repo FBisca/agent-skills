@@ -11,9 +11,15 @@ One of --ticket / --final is required. --base defaults to the ref origin/HEAD po
              plan was passed from outside the repo.
 4. spec:     if files under a living-spec area's `Paths:` changed, that spec file changed too.
              Runs only with --final; with --ticket it prints SKIPPED.
-Exit 0 only if no check FAILs, else 1. A plan that is not `Status: APPROVED` (or, under --final only, ARCHIVED; the word may sit anywhere on a
-line), or has no `- **S<n>**` scenario lines, or no `## Tickets` table is refused before any check: the
-missing part goes to stderr, exit 2.
+Exit 0 only if no check FAILs, else 1. A plan whose head is not `Status: APPROVED` (or, under --final only,
+ARCHIVED; the word may sit anywhere on the head's line, but it must be the first word after `Status:`,
+the way the engine reads it - a bolded status is no status), or has no `- **S<n>**` scenario lines, or
+no `## Tickets` table is refused before any check: the missing part goes to stderr, exit 2.
+
+The plan reader is importable: `plan_data(text)` (the declared IDs and {ticket: (satisfies, paths)}),
+`plan_rows(text)` (the `## Tickets` rows, keyed by column name), `ticket_table(text)` (the column
+names and the rows of cells), `plan_head(text)` (the backticked Slug and the unbolded Status the
+engine reads) and `refusal(text, final)` (what is missing from the plan).
 
 Scope: --ticket T<n> = that ticket's Satisfies IDs and Paths; --final = all scenarios and all tickets'
 Paths. Satisfies holds IDs, comma lists, or ranges (`S1-S9`, `S17a\u2013S17e`) expanded over the plan's
@@ -94,24 +100,54 @@ def expand(cell, ids):
     return out
 
 
-def plan_data(text):
-    """(declared IDs, {ticket: (satisfies, paths)})."""
-    ids = re.findall(r"^\s*-\s+\*\*(S\d+[a-z]?)\*\*", text, re.M)
-    tickets, cols, in_tickets = {}, None, False
+def ticket_table(text):
+    """The `## Tickets` table: (column names, rows of cells)."""
+    columns, rows, in_tickets = [], [], False
     for line in text.splitlines():
         if line.startswith("#"):
             in_tickets = line.lstrip("# ").lower().startswith("tickets")
         elif in_tickets and line.startswith("|"):
             cells = [c.strip() for c in line.strip().strip("|").split("|")]
-            if cols is None:
-                low = [c.lower() for c in cells]
-                cols = (next((i for i, c in enumerate(low) if c.startswith("satisfies")), None),
-                        next((i for i, c in enumerate(low) if c.startswith("paths")), None))
+            if not columns:
+                columns = cells
             elif not set(cells[0]) <= set("-: "):
-                sat, pth = (cells[c] if c is not None and c < len(cells) else "" for c in cols)
-                tickets[cells[0].strip("`")] = (expand(sat, ids),
-                                                [p.strip().strip("`").strip() for p in pth.split(",") if p.strip()])
+                rows.append(cells)
+    return columns, rows
+
+
+def plan_rows(text):
+    """The `## Tickets` rows, keyed by column name: the table the engine reads."""
+    columns, rows = ticket_table(text)
+    return [dict(zip(columns, cells)) for cells in rows]
+
+
+def plan_data(text):
+    """(declared IDs, {ticket: (satisfies, paths)})."""
+    ids = re.findall(r"^\s*-\s+\*\*(S\d+[a-z]?)\*\*", text, re.M)
+    columns, rows = ticket_table(text)
+    low = [c.lower() for c in columns]
+    cols = (next((i for i, c in enumerate(low) if c.startswith("satisfies")), None),
+            next((i for i, c in enumerate(low) if c.startswith("paths")), None))
+    tickets = {}
+    for cells in rows:
+        sat, pth = (cells[c] if c is not None and c < len(cells) else "" for c in cols)
+        tickets[cells[0].strip("`")] = (expand(sat, ids),
+                                        [p.strip().strip("`").strip() for p in pth.split(",") if p.strip()])
     return ids, tickets
+
+
+def plan_head(text):
+    """The head the engine reads: the backticked Slug and the unbolded Status.
+
+    The engine reads the status word that follows `Status:` directly; a bolded status
+    (`**APPROVED**`) is no status word, and the engine refuses such a plan.
+    """
+    head = text.split("\n## ", 1)[0]
+    slug = re.search(r"Slug:\s*`([^`]+)`", head)
+    status = re.search(r"Status:\s*([A-Za-z-]+)", head)
+    return {"slug": slug.group(1) if slug else None,
+            "status": status.group(1).upper() if status else None,
+            "head": head}
 
 
 def names_in(lines, added=None):
@@ -209,9 +245,13 @@ def specs_in(repo, specs):
 def refusal(text, final=False):
     """What is missing from the plan, or []. --final also accepts ARCHIVED: the archive branch sets it."""
     miss = []
-    m = re.search(r"\bStatus:\s*\**\s*([A-Za-z-]+)", text)
+    head = plan_head(text)["head"]
+    m = re.search(r"\bStatus:\s*([A-Za-z-]+)", head)
     if not m:
-        miss.append("no `Status:` line")
+        if re.search(r"\bStatus:", head):
+            miss.append("no `Status:` word the engine reads (a bolded status is none)")
+        else:
+            miss.append("no `Status:` line")
     elif m.group(1).upper() not in ("APPROVED", "ARCHIVED" if final else "APPROVED"):
         miss.append(f"Status is {m.group(1)}, not APPROVED")
     if not re.search(r"^\s*-\s+\*\*S\d+[a-z]?\*\*", text, re.M):
@@ -260,7 +300,7 @@ def main(argv=None):
         print(f"REFUSED {plan.name}: {'; '.join(miss)}", file=sys.stderr)
         return 2
     ids, tickets = plan_data(text)
-    slug = (re.search(r"Slug:\s*`([^`]+)`", text) or [None, None])[1]
+    slug = plan_head(text)["slug"]
     if a.final:
         scope_ids = ids
         ticket_paths = [p for _, ps in tickets.values() for p in ps]
