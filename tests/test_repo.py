@@ -12,6 +12,8 @@ import unittest
 
 import pytest
 
+import conftest
+
 ROOT = Path(__file__).resolve().parents[1]
 SKILLS = ROOT / "skills"
 
@@ -243,6 +245,43 @@ class RemovedSkillsTest(unittest.TestCase):
             self.assertNotIn(name, text, path)
         for entry in json.loads((ROOT / ".claude-plugin/marketplace.json").read_text())["plugins"]:
             self.assertNotIn(name, json.dumps(entry))
+
+
+class SuiteGuard(unittest.TestCase):
+    """conftest.py ends a run that is over the fast-suite budget, one that leaves a temporary entry behind, or one
+    that skipped a unit test. Each check is tested through the function its session hook calls."""
+
+    @pytest.mark.unit
+    def test_S27_a_fast_run_at_or_over_the_budget_fails_and_one_under_it_passes(self):
+        self.assertIsNone(conftest.budget_problem(2.99))
+        problem = conftest.budget_problem(3.25)
+        self.assertIsNotNone(problem)
+        self.assertIn("3.25", problem)
+        self.assertIsNotNone(conftest.budget_problem(3.0), "under 3 seconds: exactly 3 is not under")
+
+    @pytest.mark.unit
+    def test_S28_a_run_that_leaves_a_temporary_entry_fails_and_its_directory_is_removed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            clean = conftest.open_session_temp(root)
+            self.assertIsNone(conftest.close_session_temp(clean))
+            self.assertFalse(clean.exists())
+            leaky = conftest.open_session_temp(root)
+            (leaky / "left-behind").mkdir()
+            problem = conftest.close_session_temp(leaky)
+            self.assertIn("left-behind", problem)
+            self.assertFalse(leaky.exists())
+
+    @pytest.mark.unit
+    def test_S29_a_skipped_unit_test_fails_the_run_and_every_skip_is_reported_with_its_reason(self):
+        unit = conftest.Skip("tests/test_x.py::T::test_one", "Pi is not installed", True)
+        integration = conftest.Skip("tests/test_y.py::T::test_two", "Node is not installed", False)
+        self.assertIn("test_one", conftest.skip_problem([unit, integration]))
+        self.assertNotIn("test_two", conftest.skip_problem([unit, integration]))
+        self.assertIsNone(conftest.skip_problem([integration]))
+        self.assertIsNotNone(conftest.skip_problem([conftest.Skip("tests/test_z.py::T::test_three", "", False)]))
+        self.assertEqual(conftest.skip_lines([integration]),
+                         ["SKIPPED tests/test_y.py::T::test_two: Node is not installed"])
 
 
 if __name__ == "__main__":
