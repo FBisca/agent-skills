@@ -3,7 +3,7 @@
 Slug: `orchestrator-single-engine`. Living spec: `docs/specs/orchestrator-single-engine.md`. Status: **APPROVED**
 (the owner approved the action plan `2026-11-08-remaining-work.action-plan.md`, W1/PR-2, on 2026-11-08).
 
-## Why
+## Why now
 
 The engine — the plan parser, the dispatcher, the gates, the ledger — exists twice. This repository carries a
 copy of it under `skills/orchestrate/scripts/` (2,970 lines in `orchestrate.py` plus five modules), and
@@ -46,6 +46,15 @@ this repository stops carrying the engine.
   ledger as the copy it replaces.
 - **S5** WHEN the skill's documents are read, THEN the seam, the resolution order and the way out are named, and
   `AGENT_RUNTIME_HOME` keeps its documented meaning.
+
+## Seams
+
+- The member's CLI (`agent-orchestrator`), resolved through `AGENT_RUNTIME_HOME` or `PATH`: the shim hands
+  it the command and nothing else.
+- A fake member in `skills/orchestrate/tests/test_delegation.py`: a script that records what it was asked
+  and answers like the real one does. No network, no second checkout, no agent process.
+- The guard in `skills/orchestrate/tests/test_engine_home.py`: the engine's fingerprint — a module that
+  parses a plan and checks one — over every Python file under `skills/`.
 
 ## Tickets
 
