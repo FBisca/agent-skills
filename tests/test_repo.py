@@ -162,14 +162,26 @@ class VaultDir(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             folder = self.make_vault(tmp)
             unset = self.run_check({}, str(folder))
-            self.assertNotEqual(unset.returncode, 0)
+            self.assertEqual(unset.returncode, 3, unset.stdout + unset.stderr)
             self.assertIn("VAULT_DIR", unset.stdout + unset.stderr)
             slug = self.run_check({"VAULT_DIR": tmp}, "demo")
             self.assertEqual(slug.returncode, 0, slug.stdout + slug.stderr)
             self.assertIn("PASS", slug.stdout)
             missing = self.run_check({"VAULT_DIR": str(Path(tmp) / "nope")}, "demo")
-            self.assertNotEqual(missing.returncode, 0)
+            self.assertEqual(missing.returncode, 3, missing.stdout + missing.stderr)
             self.assertIn("VAULT_DIR", missing.stdout + missing.stderr)
+
+    @pytest.mark.integration
+    def test_S26_idea_check_exits_3_naming_vault_dir_when_unset_or_not_a_directory(self):
+        """S26: WHEN VAULT_DIR is unset or is not a directory, THEN idea_check.py exits 3 and names VAULT_DIR."""
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = self.make_vault(tmp)
+            not_a_dir = Path(tmp) / "file.txt"
+            not_a_dir.write_text("x", encoding="utf-8")
+            for env in ({}, {"VAULT_DIR": str(not_a_dir)}):
+                result = self.run_check(env, str(folder))
+                self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+                self.assertIn("VAULT_DIR", result.stdout + result.stderr)
 
     @pytest.mark.integration
     def test_S8_idea_answer_and_excalidraw_name_vault_dir(self):
@@ -183,12 +195,27 @@ class VaultDir(unittest.TestCase):
         code = ("import sys; sys.dont_write_bytecode = True; sys.path.insert(0, %r); import excali; excali.vault_dir()"
                 % str(SKILLS / "excalidraw" / "scripts"))
         unset = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, env=env)
-        self.assertNotEqual(unset.returncode, 0)
+        self.assertEqual(unset.returncode, 3, unset.stdout + unset.stderr)
         self.assertIn("VAULT_DIR", unset.stdout + unset.stderr)
         with tempfile.TemporaryDirectory() as tmp:
             env["VAULT_DIR"] = tmp
             ok = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, env=env)
             self.assertEqual(ok.returncode, 0, ok.stderr)
+
+    @pytest.mark.integration
+    def test_S26_excalidraw_vault_dir_exits_3_naming_vault_dir_when_unset_or_not_a_directory(self):
+        """S26: WHEN VAULT_DIR is unset or is not a directory, THEN excali.vault_dir() exits 3 and names VAULT_DIR."""
+        code = ("import sys; sys.dont_write_bytecode = True; sys.path.insert(0, %r); import excali; excali.vault_dir()"
+                % str(SKILLS / "excalidraw" / "scripts"))
+        base = {k: v for k, v in os.environ.items() if k != "VAULT_DIR"}
+        with tempfile.TemporaryDirectory() as tmp:
+            not_a_dir = Path(tmp) / "file.txt"
+            not_a_dir.write_text("x", encoding="utf-8")
+            for extra in ({}, {"VAULT_DIR": str(not_a_dir)}):
+                env = dict(base, **extra)
+                result = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, env=env)
+                self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+                self.assertIn("VAULT_DIR", result.stdout + result.stderr)
 
 
 class RemovedSkillsTest(unittest.TestCase):
