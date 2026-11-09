@@ -281,8 +281,67 @@ def _flow_is_text(value):
     return not value.startswith(("[", "{"))
 
 
+HARDCODED_SKILL_PATH = re.compile(r"~/\.(claude|agents)/skills/")
+INVOCATION_SYNTAX = re.compile(r"/skill:|Invoke it as")
+ABSOLUTE_USER_PATH = re.compile(r"/(Users|home)/[A-Za-z0-9._-]+/")
+TEXT_SUFFIXES = (".md", ".py", ".json", ".sh", ".yml", ".yaml", ".toml")
+NOTICE = "NOTICE.md"
+UPSTREAM_URL = re.compile(r"https?://\S+")
+LICENCE_NAME = re.compile(r"licen[cs]e", re.IGNORECASE)
+
+
+def _hygiene_lines(path, pattern, message):
+    """One problem per line of the file that the pattern matches, naming that line."""
+    problems = []
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    for line_no, line in enumerate(text.splitlines(), 1):
+        if pattern.search(line):
+            problems.append(Problem(path, line_no, message))
+    return problems
+
+
+def hygiene_problems(path):
+    """The hygiene problems of the skill folder that holds one SKILL.md.
+
+    A skill is copied, not linked; it names no install path and no invocation syntax, since the
+    harness's own discovery provides both; it holds no absolute user path; and a copied skill
+    names its upstream and its licence in its NOTICE.
+    """
+    problems = []
+    folder = path.parent
+    if folder.is_symlink():
+        return [Problem(path, 1, "the skill folder is a symlink; a skill is copied, not linked")]
+    for item in sorted(folder.rglob("*")):
+        if item.is_symlink():
+            problems.append(Problem(item, 1, "the path is a symlink; a skill is copied, not linked"))
+        elif item.is_file() and item.suffix in TEXT_SUFFIXES:
+            problems.extend(_hygiene_lines(item, ABSOLUTE_USER_PATH,
+                                           "the file holds an absolute user path; name it relative "
+                                           "to the skill"))
+            problems.extend(_hygiene_lines(item, HARDCODED_SKILL_PATH,
+                                           "the skill hardcodes a skill path; name the skill, not "
+                                           "its install folder"))
+            problems.extend(_hygiene_lines(item, INVOCATION_SYNTAX,
+                                           "the skill carries an invocation syntax; the harness's "
+                                           "own discovery states the invocation"))
+    notice = folder / NOTICE
+    if notice.is_file() and not notice.is_symlink():
+        text = notice.read_text(encoding="utf-8", errors="ignore")
+        if not UPSTREAM_URL.search(text):
+            problems.append(Problem(notice, 1, "NOTICE.md does not name its upstream; give the URL "
+                                               "it was copied from"))
+        if not LICENCE_NAME.search(text):
+            problems.append(Problem(notice, 1, "NOTICE.md does not name its licence"))
+    return problems
+
+
 def lint_skill(path):
-    """The problems of one SKILL.md."""
+    """The problems of one SKILL.md: its frontmatter and its folder's hygiene."""
+    return hygiene_problems(path) + _frontmatter_problems(path)
+
+
+def _frontmatter_problems(path):
+    """The frontmatter problems of one SKILL.md."""
     problems = []
     try:
         text = path.read_text(encoding="utf-8")
