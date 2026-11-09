@@ -2,6 +2,7 @@
 
 import pytest
 import contextlib
+import functools
 import hashlib
 import importlib.util
 import io
@@ -17,7 +18,9 @@ pytestmark = pytest.mark.unit
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "idea_check.py"
 
 
+@functools.lru_cache(maxsize=None)
 def load():
+    """The gate script, loaded once per suite: every test reads the same module."""
     spec = importlib.util.spec_from_file_location("idea_check", SCRIPT)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -78,6 +81,13 @@ class IdeaCheckTests(unittest.TestCase):
         self.write("assumptions.md", table(ROWS))
         self.write("answers.md", ANSWERS)
         self.write("Brief.md", BRIEF)
+
+    def test_S37_the_fixture_registers_removal_of_its_temporary_directory(self):
+        """The directory the fixture makes is removed when the test ends, not left behind."""
+        owners = [getattr(fn, "__self__", None) for fn, _, _ in self._cleanups]
+        self.assertTrue(any(isinstance(owner, tempfile.TemporaryDirectory) for owner in owners),
+                        "setUp registers no cleanup for its temporary directory")
+        self.assertTrue(self.dir.is_dir())
 
     def write(self, name, text):
         (self.dir / name).write_text(text)
@@ -428,6 +438,17 @@ class IdeaCheckTests(unittest.TestCase):
     def test_S46_edited_brief_fails(self):
         self.write("Brief.md", BRIEF + "More.\n")
         self.assertIn("FAIL brief-read", self.run_check("--gate", "2")[1])
+
+
+class GateScriptLoading(unittest.TestCase):
+    """S37: the gate script is loaded once for the module, and each test cleans up what it made."""
+
+    def test_S37_the_gate_script_is_loaded_once_for_the_module(self):
+        """Every call to the loader returns the one module object the suite already holds."""
+        first = load()
+        second = load()
+        self.assertIs(first, second)
+        self.assertIsNotNone(load.cache_info, "the loader does not cache the module")
 
 
 if __name__ == "__main__":
