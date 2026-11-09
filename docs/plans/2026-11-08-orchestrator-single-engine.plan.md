@@ -1,7 +1,6 @@
 # Plan: One engine — the skill delegates to the member
 
-Slug: `orchestrator-single-engine`. Living spec: `docs/specs/orchestrator-single-engine.md`. Status: **APPROVED**
-(the owner approved the action plan `2026-11-08-remaining-work.action-plan.md`, W1/PR-2, on 2026-11-08).
+Slug: `orchestrator-single-engine`. Living spec: `docs/specs/orchestrator-single-engine.md`. Status: APPROVED 2026-11-08.
 
 ## Why now
 
