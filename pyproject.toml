@@ -20,8 +20,8 @@ testpaths = ["tests", "skills"]
 # `conftest.py`, so that naming a file runs that file's tests whatever their marker.
 addopts = '--strict-markers --import-mode=importlib'
 markers = [
-    "unit: pure logic, in process, no subprocess and no server (the fast suite)",
-    "integration: drives a real component boundary (a subprocess, an IPC pipe, the filesystem)",
+    "unit: in process and deterministic, no subprocess, no server, no network; it may read the repository and write only inside its own temporary directory; a temporary directory is not a boundary (the fast suite)",
+    "integration: drives a real component boundary (a subprocess, an IPC pipe, a server, the network, a database); a temporary directory is not one",
 ]
 filterwarnings = [
     # A leaked file or stream is a bug in the test or in the code under test, not a warning to hide.

@@ -4,9 +4,12 @@ Instructions for agents working in this repo.
 
 ## Testing
 
-- **Unit:** In-process, isolated, deterministic; mock external dependencies.
-- **Integration:** Tests real component boundaries (subprocesses, IPC, databases, network), even when dependencies are
-  faked.
+- **Unit:** In-process, isolated, deterministic; mock external dependencies. A unit test may read the repository and
+  write only inside its own temporary directory.
+- **Integration:** Tests real component boundaries (subprocesses, IPC, databases, network, servers), even when
+  dependencies are faked.
+- A temporary directory is not a boundary. A test that writes only in its own temporary directory is still `unit`;
+  a test that starts a process, or talks to a server or the network, is `integration`.
 - Prefer unit tests for fast feedback; use integration tests to verify contracts.
 - Classify tests by behaviour, not filename. Never weaken or reclassify tests just to improve speed.
 
