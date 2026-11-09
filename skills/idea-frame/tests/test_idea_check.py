@@ -2,6 +2,7 @@
 
 import pytest
 import contextlib
+import functools
 import hashlib
 import importlib.util
 import io
@@ -17,7 +18,9 @@ pytestmark = pytest.mark.unit
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "idea_check.py"
 
 
+@functools.lru_cache(maxsize=None)
 def load():
+    """The gate script, loaded once per suite: every test reads the same module."""
     spec = importlib.util.spec_from_file_location("idea_check", SCRIPT)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

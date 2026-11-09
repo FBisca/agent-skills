@@ -42,10 +42,9 @@ def load_linter():
 LINTER = load_linter()
 
 
-def write_skill(body):
-    """A SKILL.md with the given frontmatter, in a temp folder."""
-    import tempfile
-    directory = Path(tempfile.mkdtemp()) / "probe"
+def write_skill(body, root):
+    """A SKILL.md with the given frontmatter, in a folder under `root`."""
+    directory = Path(root) / "probe"
     directory.mkdir()
     skill = directory / "SKILL.md"
     skill.write_text(body, encoding="utf-8")
@@ -197,13 +196,18 @@ class Discovery(unittest.TestCase):
 class RefusedFrontmatter(unittest.TestCase):
     """The frontmatter every harness reads faithfully, and the ones none does."""
 
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = tmp.name
+
     def assert_refused(self, frontmatter, because):
-        problems = LINTER.lint_skill(write_skill(frontmatter))
+        problems = LINTER.lint_skill(write_skill(frontmatter, self.root))
         self.assertTrue(problems, "the lint accepted frontmatter that %s" % because)
         self.assertIn(because.split()[0], " ".join(problem.message for problem in problems))
 
     def assert_accepted(self, frontmatter):
-        problems = LINTER.lint_skill(write_skill(frontmatter))
+        problems = LINTER.lint_skill(write_skill(frontmatter, self.root))
         self.assertEqual([str(problem) for problem in problems], [])
 
     def test_a_quoted_value_is_accepted(self):
