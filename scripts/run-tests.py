@@ -54,12 +54,19 @@ def run(root, directory, name, timeout):
 def main(argv=None):
     """Walk the root named on the command line (the repository by default): the exit code."""
     argv = list(sys.argv[1:] if argv is None else argv)
-    root = Path(argv[0]).resolve() if argv else ROOT
+    given = argv[0] if argv else str(ROOT)
+    root = Path(given).resolve()
     jobs = int(os.environ.get("JOBS", "0")) or (os.cpu_count() or 4)
     timeout = float(os.environ.get("TEST_TIMEOUT", "120"))
     if jobs < 1 or timeout <= 0:
         raise ValueError("JOBS and TEST_TIMEOUT must be positive")
+    if not root.is_dir():
+        print("refused: %s is not a directory" % given, file=sys.stderr)
+        return 2
     every = list(files(root))
+    if not every:
+        print("refused: no test file under %s" % given, file=sys.stderr)
+        return 2
     print("== %d test files on %d workers (timeout: %ss)" % (len(every), jobs, timeout), flush=True)
     started = time.monotonic()
     failed = []

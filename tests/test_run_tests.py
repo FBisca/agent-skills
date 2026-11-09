@@ -6,6 +6,7 @@ non-zero. The test points the runner at a fixture suite so the hang is a fixture
 repository.
 """
 
+import importlib.util
 import os
 from pathlib import Path
 import subprocess
@@ -17,6 +18,31 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "scripts" / "run-tests.py"
 TIMEOUT = 3
+
+
+def load_runner():
+    """The runner module, loaded in process: its `main` is the seam the refusal tests call."""
+    spec = importlib.util.spec_from_file_location("run_tests", RUNNER)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.unit
+def test_S36_the_runner_refuses_a_root_that_is_no_test_suite(tmp_path, capsys):
+    """A root that is not a directory, a directory with no test file, and `--help` each exit non-zero and name what they were given."""
+    runner = load_runner()
+    missing = tmp_path / "no-such-root"
+    (tmp_path / "notes").mkdir()
+    (tmp_path / "notes" / "README.md").write_text("no tests here\n", encoding="utf-8")
+    cases = [str(missing), str(tmp_path / "notes"), "--help"]
+
+    for given in cases:
+        code = runner.main([given])
+        captured = capsys.readouterr()
+        assert code != 0, "the runner must refuse %r, it exited %s" % (given, code)
+        assert given in captured.out + captured.err, "the refusal must name %r:\n%s" % (given, captured.out + captured.err)
+        assert "test files" not in captured.out, "the runner must not report a run for %r" % given
 
 
 @pytest.mark.integration
