@@ -21,6 +21,7 @@ Only after P3 has restored correct execution and gathered usable evidence should
 | D1 | Make one benchmark-backed graph change at a time behind an explicit opt-in flag. | General graph rewrite. | Isolate causality and preserve rollback. | Benchmark requirement |
 | D2 | Keep deterministic gate enforcement; vary only review entry conditions or context packets. | Let agent self-certify success. | Reliable observable correctness. | orchestrate skill |
 | D3 | Do not optimize away meaningful architecture context solely to reduce tokens. | Aggressive automatic context stripping. | Task completeness depends on relevant context. | User goal; routing calibration |
+| D4 | Risk tiers as decided in P4 D5–D8: `sensitive` when the pull request's actual diff matches a trigger in the committed `.orchestrate/risk.yaml` (or the plan marks it), else `normal`; only raised, never lowered. Review-skip is a per-project switch a person sets; it drops only the reviewer and its fix rounds, only for `normal` tickets. The engine lives in agent-runtime `packages/agent-orchestrator/`; T1 and T2 Paths must move there before launch. | Model-judged risk; skipping the scenario gate. | Owner decisions 2026-11-09. | P4 plan |
 
 ## Binding P5 contract — Q16–Q23, Q27–Q30, Q35, Q38–Q43
 
