@@ -9,11 +9,14 @@ Run `agent-eval` from PATH, else as `uv run --project <agent-runtime checkout> a
 
 1. **Read the case.** `manifest.json` lists the sessions (`id`, `role`, `parent`, `file`), the orchestrate files
    (`orchestrate.files[].file`) and the `git` range of `changes.patch`. Read a listed file with
-   `gzip -dc <case>/<file>`. The **subject** is the session the user named, else the root session (`parent` null)
-   whose work `changes.patch` holds. Done when every listed file that bears on a rubric's Assess criteria is read.
+   `gzip -dc <case>/<file>`; search a large transcript (`grep`, `jq`) rather than reading it whole. The **subject**
+   is the session the user named, else the root session (`parent` null) whose work `changes.patch` holds; when
+   several fit, ask. `changes.patch` spans the whole range: judge the subject's part of it. Done when every listed
+   file that bears on a rubric's Assess criteria is read or searched.
 2. **Judge** under [`SKILL.md`](SKILL.md). Each judgment is a **finding**: `kind` `proven` (observed in the case),
    `risk` (possible, unobserved) or `strength`; a 1.0 dimension cites its `strength`. A dimension's `label` is its
-   rubric's anchor label (`problematic`, `mostly_efficient`).
+   rubric's anchor label (`problematic`, `mostly_efficient`). Judge the final state; a defect fixed later in the run
+   costs efficiency, not quality.
 3. **Cite.** `file` as the manifest lists it (or `changes.patch`), `line` where the quote starts (1-based, decompressed),
    `quote` copied raw from that line. Transcripts are JSONL: quote the JSON-escaped text as it sits in the line
    (`\"`, `\n`, `’`), never the rendered message.
