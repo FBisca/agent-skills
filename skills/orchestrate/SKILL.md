@@ -43,6 +43,7 @@ The pane is named `orchestrate-<slug>` and nests under the Lead's terminal when 
 
 - The Herdr pane `orchestrate-<slug>` is the lead. Workers `<slug>-t<n>` nest under it and appear on their ticket rows in the Plans panel.
 - Status cells of the plan. A ticket stops at `IN PROGRESS · awaiting merge (<PR>)` until the user merges its PR; the driver then marks it COMPLETE and unblocks the tickets that depend on it. Status also reads `IN PROGRESS · needs you: <reason>` when a ticket waits for a person.
+- An `orphaned` task: a restarted drive found an open task whose agent the runtime no longer lists, and names it in an `orphaned` event. An implementer whose report never landed is dispatched again by itself — a new `t<N>o<k>` attempt, same worktree, branch and worker name.
 - `<run>/attention.md`: everything waiting for the user, with the question or action.
 - `<run>/gaps.md`: the advisory gaps review of the whole plan, written once at archive. Gaps become plan edits, your call.
 - `<run>/metrics.json`: per ticket the route, review rounds, escalations, decider calls and worker usage; lead model turns are 0. Written when the run stops.
@@ -69,17 +70,22 @@ The schemas and field lists live in the member's `contracts.py` only.
 
 The driver pauses a ticket when it needs a person: a scope or product question, a person-owned ticket (prod data, sign-off, deploy), or a failure the decider could not settle. The decider is one-shot: it never takes a reply. Read `<run>/attention.md`, decide, and answer through the plan Status:
 
-- `TO-DO`: retry. On its next round the driver stops the held worker if live, releases the assignment, and dispatches a fresh attempt of the same unit (escalation counts carry over).
+- `TO-DO`: retry. On its next round the driver stops the held worker if live, releases the assignment, and dispatches a fresh attempt of the same unit (escalation counts carry over). A note in the cell is fine: `TO-DO · retry` retries too.
 - `COMPLETE <date>`: done by hand. Its dependents and the archive unblock.
 - Any other edit leaves the ticket paused.
 
 If the answer changes scope, add a Decisions row or a ticket (with its scenarios) to the plan first.
 
+Two wakes report work the run could not do:
+
+- `stranded <unit>`: the drive cannot tell what became of an open task's agent. Nothing was released or spawned and the run exits non-zero; the work may still be in its terminal — look at it, then restart the drive.
+- `not-dispatched <ticket>`: the dispatch failed and its reason stays in the cell, `TO-DO · not dispatched: <reason>`, until it reads exactly `TO-DO` — that retry compares the whole cell, so the driver never reads its own note as yours.
+
 When only paused tickets remain, the run exits. After editing the plan, run `launch` again: the driver re-reads the plan and the ledger, so it picks up where it stopped. A run still alive picks the edit up on its next round.
 
 ## References
 
-- [Routing](references/routing.md): size and difficulty to class and effort; escalation.
+- [Routing](references/routing.md): size and difficulty to class and effort; escalation; the idle window.
 - [State helper](references/state.md): the ledger the driver writes, and the manual commands for diagnosis.
 - [Chunked dispatch](references/chunked-dispatch.md), [cross-repository work](references/cross-repository.md): not done by the driver; manual use only.
 
