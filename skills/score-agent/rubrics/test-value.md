@@ -38,7 +38,3 @@
 ## Required evidence
 
 Name specific test cases/files and their protected guarantees. For alleged redundancy, show **overlap and retained confidence**; for gaps, tie the missing case to a real requirement/risk. Record timing only if observed.
-
-## Scoring protocol
-
-Score **observed behaviour**, not presumed intentions. Use only `1.0`, `0.8`, `0.4`, `0.2`, or `N/A` (`insufficient_evidence`). Choose the **lowest anchor supported by material evidence**; multiple minor issues may become material if their combined cost is significant. Never average subchecks or invent unobserved failures. For every deduction, cite a message, action, command, file/line, or test and explain its consequence. Separate **observed failure** from **potential risk**. Mark an inapplicable subcheck `not_applicable`, not a defect. A passing outcome alone does not prove a good process; a failed outcome alone does not prove a bad process. A critical safety/integrity breach is handled by the agent skill's hard gates, independent of this score.
