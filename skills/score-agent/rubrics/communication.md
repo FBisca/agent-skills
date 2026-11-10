@@ -37,7 +37,3 @@
 ## Required evidence
 
 Cite representative user-facing messages; identify duplicated text, missing decision/status, or unjustified length. Do not score internal reasoning or raw tool output as user-facing verbosity unless the agent chose to surface it.
-
-## Scoring protocol
-
-Score **observed behaviour**, not presumed intentions. Use only `1.0`, `0.8`, `0.4`, `0.2`, or `N/A` (`insufficient_evidence`). Choose the **lowest anchor supported by material evidence**; multiple minor issues may become material if their combined cost is significant. Never average subchecks or invent unobserved failures. For every deduction, cite a message, action, command, file/line, or test and explain its consequence. Separate **observed failure** from **potential risk**. Mark an inapplicable subcheck `not_applicable`, not a defect. A passing outcome alone does not prove a good process; a failed outcome alone does not prove a bad process. A critical safety/integrity breach is handled by the agent skill's hard gates, independent of this score.
