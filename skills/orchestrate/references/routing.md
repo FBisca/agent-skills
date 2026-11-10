@@ -74,7 +74,7 @@ A **unit** keeps one ID across every attempt at it: the first build and each fix
 
 The user picks among the options in `attention.md`: one class up, re-plan, or split the unit. They answer by setting the ticket's Status in the plan: `TO-DO` retries it as a fresh attempt of the same unit, `COMPLETE` marks it done by hand. The cell rules are in the skill's *When the run pauses*.
 
-A unit the runtime reports `working` holds an **idle window**: the tick passes over it until the window has run for `--working-minutes`, and the request says how long. The window opens at the first tick that sees the agent `working`, clears at a tick that does not, and lives in memory — a restart starts it empty. `--idle-minutes` is the tick: a unit whose agent and CI show nothing new is idle, and two in a row ask the Lead.
+A unit the runtime reports `working` holds an **idle window**: the tick passes over it until the window has run for `--working-minutes`, and the request says how long. The window opens at the first tick that counts the agent `working`, clears at every tick that does not count the unit, and lives in memory — a restart starts it empty. `--idle-minutes` is the tick: a unit whose agent and CI show nothing new is idle, and two in a row ask the Lead.
 
 `show --unit <id>` still sums a unit's failed review rounds and cutoffs for diagnosis.
 
