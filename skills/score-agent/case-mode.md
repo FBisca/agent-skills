@@ -19,7 +19,7 @@ Run `agent-eval` from PATH, else as `uv run --project <agent-runtime checkout> a
    costs efficiency, not quality.
 3. **Cite.** `file` as the manifest lists it (or `changes.patch`), `line` where the quote starts (1-based, decompressed),
    `quote` copied raw from that line. Transcripts are JSONL: quote the JSON-escaped text as it sits in the line
-   (`\"`, `\n`, `’`), never the rendered message.
+   (`\"`, `\n`, `\u2019`), never the rendered message.
 4. **Write the label** to a scratchpad file. `judge.rubric_sha256`:
    `cat rubrics/code-quality.md rubrics/test-value.md rubrics/efficiency.md rubrics/communication.md | shasum -a 256`
    beside this file; `judge.model`: your exact model id. `score` rounds **half up** on the exact decimal mean
