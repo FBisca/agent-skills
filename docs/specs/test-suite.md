@@ -1,10 +1,10 @@
 # Test-Suite
 
-Paths: scripts/, tests/, conftest.py, pyproject.toml, skills/converge/, skills/idea-frame/, skills/idea-answer/, skills/start-planning/, AGENTS.md, README.md
+Paths: scripts/, tests/, conftest.py, pyproject.toml, skills/idea-frame/, skills/idea-answer/, skills/start-planning/, AGENTS.md, README.md
 
 What the test suite guarantees: a fast unit suite that runs offline, fails loudly instead of hanging, and tests machine-read contracts rather than prose. This is the living spec of the test-suite plan, `docs/plans/2026-11-09-test-suite.plan.md`.
 
-- **R1** WHEN every tracked plan is read by the plan reader the gate uses, THEN each plan yields its scenario ids and its ticket rows, and a plan whose Tickets table is missing or has no rows is refused. (from test-suite/S20)
+- **R1** Retired: the converge gate and its plan reader are removed; the engine's `plan check` reads a plan. (from test-suite/S20; retired by yaml-eec/S26)
 - **R2** WHEN the engine reads a plan, THEN the ticket table carries the nine header names it requires (`#`, `What it delivers`, `Satisfies`, `Blocked by`, `Paths`, `Size`, `Difficulty`, `Owner`, `Status`) with `Status` last, the head carries a backticked `Slug:` and an unbolded `Status: APPROVED`, and `Size`/`Difficulty` are the engine's vocabulary (`small|regular`, `simple|complex`). (from test-suite/S21)
 - **R3** WHEN the idea skills document a vocabulary the gate enforces (the stages, the assumption columns, the answer entry fields, the test types, the result values), THEN that vocabulary is exactly the script's, in both directions: the script knows no value the document omits, and the document names no value the script rejects. (from test-suite/S22)
 - **R4** WHEN a skill's frontmatter carries each defect the lint names, THEN the lint refuses it with the message it names, and every refusal it can produce is asserted by a test. (from test-suite/S23)

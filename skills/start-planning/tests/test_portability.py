@@ -5,6 +5,8 @@ S2: the two steps that need another context (gather, grill) have a Pi path that 
 fails loudly; neither may be skipped.
 S3: the Claude Code and Codex paths are still there, unchanged in substance.
 test-suite/R2: the plan the skill documents is the plan the engine reads.
+yaml-eec/S26, S30: the plan is the engine's YAML contract, its narrative and its oracles; a Python
+oracle is formatted under its promoted path before the plan is checked and approved.
 """
 
 import pytest
@@ -18,15 +20,19 @@ pytestmark = pytest.mark.unit
 SKILL = Path(__file__).resolve().parents[1] / "SKILL.md"
 TEXT = SKILL.read_text(encoding="utf-8")
 
-PLAN_HEADINGS = ("Why now", "Sources", "Decisions", "Scenarios", "Out of scope", "Risks",
-                 "Seams", "Tickets")
-TICKET_HEADER = ("| # | What it delivers | Satisfies | Blocked by | Paths | Size | Difficulty "
-                  "| Owner | Status |")
+REFERENCE = (SKILL.parent / "references" / "plan-yaml.md").read_text(encoding="utf-8")
 
-# The engine (agent-runtime's driver) reads the plan the skill writes: the nine column names
-# it requires, and the values it accepts for Size and Difficulty.
-ENGINE_COLUMNS = ("#", "What it delivers", "Satisfies", "Blocked by", "Paths", "Size",
-                  "Difficulty", "Owner", "Status")
+# The narrative's headings; the scenarios and tickets live in the contract alone.
+PLAN_HEADINGS = ("Why now", "Sources", "Decisions", "Out of scope", "Risks", "Seams")
+
+# The engine (agent-runtime's `plan/1` loader) reads the contract the skill writes: its top-level
+# keys, the scenario and ticket fields, and the values it accepts for size and difficulty.
+TOP_KEYS = ("schema", "slug", "goal", "spec", "outcome", "scenarios", "tickets")
+SCENARIO_KEYS = ("id", "when", "then", "evidence")
+EVIDENCE_KEYS = ("check", "baseline", "oracle", "place", "timeout", "env", "negative", "promote",
+                 "human")
+TICKET_KEYS = ("id", "delivers", "satisfies", "paths", "size", "difficulty", "blocked_by", "owner",
+               "risk", "evidence_waiver", "repo")
 SIZE_VALUES = ("small", "regular")
 DIFFICULTY_VALUES = ("simple", "complex")
 
@@ -34,8 +40,8 @@ DIFFICULTY_VALUES = ("simple", "complex")
 # that disappears is a behaviour that changed under Claude Code or Codex.
 CLAUDE_CODEX_CONTRACT = (
     "**Input:** a feature, idea or task",
-    "**Output:** one approved **plan** at `docs/plans/YYYY-MM-DD-<slug>.plan.md`",
-    "**Hand-off:** `/orchestrate <plan-path>` builds it.",
+    "**Output:** one approved **plan**: three files in the repository's plan directory",
+    "**Hand-off:** `/orchestrate <plan.yaml>` builds it.",
     "A PRD is not a gate.",
     "It lists every source with its link (the request, the PRD if any, the Linear project and "
     "issues, the vault project note and its decision notes, RFCs, the living spec for the area)",
@@ -47,10 +53,11 @@ CLAUDE_CODEX_CONTRACT = (
     "cases into the questions",
     "Settled decisions enter the plan unasked, with their source.",
     "Each ticket is a **tracer bullet**",
-    "**Satisfies**: the S-IDs the ticket makes true",
-    "**Owner**: `agent` for code.",
+    "**`satisfies`**: the scenario IDs the ticket makes true.",
+    "**`owner`**: `agent` for code.",
     "then stop for one approval. Build nothing at this point.",
-    "On approval, set `Status: APPROVED <date>` and hand off to `/orchestrate <plan-path>`.",
+    "On the user's yes, run `<engine> plan approve <plan.yaml>`.",
+    "Then hand off to `/orchestrate <plan.yaml>`.",
 )
 
 
@@ -62,35 +69,37 @@ class PlanContract(unittest.TestCase):
             self.assertTrue(any(item.startswith(heading) for item in headings),
                             "missing plan heading: %s" % heading)
 
-    def test_S1_the_ticket_columns_are_kept(self):
-        """S1: the ticket table keeps its columns, in order."""
-        self.assertIn(TICKET_HEADER, TEXT)
-
     def test_S1_the_scenario_shape_is_kept(self):
-        """S1: scenarios stay WHEN/THEN lines with S-ids."""
-        self.assertIn("- **S1** WHEN <condition>, THEN <observable outcome>.", TEXT)
+        """S1: scenarios stay WHEN/THEN with S-ids."""
+        self.assertIn("    when: <condition>\n    then: <observable outcome>", REFERENCE)
         self.assertRegex(TEXT, r"`S<n>`")
 
-    def test_S1_the_status_starts_as_awaiting_approval(self):
-        """S1: the plan stops for one approval before anything is built."""
-        self.assertIn("Status: AWAITING APPROVAL", TEXT)
+    def test_S1_the_plan_stops_for_one_approval_and_the_engine_approves_it(self):
+        """S1: the plan stops for one approval before anything is built; `plan approve` records it."""
         self.assertIn("then stop for one approval", TEXT)
+        self.assertIn("plan approve <plan.yaml>", TEXT)
+        self.assertIn("Never write `approval`", REFERENCE)
+
+    def test_S30_a_python_oracle_is_formatted_before_the_plan_is_checked(self):
+        """yaml-eec/S30: the oracle step runs the formatter script before `plan check` and approval."""
+        self.assertIn("scripts/format_oracle.py --repo <repo> <oracle file> <place>", TEXT)
+        self.assertLess(TEXT.index("format_oracle.py"), TEXT.index("plan check <plan.yaml>"))
 
 
 class EngineContract(unittest.TestCase):
     """test-suite/R2: the plan the skill documents is the plan the engine reads."""
 
     def test_the_documented_plan_carries_the_engine_contract(self):
-        """test-suite/R2: the documented plan is the plan the engine reads."""
-        columns = [cell.strip() for cell in TICKET_HEADER.strip("|").split("|")]
-        self.assertEqual(columns, list(ENGINE_COLUMNS), "the nine column names")
-        self.assertEqual(columns[-1], "Status", "Status is the last column")
-        self.assertIn(TICKET_HEADER, TEXT, "the documented ticket table")
-        self.assertRegex(TEXT, r"Slug: `<slug>`", "a backticked Slug")
-        self.assertRegex(TEXT, r"`Status: APPROVED", "the unbolded Status: APPROVED")
-        self.assertNotRegex(TEXT, r"\*\*APPROVED", "a bolded Status")
-        for column, values in (("Size", SIZE_VALUES), ("Difficulty", DIFFICULTY_VALUES)):
-            found = re.search(r"\*\*%s\*\* \(`([^`]+)`\)" % column, TEXT)
+        """test-suite/R2: the documented contract is the `plan/1` the engine reads."""
+        skeleton = re.search(r"```yaml\n(.*?)```", REFERENCE, re.S).group(1)
+        top = re.findall(r"^([a-z_]+):", skeleton, re.M)
+        self.assertEqual(top, list(TOP_KEYS), "the top-level keys, in order")
+        self.assertIn("schema: plan/1\n", skeleton)
+        nested = set(re.findall(r"^ {2,6}(?:- )?([a-z_]+):", skeleton, re.M))
+        for key in SCENARIO_KEYS + EVIDENCE_KEYS + TICKET_KEYS:
+            self.assertIn(key, nested, "the documented field %s" % key)
+        for column, values in (("size", SIZE_VALUES), ("difficulty", DIFFICULTY_VALUES)):
+            found = re.search(r"\*\*`%s`\*\* \(`([^`]+)`\)" % column, TEXT)
             self.assertIsNotNone(found, "the documented %s vocabulary" % column)
             documented = [value.strip() for value in found.group(1).split("|")]
             self.assertEqual(documented, list(values),
@@ -140,7 +149,7 @@ class Delegation(unittest.TestCase):
 
     def test_every_script_the_skill_names_exists(self):
         """The skill names scripts that exist: a broken path is a broken step."""
-        for name in set(re.findall(r"scripts/[A-Za-z_]+\.py", TEXT)):
+        for name in set(re.findall(r"(?:\.\./[a-z-]+/)?scripts/[A-Za-z_]+\.py", TEXT)):
             self.assertTrue((SKILL.parent / name).is_file(), name)
 
     def test_the_reference_carries_the_harness_detail_not_the_skill(self):

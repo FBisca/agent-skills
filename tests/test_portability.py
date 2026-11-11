@@ -2,8 +2,8 @@
 
 S3: the shared skills keep the Claude Code and Codex behaviour they had.
 S4: the test suite runs offline and enforces the Markdown plan contract.
-test-suite/R1: every tracked plan is read by the reader the gate uses.
 test-suite/R2: the engine reads the plans this repository tracks.
+yaml-eec/S26: the tree carries no converge skill; the engine's `plan check` reads a YAML plan.
 """
 
 import importlib.util
@@ -21,7 +21,6 @@ SKILLS = ROOT / "skills"
 # These read the plans through `git ls-files`: a subprocess, so an integration boundary (test-suite/R12).
 GIT_READERS = {
     "test_S4_every_tracked_plan_keeps_the_plan_contract",
-    "test_the_gate_reader_reads_every_tracked_plan",
     "test_the_engine_reads_every_tracked_plan",
 }
 
@@ -37,22 +36,26 @@ SIZE_VALUES = ("small", "regular")
 DIFFICULTY_VALUES = ("simple", "complex")
 
 
-def load_converge():
-    """The gate's own plan reader, in process: `converge.py` is the reader the gate uses."""
-    script = SKILLS / "converge" / "scripts" / "converge.py"
-    spec = importlib.util.spec_from_file_location("gate_converge", script)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+def ticket_table(text):
+    """A Markdown plan's Tickets table, as the engine reads it: the header cells and each row."""
+    section = re.split(r"(?m)^## Tickets[^\n]*\n", text, maxsplit=1)
+    if len(section) < 2:
+        return [], []
+    body = re.split(r"(?m)^## ", section[1], maxsplit=1)[0]
+    lines = [line for line in body.splitlines() if line.startswith("|")]
+    if len(lines) < 2:
+        return [], []
 
+    def cells(line):
+        return [cell.strip() for cell in line.strip().strip("|").split("|")]
 
-converge = load_converge()
+    header = cells(lines[0])
+    return header, [dict(zip(header, cells(line))) for line in lines[2:]]
 
 # The harness-specific instructions each shared skill carries, and must keep.
 SHARED_CONTRACTS = {
     "cold-read": ("Claude:", "Codex:"),
-    "orchestrate": ("scripts/orchestrate.py launch", "Status: APPROVED"),
-    "converge": ("scripts/converge.py", "REFUSED"),
+    "orchestrate": ("<engine> launch <plan>", "plan approve"),
     "start-planning": ("scripts/fresh_context.py", "references/delegation.md"),
 }
 
@@ -142,40 +145,6 @@ class PlanContract(unittest.TestCase):
             scenarios = set(re.findall(r"^- \*\*S(\d+[a-z]?)\*\* WHEN .*, THEN ", text, re.M))
             self.assertTrue(scenarios, "%s: no scenario lines" % name)
             self.assertIn(TICKET_HEADER, text, "%s: ticket columns" % name)
-            # The coverage the gate reads, with the gate's own reader.
-            ids, tickets = converge.plan_data(text)
-            covered = {identifier for satisfies, _ in tickets.values() for identifier in satisfies}
-            for scenario in scenarios:
-                self.assertIn("S" + scenario, covered, "%s: S%s is in no ticket" % (name, scenario))
-            self.assertEqual(covered, set(ids), "%s: a ticket satisfies an undeclared scenario" % name)
-
-
-class PlanReader(unittest.TestCase):
-    """test-suite/R1: the plan format is read by the reader the gate uses."""
-
-    HEAD = ("# Plan: the reader\n\nSlug: `reader`. Living spec: `docs/specs/reader.md`. "
-            "Status: APPROVED 2026-11-09.\n\n## Scenarios\n\n"
-            "- **S1** WHEN the gate reads a plan, THEN it yields the scenario ids and the "
-            "ticket rows.\n\n")
-
-    @pytest.mark.integration
-    def test_the_gate_reader_reads_every_tracked_plan(self):
-        """test-suite/R1: every tracked plan yields its scenario ids and its ticket rows; a plan
-        whose Tickets table is missing or has no rows is refused."""
-        plans = tracked_plans()
-        self.assertTrue(plans)
-        for plan in plans:
-            text = plan.read_text(encoding="utf-8")
-            ids, tickets = converge.plan_data(text)
-            self.assertTrue(ids, "%s: no scenario ids" % plan.name)
-            self.assertTrue(tickets, "%s: no ticket rows" % plan.name)
-            rows = converge.plan_rows(text)
-            self.assertEqual(len(rows), len(tickets), "%s: the reader's rows disagree" % plan.name)
-        missing = self.HEAD + "## Tickets\n\nno table here\n"
-        empty = self.HEAD + ("## Tickets\n\n" + TICKET_HEADER + "\n"
-                             + "|---|---|---|---|---|---|---|---|---|\n")
-        for text in (missing, empty):
-            self.assertTrue(converge.refusal(text), "a plan without ticket rows is refused")
 
 
 class EnginePlanContract(unittest.TestCase):
@@ -186,10 +155,10 @@ class EnginePlanContract(unittest.TestCase):
         """test-suite/R2: the engine's contract, asserted by name, holds for every plan it reads."""
         for plan in tracked_plans():
             text = plan.read_text(encoding="utf-8")
-            columns = converge.ticket_table(text)[0]
+            columns, rows = ticket_table(text)
             self.assertEqual(columns, list(TICKET_COLUMNS), "%s: ticket columns" % plan.name)
             self.assertEqual(columns[-1], "Status", "%s: Status is the last column" % plan.name)
-            for row in converge.plan_rows(text):
+            for row in rows:
                 size = (row.get("Size") or "").strip()
                 difficulty = (row.get("Difficulty") or "").strip()
                 if (row.get("Owner") or "").strip().lower() != "agent":
@@ -200,18 +169,24 @@ class EnginePlanContract(unittest.TestCase):
                 self.assertIn(size, SIZE_VALUES, "%s: %s Size" % (plan.name, row.get("#")))
                 self.assertIn(difficulty, DIFFICULTY_VALUES,
                               "%s: %s Difficulty" % (plan.name, row.get("#")))
-            head = converge.plan_head(text)
-            if head["status"] != "APPROVED":
-                # The engine reads no status out of this head; the gate refuses the plan too,
-                # so it never reaches the engine.
-                self.assertTrue(converge.refusal(text),
-                                "%s: the gate accepts a plan the engine cannot read" % plan.name)
-                continue
-            lines = head["head"].splitlines()
+            lines = text.split("\n## ", 1)[0].splitlines()
+            if not any(re.search(r"\bStatus: APPROVED\b", line) for line in lines):
+                continue  # the engine runs no plan that is not approved
             self.assertTrue(any(re.match(r"^Slug: `[^`]+`", line) for line in lines),
                             "%s: no backticked Slug" % plan.name)
             self.assertTrue(any(re.match(r"^[^*]*Status: APPROVED\b", line) for line in lines),
                             "%s: no unbolded Status: APPROVED" % plan.name)
+
+
+class NoConverge(unittest.TestCase):
+    @pytest.mark.unit
+    def test_S26_the_tree_carries_no_converge_skill(self):
+        """yaml-eec/S26: converge's checks live in the engine's gates; no skill copy is left."""
+        self.assertFalse((SKILLS / "converge").exists())
+        for path in (ROOT / "README.md", ROOT / "docs" / "workflow.md"):
+            text = path.read_text(encoding="utf-8")
+            for name in ("/converge", "skills/converge", "converge.py"):
+                self.assertNotIn(name, text, path.name)
 
 
 class MarkerMeaning(unittest.TestCase):
@@ -246,7 +221,7 @@ class MarkerMeaning(unittest.TestCase):
             expected = {"integration"} if name.startswith("test_printed_answer") else {"unit"}
             self.assertEqual(self.kinds(getattr(gatherer, name)), expected, name)
 
-        for case in (Discovery, SharedSkills, NoHarnessInstructions, PlanContract, PlanReader, EnginePlanContract):
+        for case in (Discovery, SharedSkills, NoHarnessInstructions, PlanContract, EnginePlanContract, NoConverge):
             for name in unittest.TestLoader().getTestCaseNames(case):
                 expected = {"integration"} if name in GIT_READERS else {"unit"}
                 self.assertEqual(self.kinds(getattr(case, name)), expected, "%s.%s" % (case.__name__, name))
@@ -254,3 +229,4 @@ class MarkerMeaning(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

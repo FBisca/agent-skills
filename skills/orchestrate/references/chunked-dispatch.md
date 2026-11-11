@@ -62,6 +62,6 @@ For each chunk:
 
 ## 4. Final gate
 
-Run the full formatter, linter and suite, then `converge --ticket T<n>`, then push (never forced). The large review and CI follow. Their findings are a fix round for the same unit.
+Run the full formatter, linter and suite, check the diff stays in the ticket's Paths, then push (never forced). The large review and CI follow. Their findings are a fix round for the same unit.
 
 Done when the gate passes and every chunk is COMPLETE.

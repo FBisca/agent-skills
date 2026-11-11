@@ -2,9 +2,9 @@
 
 Agent skills for [Claude Code](https://claude.com/claude-code), [Codex](https://developers.openai.com/codex) and [Pi](https://pi.dev/). They turn a raw idea into a gated, spec-driven build: each stage hands a checkable artifact to the next, and the gates are scripts, not opinions.
 
-- **Deterministic gates.** `idea_check.py` and `converge.py` read files and exit non-zero; an agent cannot talk its way past them.
+- **Deterministic gates.** `idea_check.py` and the engine's `plan check` read files and exit non-zero; an agent cannot talk its way past them.
 - **Agents that disagree on purpose.** `cold-read` asks a fresh reader to paraphrase a document; `orchestrate` builds with separate implementer agents and accepts a ticket only when its scenarios pass.
-- **Tested.** The gate and orchestration scripts (`idea-frame`, `converge`, `orchestrate`) have test suites that run in CI on Python 3.11 to 3.13, and a repo-level test lints every `SKILL.md`. `idea-answer` and `cold-read` have only Markdown contract checks, no scripts. `excalidraw` and `explain-video` are checked by their own render loops, not by unit tests.
+- **Tested.** The gate, planning and orchestration scripts (`idea-frame`, `start-planning`, `orchestrate`) have test suites that run in CI on Python 3.11 to 3.13, and a repo-level test lints every `SKILL.md`. `idea-answer` and `cold-read` have only Markdown contract checks, no scripts. `excalidraw` and `explain-video` are checked by their own render loops, not by unit tests.
 
 ## The pipeline
 
@@ -14,9 +14,10 @@ flowchart LR
     B -->|cold-read + gate 2| C["to-spec<br/>PRD"]
     C --> D["start-planning<br/>scenarios + vertical<br/>tickets, stop for approval"]
     D --> E["orchestrate<br/>implementer agents<br/>build ticket by ticket"]
-    E -->|converge| F{"scenarios,<br/>tests, paths<br/>all pass?"}
+    E -->|ticket gates| F{"scope, covers,<br/>evidence, review,<br/>CI all pass?"}
     F -->|no| E
-    F -->|yes| G["archive plan into<br/>the living spec"]
+    F -->|yes| H["verify the outcome<br/>on the integrated tree"]
+    H --> G["archive plan into<br/>the living spec"]
 ```
 
 The full walkthrough, with the method behind each step and the findings from two backtests, is in **[docs/workflow.md](docs/workflow.md)**.
@@ -36,7 +37,6 @@ Own = written for this repo. Derivative = modified from an upstream, with attrib
 | [`cold-read`](skills/cold-read) | A zero-context reader paraphrases a document to show whether it can be followed | Derivative (Google, Apache-2.0) |
 | [`start-planning`](skills/start-planning) | Plans one feature from its sources to WHEN/THEN scenarios and vertical tickets, then stops for approval | Own |
 | [`orchestrate`](skills/orchestrate) | Builds an approved plan with implementer agents and gates each ticket on its scenarios | Own |
-| [`converge`](skills/converge) | Deterministic check of a ticket or plan against its scenarios, tests and paths | Own |
 | [`score-agent`](skills/score-agent) | Scores a finished coding session from its trace, diff and test evidence, against the four rubrics it ships | Own |
 | [`score-steering`](skills/score-steering) | Scores how the human steered a coding session, advisory only, against the one rubric it ships | Own |
 | [`excalidraw`](skills/excalidraw) | Hand-drawn Excalidraw diagrams written as a Python spec, linted and checked by rendering | Own |

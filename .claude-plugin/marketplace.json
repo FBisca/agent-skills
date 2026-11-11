@@ -9,7 +9,7 @@
     {
       "name": "agent-skills",
       "source": "./",
-      "description": "Planning, orchestration and review skills: idea-frame, idea-answer, start-planning, orchestrate, converge, cold-read, excalidraw, explain-video and more.",
+      "description": "Planning, orchestration and review skills: idea-frame, idea-answer, start-planning, orchestrate, cold-read, excalidraw, explain-video and more.",
       "version": "0.1.0",
       "license": "MIT",
       "author": { "name": "Felippe Bisca" },
