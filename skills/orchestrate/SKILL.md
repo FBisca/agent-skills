@@ -1,34 +1,36 @@
 ---
 name: orchestrate
-description: Build an approved plan's tickets with implementer agents, gate each one on its scenarios, and archive the plan into the living spec. Use when the user says /orchestrate or wants an approved plan, or its next ticket, implemented.
+description: Build an approved plan's tickets with implementer agents, gate each one on its scenarios, verify the plan's outcome on the integrated tree, and archive it into the living spec. Use when the user says /orchestrate or wants an approved plan, or its next ticket, implemented.
 ---
 
 # Orchestrate
 
-**Input:** an approved plan (`docs/plans/*.plan.md`) with these fields: `Slug: <slug>`; `Living spec: docs/specs/<area>.md`; `Status: APPROVED`; a Decisions table; scenario lines `- **S<n>** WHEN …, THEN …`; a `## Tickets` table whose IDs are `T<n>` with the columns Satisfies, Blocked by, Paths, Owner and Status, plus Size and Difficulty (a plan without them reads every ticket as regular · simple).
-**Output:** each ticket merged and COMPLETE, the scenarios archived into the living spec, and the plan set to `Status: ARCHIVED`.
+**Input:** an approved plan: `<name>.plan.yaml` (`plan/1`) that `plan approve` has approved, with its narrative `<name>.plan.md` and its oracles `<name>.oracle/` beside it.
+**Output:** each ticket merged and COMPLETE, the plan's outcome verified on the integrated tree, and the plan archived: its scenarios in the living spec, its promoted oracles in the repository.
 **Hand-off:** new scope goes back to `/start-planning`.
 
 Arguments: `<plan-path>`.
 
+`<engine>` below is `python3 <skill-dir>/scripts/orchestrate.py`, the hand-off to the engine; it passes every command and its arguments through unchanged.
+
 ## Gate
 
-- When the plan is missing, unapproved, or lacks any Input field, refuse: name what is missing and point the user to `/start-planning`. Plan nothing and build nothing yourself. A PRD, Linear issue or vault note is a source, not a plan.
-- The plan is the ledger of scope and decisions. When the user decides something or adds scope mid-run, write it into the plan (a Decisions row, or a new ticket with its scenarios).
+- When the plan is missing or unapproved, refuse: name what is missing and point the user to `/start-planning`. Plan nothing and build nothing yourself. A PRD, Linear issue or vault note is a source, not a plan. `<engine> plan check <plan>` names what a plan lacks.
+- The plan is the ledger of scope and decisions, and its approval covers its bytes. When the user decides something or adds scope mid-run, write it into the plan (a Decisions row in the narrative; a ticket, a scenario or a Paths change in the contract). A change to the contract or an oracle needs a new approval: stop the run, edit, `<engine> plan approve <plan>`, then `launch` again. The narrative is not digested, so a Decisions row alone needs none.
 
 ## What to do
 
 You are a launcher. A Python driver runs the build, so the loop costs no model tokens.
 
-1. Run `python3 <skill-dir>/scripts/orchestrate.py launch <plan>`.
+1. Run `<engine> launch <plan>`.
 2. Exit 2 means the plan is not runnable: relay what it says is missing and stop. Nothing was started.
 3. Otherwise report the pane name it prints (`orchestrate-<slug>`) and end the turn. If a driver with that name is already live, `launch` starts no second one and prints the same name.
 
-Do not run the loop, wait on workers, write `task.md`, review or gate tickets, merge, or archive. The driver does all of it through the `agent-runtime` tools: dispatch, converge, review, fix rounds, CI, unblocking once you merge, archive. It never merges a PR. For its options and behavior: `orchestrate.py run --help`.
+The driver does the build through the `agent-runtime` tools: dispatch, the ticket gates (scope, integrity, covers, evidence), review, fix rounds, CI, unblocking once the user merges, integration, outcome verification and archive. It never merges a PR. Your part is answering its requests and the person-owned tickets. For its options and behaviour: `<engine> run --help`.
 
 ## The engine
 
-The driver is not in this skill. It is the `agent-orchestrator` member of [agent-runtime](https://github.com/FBisca/agent-runtime), and `scripts/orchestrate.py` is a shim: it resolves that member's CLI and hands it the command. The engine's behaviour and its suite live in that repository, in `docs/specs/orchestrator-engine.md`.
+The driver is not in this skill. It is the `agent-orchestrator` member of [agent-runtime](https://github.com/FBisca/agent-runtime), and `scripts/orchestrate.py` is a shim: it resolves that member's CLI and hands it the command. The engine's behaviour and its suite live in that repository, in `docs/specs/orchestrator-engine.md` and `docs/specs/plan-contract.md`.
 
 The member is resolved in this order:
 
@@ -42,13 +44,13 @@ The pane is named `orchestrate-<slug>` and nests under the Lead's terminal when 
 ## What the user sees
 
 - The Herdr pane `orchestrate-<slug>` is the lead. Workers `<slug>-t<n>` nest under it and appear on their ticket rows in the Plans panel.
-- Status cells of the plan. A ticket stops at `IN PROGRESS · awaiting merge (<PR>)` until the user merges its PR; the driver then marks it COMPLETE and unblocks the tickets that depend on it. Status also reads `IN PROGRESS · needs you: <reason>` when a ticket waits for a person.
+- `<engine> status <plan>` (`--json` for the same as data): the plan's state and history, and each ticket's state, reason and PR. A ticket stops at `IN PROGRESS · awaiting merge (<PR>)` until the user merges its PR; the driver then marks it COMPLETE and unblocks the tickets that depend on it. It reads `needs you: <reason>` when it waits for a person.
 - An `orphaned` task: a restarted drive found an open task whose agent the runtime no longer lists, and names it in an `orphaned` event. An implementer whose report never landed is dispatched again by itself — a new `t<N>o<k>` attempt, same worktree, branch and worker name.
 - `<run>/attention.md`: everything waiting for the user, with the question or action.
 - `<run>/gaps.md`: the advisory gaps review of the whole plan, written once at archive. Gaps become plan edits, your call.
 - `<run>/metrics.json`: per ticket the route, review rounds, escalations, decider calls and worker usage; lead model turns are 0. Written when the run stops.
 
-`<run>` is `~/.local/state/orchestrate/<slug>/`.
+`<run>` is `~/.local/state/orchestrate/<repo-key>/<slug>/`; `status --json` prints it as `run_dir`.
 
 ## Contracts
 
@@ -61,27 +63,50 @@ Every agent-to-driver handoff is a versioned JSON file, validated in code; the d
 | `<run>/<task>/report.json` | worker |
 | `<run>/<task>/review.json` | reviewer |
 | `<run>/<task>/findings.json` | driver, for a fix round |
-| `<run>/<task>/decision.json` | decider |
+| `<run>/<task>/request.<n>.json`, `<run>/<task>/decision.<n>.json` | driver; Lead, through `decide` |
+| `<run>/receipts/` | driver: every evidence run, its receipt and log |
 | `<run>/attention.md`, `<run>/deferred.md`, `<run>/gaps.md`, `<run>/metrics.json` | driver (gaps.md: the gaps reviewer), for people |
 
 The schemas and field lists live in the member's `contracts.py` only.
 
 ## When the run pauses
 
-The driver pauses a ticket when it needs a person: a scope or product question, a person-owned ticket (prod data, sign-off, deploy), or a failure the decider could not settle. The decider is one-shot: it never takes a reply. Read `<run>/attention.md`, decide, and answer through the plan Status:
+The driver pauses a unit when it needs a person: a scope or product question, a failure it could not settle, a worker that went idle. The request names the unit, the reason and a menu. Answer it:
 
-- `TO-DO`: retry. On its next round the driver stops the held worker if live, releases the assignment, and dispatches a fresh attempt of the same unit (escalation counts carry over). A note in the cell is fine: `TO-DO · retry` retries too.
-- `COMPLETE <date>`: done by hand. Its dependents and the archive unblock.
-- Any other edit leaves the ticket paused.
+```
+<engine> decide <plan> <unit> <action> --reason "<why>" [--answer "<text>"]
+```
 
-If the answer changes scope, add a Decisions row or a ticket (with its scenarios) to the plan first.
+- `retry`, `retry one class up`, `fresh worker`: a new attempt of the same unit; escalation counts carry over.
+- `answer`: the same worker resumes with `--answer` as its next instruction. The driver refuses an answer that names a ticket ID: say "your Paths", not the ticket.
+- `mark blocked`, `skip`: the unit stops; its dependents stay blocked.
+
+If the answer changes scope, change the plan first (see Gate).
+
+A person-owned ticket reads `needs you: <what it delivers>` once its blockers merge. Do the work it names, in its `repo` when it has one. No command records it done yet: with no driver running, set its entry in the ledger's `ticket_status` to `COMPLETE <date> · <what landed>`, then `launch` again.
+
+## Verify and accept
+
+Once every ticket is COMPLETE, the driver runs every evidence item on one pinned default-branch commit that contains each merge. `<engine> verify <plan>` says whether the outcome holds on those receipts, and exits non-zero when it does not.
+
+An evidence item that did not pass, or a `human` item, waits for a person. Check it yourself, then record it:
+
+```
+<engine> accept <plan> <scenario> --note "<what you checked>"
+```
+
+The note is kept with your name, the time and the tree, and the plan becomes ACCEPTED_WITH_HUMAN. The archive starts once the plan is accepted.
 
 Two wakes report work the run could not do:
 
 - `stranded <unit>`: the drive cannot tell what became of an open task's agent. Nothing was released or spawned and the run exits non-zero; the work may still be in its terminal — look at it, then restart the drive.
-- `not-dispatched <ticket>`: the dispatch failed and its reason stays in the cell, `TO-DO · not dispatched: <reason>`, until it reads exactly `TO-DO` — that retry compares the whole cell, so the driver never reads its own note as yours.
+- `not-dispatched <ticket>`: the dispatch failed; `status` shows its reason on the ticket.
 
-When only paused tickets remain, the run exits. After editing the plan, run `launch` again: the driver re-reads the plan and the ledger, so it picks up where it stopped. A run still alive picks the edit up on its next round.
+When only paused units remain, the run exits. Run `launch` again after answering: the driver re-reads the plan and the ledger, so it picks up where it stopped. A run still alive picks a decision up on its next round.
+
+## Markdown plans
+
+A plan written before the YAML contract (`<name>.plan.md` with a `## Tickets` table) still runs until the legacy reader is removed. Its Status cells are its ledger, and the user answers a pause through them: `TO-DO` retries, `COMPLETE <date>` marks the ticket done by hand.
 
 ## References
 

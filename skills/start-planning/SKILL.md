@@ -1,89 +1,137 @@
 ---
 name: start-planning
-description: Plan one feature spec-driven, from its sources to WHEN/THEN scenarios and vertical tickets, then stop for approval. Use when the user wants to plan a feature, idea or task, says "let's plan X", or hands over a PRD, Linear issue or vault note to build.
+description: Plan one feature spec-driven, from its sources to WHEN/THEN scenarios, their evidence and vertical tickets, then stop for approval. Use when the user wants to plan a feature, idea or task, says "let's plan X", or hands over a PRD, Linear issue or vault note to build.
 ---
 
 # Start planning
 
 **Input:** a feature, idea or task, plus whatever already describes it: a PRD, Linear issues, vault notes, a living spec, or only the request itself.
-**Output:** one approved **plan** at `docs/plans/YYYY-MM-DD-<slug>.plan.md`, dated the day it is written and never re-dated.
-**Hand-off:** `/orchestrate <plan-path>` builds it.
+**Output:** one approved **plan**: three files in the repository's plan directory, named `YYYY-MM-DD-<slug>` for the day they are written and never re-dated:
 
-Three documents, three jobs: the **PRD**, when there is one, says why and for whom; the **plan** turns one piece of the work into testable scenarios and tickets; the **living spec** (`docs/specs/<area>.md`) records what the system does today.
+- `<name>.plan.yaml`, the **contract** (`plan/1`): goal, scenarios, evidence, tickets. `plan approve` digests it.
+- `<name>.plan.md`, the **narrative**: why now, sources, decisions, risks, seams. Not digested.
+- `<name>.oracle/`, the **oracles**: test files the evidence runs, each named `<file>.oracle`.
+
+**Hand-off:** `/orchestrate <plan.yaml>` builds it.
+
+Three documents, three jobs: the **PRD**, when there is one, says why and for whom; the **plan** turns one piece of the work into testable scenarios and tickets; the **living spec** (the contract's `spec`) records what the system does today.
+
+`<engine>` below is `python3 <skill-dir>/../orchestrate/scripts/orchestrate.py`, the orchestrate skill's hand-off to the engine. The engine owns the plan format: its `plan check` is the authority on the contract, and [references/plan-yaml.md](references/plan-yaml.md) is the skeleton to write from.
 
 ## Delegation
 
-Step 1 needs another context; step 2 needs another skill.
+Steps 2 and 7 need another context; step 3 needs another skill.
 
-- **Gather**: a fresh-context gatherer — a subagent with no inherited context and no fork of this session.
+- **Gather** and **oracle review**: a fresh-context agent — a subagent with no inherited context and no fork of this session.
 - **Grill**: the `grilling` skill, which asks the user.
 
-The gather must be bounded and explicit: it runs under a timeout, it returns structured findings (the Sources table, the decisions with their sources, the findings, the counts and the edge cases), and it fails loudly. When it times out, fails or returns anything else, stop: never continue into the plan on evidence it did not produce.
+Each delegation must be bounded and explicit: it runs under a timeout, it returns structured findings, and it fails loudly. When it times out, fails or returns anything else, stop: never continue into the plan on evidence it did not produce.
 
 `grilling` is an upstream skill, installed separately. When it is missing, stop and name the install command; never answer its questions yourself and never skip the grill.
 
-A harness with no subagent of its own dispatches the gatherer through the adapter this skill ships, `scripts/fresh_context.py`. [references/delegation.md](references/delegation.md) has the per-harness dispatch, the packet, the result schema and the failure codes.
+A harness with no subagent of its own dispatches through the adapter this skill ships, `scripts/fresh_context.py`. [references/delegation.md](references/delegation.md) has the per-harness dispatch, the packet, the result schema and the failure codes.
 
-## 1. Gather
+## 1. Find the plan directory
+
+Run `<engine> plans list --json`.
+
+- The user named a plan path or directory: use it, and pass it to every later `plans list`.
+- One directory holds the listed plans: write there.
+- It refuses, naming several directories: ask the user which one.
+- The list is empty: ask once, suggesting `docs/plans/`, and create it on the first write.
+
+Done when one directory is chosen.
+
+## 2. Gather
 
 A PRD is not a gate. Plan an idea or task from the request and whatever sources exist; the request itself is a source. Suggest `/to-spec` only when the work hinges on a product decision (who it is for, what users get, whether to build it) that no PRD settles, and keep planning unless the user chooses to write one. A product question that surfaces later goes to the PRD owner, or to the user when there is no PRD, not into the plan.
 
-Dispatch a fresh-context gatherer (see Delegation): where the harness has model classes, a medium-class ([class](../orchestrate/references/routing.md#class-to-model)) one. It lists every source with its link (the request, the PRD if any, the Linear project and issues, the vault project note and its decision notes, RFCs, the living spec for the area), extracts each decision they already settle with its source, and reads the code the feature touches. When a decision depends on real data (backfill, migration, existing records), it runs read-only queries and returns the counts and edge cases: empty sets, conflicts, departed or archived owners.
+Dispatch a fresh-context gatherer (see Delegation): where the harness has model classes, a medium-class ([class](../orchestrate/references/routing.md#class-to-model)) one. It lists every source with its link (the request, the PRD if any, the Linear project and issues, the vault project note and its decision notes, RFCs, the living spec for the area), extracts each decision they already settle with its source, and reads the code the feature touches, naming its seams: the CLI, HTTP, tool and public entry points, and the test fixtures, where a test can drive the feature from outside. When a decision depends on real data (backfill, migration, existing records), it runs read-only queries and returns the counts and edge cases: empty sets, conflicts, departed or archived owners.
 
 The gatherer's answer is the only evidence you may use: its Sources table and the decisions it settled with their sources. Do not fill a gap it left with your own recollection of the conversation.
 
-Done when the gatherer has returned the Sources table and every settled decision with its source.
+Done when the gatherer has returned the Sources table, every settled decision with its source, and the seams.
 
-## 2. Grill the gaps
+## 3. Grill the gaps
 
 Invoke the `grilling` skill on the decisions the sources leave open or contradict, bringing Gather's counts and edge cases into the questions. Settled decisions enter the plan unasked, with their source.
 
 Done when the grilling frontier is empty.
 
-## 3. Write the plan
+## 4. Write the narrative
 
-Keep these headings and columns: other skills parse them.
+Write `<name>.plan.md` with these headings:
 
 ```markdown
 # Plan: <feature>
 
-Slug: `<slug>`. Living spec: `docs/specs/<area>.md`. Status: AWAITING APPROVAL.
+Slug: `<slug>`. Contract: `<name>.plan.yaml`.
 
 ## Why now
 ## Sources        (table: Source | What it settles)
 ## Decisions      (table: # | Choice | Rejected | Why | Source)
-## Scenarios
-- **S1** WHEN <condition>, THEN <observable outcome>.
 ## Out of scope
 ## Risks          (security, performance, migration, rollback: each covered or n/a)
 ## Seams          (where tests attach: the highest existing seam, as few as possible)
-## Tickets
-| # | What it delivers | Satisfies | Blocked by | Paths | Size | Difficulty | Owner | Status |
-|---|---|---|---|---|---|---|---|---|
-| T1 | <end-to-end behaviour> | S1, S2 | none | src/feature/, tests/feature.test.ts | regular | simple | agent | TO-DO |
 ```
 
-Each scenario is one observable behaviour that a test would catch if it broke. IDs are `S<n>`, with an optional letter suffix (`S4a`). Every requirement becomes a scenario; one you can't phrase as WHEN/THEN is an open decision, so take it back to step 2.
+Scenarios and tickets live in the contract alone; the narrative cites their IDs.
 
-Done when every requirement is a scenario, every decision row names its rejected option and source, and Risks has all four lines.
+Done when every decision row names its rejected option and source, and Risks has all four lines.
 
-## 4. Slice into tickets
+## 5. Write the scenarios and their evidence
+
+In `<name>.plan.yaml`, from [the skeleton](references/plan-yaml.md): `goal` in one sentence, `spec` the living spec, then the scenarios.
+
+Each scenario is one observable behaviour that a test would catch if it broke: `id`, `when`, `then`. IDs are `S<n>`, with an optional letter suffix (`S4a`). Every requirement becomes a scenario; one you can't phrase as WHEN/THEN is an open decision, so take it back to step 3.
+
+`outcome` lists the scenarios that prove the goal on the integrated tree; each carries evidence. Evidence is for the outcome and for the scenarios a risk-tagged ticket satisfies. Every other scenario is covered by the tests its ticket writes, the reviewer and CI.
+
+Write evidence by the **oracle ladder**, taking the first rung that holds:
+
+1. **Reuse**: a `check` that runs an existing test.
+2. **Command**: a `check` over an observable (a CLI's output, a file, an exit code).
+3. **Black-box oracle**: a new test at an existing seam.
+4. **Contract-first oracle**: a new test against an interface a Decision row fixes.
+5. **Human**: `human: <what a person confirms>`.
+
+An oracle targets only an interface that exists or that a Decision row fixes; when neither holds, the decision is open: back to step 3. An oracle drives the outermost stable seam and imports the system under test lazily, so it collects cleanly at base. `baseline` is what the check does at base today: `fail` for behaviour still to build, `pass` for behaviour it must keep.
+
+After writing or editing each Python oracle, run `python3 <skill-dir>/scripts/format_oracle.py --repo <repo> <oracle file> <place>`. It formats the file as the repository's formatter formats its promoted path, so the byte-identical copy promoted at archive passes the repository's format gate.
+
+Done when every outcome scenario has evidence and every Python oracle has been through `format_oracle.py` since its last edit.
+
+## 6. Slice into tickets
 
 Each ticket is a **tracer bullet**: one narrow path through every layer it needs (schema, API, UI, test), landing as one PR under ~800 hand-written lines.
 
-- **Satisfies**: the S-IDs the ticket makes true, as a comma list or a range (`S1–S4`). Every scenario sits in some ticket's Satisfies.
-- **Blocked by**: the ticket IDs that must merge first, comma-separated, or `none`. A blocked ticket branches from main after its blockers merge; stacked branches break under squash merge.
-- **Paths**: the repo-relative files, directories (ending `/`) or globs the ticket may change, comma-separated. The build is fenced to them.
-- **Size** (`small | regular`) and **Difficulty** (`simple | complex`): judged by orchestrate's [routing](../orchestrate/references/routing.md), they pick the ticket's worker. A person-owned ticket leaves both empty. `big` is not a size: the driver refuses such a ticket, so split the work into two tickets.
-- **Owner**: `agent` for code. Every step a person runs or approves (prod data apply, sign-off, deploy) is its own ticket with that person as Owner; a code PR never closes it.
-- **Status**: TO-DO, IN PROGRESS or COMPLETE.
+- **`satisfies`**: the scenario IDs the ticket makes true. Every scenario sits in some ticket's `satisfies`.
+- **`blocked_by`**: the ticket IDs that must merge first. A blocked ticket branches from main after its blockers merge; stacked branches break under squash merge.
+- **`paths`**: the literal repo-relative files and directories (ending `/`) the ticket may change; no globs. The build is fenced to them, and a ticket that changes a test some other ticket's behaviour breaks owns that test too.
+- **`size`** (`small | regular`) and **`difficulty`** (`simple | complex`): judged by orchestrate's [routing](../orchestrate/references/routing.md), they pick the ticket's worker. `big` is not a size: split the work into two tickets.
+- **`owner`**: `agent` for code. Every step a person runs or approves (prod data apply, sign-off, deploy, work in another repository) is its own ticket with that person as owner, no `size` or `difficulty`, and `repo` when it is elsewhere; a code PR never closes it.
+- **`risk`**: tag a ticket `security`, `concurrency`, `retry-idempotency`, `migration`, `external` or `state` when it carries that risk. It then satisfies a scenario with evidence, or carries an `evidence_waiver` naming where the risk *is* verified.
 
 A wide mechanical refactor runs as expand–contract: expand, one ticket per migrate batch, then contract.
 
 When the repo is tracked in Linear, create one sub-issue per ticket under the feature issue. The plan stays the source of truth.
 
-Done when every scenario appears in some ticket's Satisfies.
+Done when every scenario appears in some ticket's `satisfies`, and every risk-tagged ticket has evidence or a waiver.
 
-## 5. Approve
+## 7. Check and review
 
-Show the plan path, the decisions, the scenarios and the tickets table with each Size and Difficulty, then stop for one approval. Build nothing at this point. On approval, set `Status: APPROVED <date>` and hand off to `/orchestrate <plan-path>`.
+1. Run `<engine> plan check <plan.yaml>` and fix every line it prints, until it exits 0.
+2. Dispatch one fresh-context oracle reviewer, large class (see Delegation). Its packet: the contract, the oracle files, and the narrative's Decisions and Seams; never this session's reasoning. It returns, for each scenario with evidence, the assertion that checks its `then` (or none), and for each outcome scenario one counterexample: a wrong implementation its evidence would still pass.
+3. Fix the findings you agree with, then run `plan check` and `format_oracle.py` again on what changed.
+
+The review is advisory: what you leave open goes to the approval.
+
+Done when `plan check` exits 0 on the final contract and the review has returned.
+
+## 8. Approve
+
+Show the three paths, the decisions, the scenarios with their evidence, the tickets with each size and difficulty, and the oracle review's open findings; then stop for one approval. Build nothing at this point.
+
+On the user's yes, run `<engine> plan approve <plan.yaml>`. It records the approval in the contract, snapshots the contract and its oracles, and runs every evidence item at base against its `baseline`. When it refuses, fix what it names; a fix that changes the plan needs the user's yes again. Any later edit to the contract or an oracle needs a new `plan approve`.
+
+Then hand off to `/orchestrate <plan.yaml>`.

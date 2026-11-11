@@ -77,6 +77,29 @@ class DelegationTests(unittest.TestCase):
             self.assertEqual(failed.returncode, 3, failed.stderr)
 
     @pytest.mark.integration
+    def test_S26_the_plan_commands_reach_the_member_unchanged(self):
+        """yaml-eec/S26: `plan check`, `plan approve`, `plans list`, `verify`, `accept` and `status` are
+        handed to the member as they were given, and the tree carries no converge skill."""
+        commands = (
+            ["plan", "check", "docs/plans/x.plan.yaml", "--repo", "."],
+            ["plan", "approve", "docs/plans/x.plan.yaml", "--base", "HEAD"],
+            ["plans", "list", "--json"],
+            ["verify", "docs/plans/x.plan.yaml"],
+            ["accept", "docs/plans/x.plan.yaml", "S3", "--note", "checked by hand"],
+            ["status", "docs/plans/x.plan.yaml", "--json"],
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            home, env = self.checkout(tmp)
+            env = dict(env, AGENT_RUNTIME_HOME=str(home), PATH=str(Path(tmp) / "empty"))
+            for argv in commands:
+                result = self.run_skill(env, *argv)
+                self.assertEqual(result.returncode, 0, result.stderr)
+            calls = [json.loads(line)["argv"] for line in
+                     (home / "calls.jsonl").read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(calls, [list(argv) for argv in commands])
+        self.assertFalse((ROOT / "skills" / "converge").exists())
+
+    @pytest.mark.integration
     def test_S4_the_named_checkout_wins_over_a_member_on_the_path(self):
         """S4: the checkout the user named is not shadowed by an older install on PATH."""
         with tempfile.TemporaryDirectory() as tmp:
