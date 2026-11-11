@@ -1,0 +1,5 @@
+interface:
+  display_name: "Business Writing"
+  short_description: "Plan, draft and edit clear English business prose"
+policy:
+  allow_implicit_invocation: false

@@ -41,6 +41,10 @@ SOFTWARE.
 
 `skills/cold-read/reader.md` is adapted from `agents/comprehension.md` in the Elephant-Goldfish Model, https://github.com/google/elephant-goldfish-model. Apache License 2.0; full text in `skills/cold-read/LICENSE`, attribution and change note in `skills/cold-read/NOTICE.md`. Not endorsed by Google.
 
+## process-business-writing, analytics-data-storytelling: aleberriz/agent-skills (Apache-2.0)
+
+`skills/process-business-writing` and `skills/analytics-data-storytelling` are copied from `plugins/core-skills/skills/` in https://github.com/aleberriz/agent-skills. Apache License 2.0; full text in each skill's `LICENSE`, attribution and change note (both load only when invoked; `process-git` is not carried) in each skill's `NOTICE.md`.
+
 ## Used, not distributed
 
 - **HyperFrames** (https://github.com/heygen-com/hyperframes, Apache-2.0, Copyright HeyGen). `explain-video` drives the HyperFrames CLI and, for its frozen v0.8.184 workflow pieces, fetches them with `skills/explain-video/scripts/fetch-hyperframes.sh`. The `hyperframes`, `hyperframes-cli`, `hyperframes-registry` and `media-use` skills are installed from upstream (`skills.lock.json`), not copied here.
