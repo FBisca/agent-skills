@@ -9,7 +9,7 @@ description: Plan one feature spec-driven, from its sources to WHEN/THEN scenari
 **Output:** one approved **plan**: three files in the repository's plan directory, named `YYYY-MM-DD-<slug>` for the day they are written and never re-dated:
 
 - `<name>.plan.yaml`, the **contract** (`plan/1`): goal, scenarios, evidence, tickets. `plan approve` digests it.
-- `<name>.plan.md`, the **narrative**: why now, sources, decisions, risks, seams. Not digested.
+- `<name>.brief.md`, the **brief**: the plan's diff in plain words, and its decisions. Not digested.
 - `<name>.oracle/`, the **oracles**: test files the evidence runs, each named `<file>.oracle`.
 
 **Hand-off:** `/orchestrate <plan.yaml>` builds it.
@@ -58,28 +58,7 @@ Invoke the `grilling` skill on the decisions the sources leave open or contradic
 
 Done when the grilling frontier is empty.
 
-## 4. Write the narrative
-
-Write `<name>.plan.md` with these headings:
-
-```markdown
-# Plan: <feature>
-
-Slug: `<slug>`. Contract: `<name>.plan.yaml`.
-
-## Why now
-## Sources        (table: Source | What it settles)
-## Decisions      (table: # | Choice | Rejected | Why | Source)
-## Out of scope
-## Risks          (security, performance, migration, rollback: each covered or n/a)
-## Seams          (where tests attach: the highest existing seam, as few as possible)
-```
-
-Scenarios and tickets live in the contract alone; the narrative cites their IDs.
-
-Done when every decision row names its rejected option and source, and Risks has all four lines.
-
-## 5. Write the scenarios and their evidence
+## 4. Write the scenarios and their evidence
 
 In `<name>.plan.yaml`, from [the skeleton](references/plan-yaml.md): `goal` in one sentence, `spec` the living spec, then the scenarios.
 
@@ -92,16 +71,16 @@ Write evidence by the **oracle ladder**, taking the first rung that holds:
 1. **Reuse**: a `check` that runs an existing test.
 2. **Command**: a `check` over an observable (a CLI's output, a file, an exit code).
 3. **Black-box oracle**: a new test at an existing seam.
-4. **Contract-first oracle**: a new test against an interface a Decision row fixes.
+4. **Contract-first oracle**: a new test against an interface a settled decision fixes.
 5. **Human**: `human: <what a person confirms>`.
 
-An oracle targets only an interface that exists or that a Decision row fixes; when neither holds, the decision is open: back to step 3. An oracle drives the outermost stable seam and imports the system under test lazily, so it collects cleanly at base. `baseline` is what the check does at base today: `fail` for behaviour still to build, `pass` for behaviour it must keep.
+An oracle targets only an interface that exists or that a settled decision fixes; when neither holds, the decision is open: back to step 3. An oracle drives the outermost stable seam and imports the system under test lazily, so it collects cleanly at base. `baseline` is what the check does at base today: `fail` for behaviour still to build, `pass` for behaviour it must keep.
 
 After writing or editing each Python oracle, run `python3 <skill-dir>/scripts/format_oracle.py --repo <repo> <oracle file> <place>`. It formats the file as the repository's formatter formats its promoted path, so the byte-identical copy promoted at archive passes the repository's format gate.
 
 Done when every outcome scenario has evidence and every Python oracle has been through `format_oracle.py` since its last edit.
 
-## 6. Slice into tickets
+## 5. Slice into tickets
 
 Each ticket is a **tracer bullet**: one narrow path through every layer it needs (schema, API, UI, test), landing as one PR under ~800 hand-written lines.
 
@@ -118,10 +97,29 @@ When the repo is tracked in Linear, create one sub-issue per ticket under the fe
 
 Done when every scenario appears in some ticket's `satisfies`, and every risk-tagged ticket has evidence or a waiver.
 
+## 6. Write the brief
+
+Write `<name>.brief.md`: the plan's **diff** in plain words, what a person reads before approving. It cites scenario and ticket IDs; their text lives in the contract.
+
+```markdown
+# Brief: <feature>
+
+Slug: `<slug>`. Contract: `<name>.plan.yaml`.
+
+## What changes   (one line per behaviour: `<path or area>`: before → after (T<n>))
+## Decisions      (one line each: D<n> <choice>, over <rejected>: <why> (<source>))
+## Out of scope   (one line; drop the heading when nothing is)
+## Risks          (one line per tagged risk: where it is verified; drop the heading when none)
+```
+
+Write each line as the change itself, the way a commit message would; the reasoning behind it belongs to its decision line.
+
+Done when every ticket's `delivers` reads as a What changes line, and every decision line names what it rejected and its source.
+
 ## 7. Check and review
 
 1. Run `<engine> plan check <plan.yaml>` and fix every line it prints, until it exits 0.
-2. Dispatch one fresh-context oracle reviewer, large class (see Delegation). Its packet: the contract, the oracle files, and the narrative's Decisions and Seams; never this session's reasoning. It returns, for each scenario with evidence, the assertion that checks its `then` (or none), and for each outcome scenario one counterexample: a wrong implementation its evidence would still pass.
+2. Dispatch one fresh-context oracle reviewer, large class (see Delegation). Its packet: the contract, the oracle files, and the brief's Decisions; never this session's reasoning. It returns, for each scenario with evidence, the assertion that checks its `then` (or none), and for each outcome scenario one counterexample: a wrong implementation its evidence would still pass.
 3. Fix the findings you agree with, then run `plan check` and `format_oracle.py` again on what changed.
 
 The review is advisory: what you leave open goes to the approval.

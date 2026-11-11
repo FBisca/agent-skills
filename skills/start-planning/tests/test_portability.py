@@ -5,7 +5,7 @@ S2: the two steps that need another context (gather, grill) have a Pi path that 
 fails loudly; neither may be skipped.
 S3: the Claude Code and Codex paths are still there, unchanged in substance.
 test-suite/R2: the plan the skill documents is the plan the engine reads.
-yaml-eec/S26, S30: the plan is the engine's YAML contract, its narrative and its oracles; a Python
+yaml-eec/S26, S30: the plan is the engine's YAML contract, its brief and its oracles; a Python
 oracle is formatted under its promoted path before the plan is checked and approved.
 """
 
@@ -22,8 +22,8 @@ TEXT = SKILL.read_text(encoding="utf-8")
 
 REFERENCE = (SKILL.parent / "references" / "plan-yaml.md").read_text(encoding="utf-8")
 
-# The narrative's headings; the scenarios and tickets live in the contract alone.
-PLAN_HEADINGS = ("Why now", "Sources", "Decisions", "Out of scope", "Risks", "Seams")
+# The brief's headings: the plan's diff in plain words; the scenarios and tickets live in the contract alone.
+PLAN_HEADINGS = ("What changes", "Decisions", "Out of scope", "Risks")
 
 # The engine (agent-runtime's `plan/1` loader) reads the contract the skill writes: its top-level
 # keys, the scenario and ticket fields, and the values it accepts for size and difficulty.
@@ -68,6 +68,13 @@ class PlanContract(unittest.TestCase):
         for heading in PLAN_HEADINGS:
             self.assertTrue(any(item.startswith(heading) for item in headings),
                             "missing plan heading: %s" % heading)
+
+    def test_S1_the_plan_writes_a_brief_not_a_narrative(self):
+        """S1: the third plan file is the brief, the plan's diff in plain words."""
+        self.assertIn("`<name>.brief.md`", TEXT)
+        self.assertNotIn("`<name>.plan.md`", TEXT)
+        for heading in ("Why now", "Sources", "Seams"):
+            self.assertNotIn("## " + heading, TEXT)
 
     def test_S1_the_scenario_shape_is_kept(self):
         """S1: scenarios stay WHEN/THEN with S-ids."""
