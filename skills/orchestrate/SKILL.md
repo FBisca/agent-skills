@@ -5,7 +5,7 @@ description: Build an approved plan's tickets with implementer agents, gate each
 
 # Orchestrate
 
-**Input:** an approved plan: `<name>.plan.yaml` (`plan/1`) that `plan approve` has approved, with its narrative `<name>.plan.md` and its oracles `<name>.oracle/` beside it.
+**Input:** an approved plan: `<name>.plan.yaml` (`plan/1`) that `plan approve` has approved, with its brief `<name>.brief.md` (or, in an older plan, its narrative `<name>.plan.md`) and its oracles `<name>.oracle/` beside it.
 **Output:** each ticket merged and COMPLETE, the plan's outcome verified on the integrated tree, and the plan archived: its scenarios in the living spec, its promoted oracles in the repository.
 **Hand-off:** new scope goes back to `/start-planning`.
 
@@ -16,7 +16,7 @@ Arguments: `<plan-path>`.
 ## Gate
 
 - When the plan is missing or unapproved, refuse: name what is missing and point the user to `/start-planning`. Plan nothing and build nothing yourself. A PRD, Linear issue or vault note is a source, not a plan. `<engine> plan check <plan>` names what a plan lacks.
-- The plan is the ledger of scope and decisions, and its approval covers its bytes. When the user decides something or adds scope mid-run, write it into the plan (a Decisions row in the narrative; a ticket, a scenario or a Paths change in the contract). A change to the contract or an oracle needs a new approval: stop the run, edit, `<engine> plan approve <plan>`, then `launch` again. The narrative is not digested, so a Decisions row alone needs none.
+- The plan is the ledger of scope and decisions, and its approval covers its bytes. When the user decides something or adds scope mid-run, write it into the plan (a decision line in the brief; a ticket, a scenario or a Paths change in the contract). A change to the contract or an oracle needs a new approval: stop the run, edit, `<engine> plan approve <plan>`, then `launch` again. The brief is not digested, so a decision line alone needs none.
 
 ## What to do
 
