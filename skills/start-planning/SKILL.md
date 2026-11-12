@@ -22,7 +22,7 @@ Three documents, three jobs: the **PRD**, when there is one, says why and for wh
 
 Steps 2 and 7 need another context; step 3 needs another skill.
 
-- **Gather** and **oracle review**: a fresh-context agent — a subagent with no inherited context and no fork of this session.
+- **Gather** and **evidence review**: a fresh-context agent — a subagent with no inherited context and no fork of this session.
 - **Grill**: the `grilling` skill, which asks the user.
 
 Each delegation must be bounded and explicit: it runs under a timeout, it returns structured findings, and it fails loudly. When it times out, fails or returns anything else, stop: never continue into the plan on evidence it did not produce.
@@ -42,7 +42,7 @@ The **lane** sizes the planning to the work. Judge the request by orchestrate's 
 | Step | Standard | Full |
 |---|---|---|
 | 2. Gather | small class | medium class |
-| 7. Oracle review | only when the plan adds an oracle; medium class | always; large class |
+| 7. Evidence review | only when the plan adds an oracle; medium class | always; large class |
 
 Every other step runs the same in both lanes.
 
@@ -138,7 +138,7 @@ Done when every ticket's `delivers` reads as a What changes line, and every deci
 ## 7. Check and review
 
 1. Run `<engine> plan check <plan.yaml>` and fix every line it prints, until it exits 0.
-2. When the lane calls for it, dispatch one fresh-context oracle reviewer on the lane's class (see Delegation). Its packet: the contract, the oracle files, and the brief's Decisions; never this session's reasoning. It returns, for each scenario with evidence, the assertion that checks its `then` (or none), and for each outcome scenario one counterexample: a wrong implementation its evidence would still pass.
+2. When the lane calls for it, dispatch one fresh-context evidence reviewer on the lane's class (see Delegation). Its packet: the contract, the oracle files, and the brief's Decisions; never this session's reasoning. It returns, for each scenario with evidence, the assertion that checks its `then` (or none), and for each outcome scenario one counterexample: a wrong implementation its evidence would still pass.
 3. Fix the findings you agree with, then run `plan check` and `format_oracle.py` again on what changed.
 
 The review is advisory: what you leave open goes to the approval.
@@ -147,7 +147,7 @@ Done when `plan check` exits 0 on the final contract and the review, when the la
 
 ## 8. Approve
 
-Show the lane, the three paths, the decisions, the scenarios with their evidence, the tickets with each size and difficulty, and the oracle review's open findings; then stop for one approval. Build nothing at this point.
+Show the lane, the three paths, the decisions, the scenarios with their evidence, the tickets with each size and difficulty, and the evidence review's open findings; then stop for one approval. Build nothing at this point.
 
 On the user's yes, run `<engine> plan approve <plan.yaml>`. It records the approval in the contract, snapshots the contract and its oracles, and runs every evidence item at base against its `baseline`. When it refuses, fix what it names; a fix that changes the plan needs the user's yes again. Any later edit to the contract or an oracle needs a new `plan approve`.
 
