@@ -91,8 +91,15 @@ class GathererTests(unittest.TestCase):
         self.assertIn("--session-dir", argv)
         self.assertNotIn("--continue", argv)
         self.assertNotIn("--resume", argv)
-        self.assertIn("--no-extensions", argv)
         self.assertIn("--no-mcp", argv)
+
+    @pytest.mark.unit
+    def test_the_gatherer_loads_the_users_extensions(self):
+        # A provider such as ollama-cloud is registered by an extension; without it the
+        # configured model does not resolve.
+        runner = self.runner_for(out=json.dumps(ANSWER))
+        app.gather(str(self.packet), pi_bin=sys.executable, runner=runner)
+        self.assertNotIn("--no-extensions", runner.calls[0]["argv"])
 
     @pytest.mark.unit
     def test_the_gatherer_gets_read_only_tools_by_default(self):
