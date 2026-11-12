@@ -113,9 +113,13 @@ def read_packet(path):
 # ---- the subprocess ------------------------------------------------------------------------
 
 def build_argv(pi_bin, prompt, session_dir, model=None, tools=DEFAULT_TOOLS):
-    """The argv of the isolated gatherer session: no parent session, no extensions, no MCP."""
+    """The argv of the isolated gatherer session: no parent session and no MCP.
+
+    The user's extensions stay loaded: a model provider (ollama-cloud) is registered by one,
+    so dropping them leaves the configured model unresolvable.
+    """
     argv = [pi_bin, "--print", "--no-session", "--session-dir", str(session_dir),
-            "--no-extensions", "--no-mcp", "--tools", tools]
+            "--no-mcp", "--tools", tools]
     if model:
         argv += ["--model", model]
     argv.append(prompt)
