@@ -29,7 +29,7 @@ STRIPPED = {
 # Skills dropped as unused: neither carried here nor installed from the lock.
 REMOVED = {
     "caveman", "teach", "codebase-design", "improve-codebase-architecture",
-    "tdd", "to-tickets", "triage", "impeccable",
+    "to-tickets", "triage", "impeccable",
 }
 
 

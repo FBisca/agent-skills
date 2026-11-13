@@ -46,6 +46,7 @@ Own = written for this repo. Derivative = modified from an upstream, with attrib
 | [`gh-pr-create`](skills/gh-pr-create) | Opens pull requests safely with `gh` | Own |
 | [`git-commit`](skills/git-commit) | Conventional Commits with project conventions | Own |
 | [`handoff`](skills/handoff) | Compacts a conversation into a handoff document for another agent | Derivative (Matt Pocock, MIT) |
+| [`tdd`](skills/tdd) | Test-first red → green loop, with an admission rule so each test earns its place at the cheapest level | Derivative (Matt Pocock, MIT) |
 | [`zoom-out`](skills/zoom-out) | Asks for broader context on unfamiliar code | Upstream copy (Matt Pocock, MIT) |
 | [`process-business-writing`](skills/process-business-writing) | Plans, drafts and edits clear English business prose; loads only when invoked | Derivative (aleberriz, Apache-2.0) |
 | [`analytics-data-storytelling`](skills/analytics-data-storytelling) | Analyses, charts and narrates data for human readers; loads only when invoked | Derivative (aleberriz, Apache-2.0) |
@@ -65,6 +66,7 @@ These skills ship no `scripts/` folder: their behaviour is instructions for an a
 - `process-business-writing`
 - `score-agent`
 - `score-steering`
+- `tdd`
 - `zoom-out`
 
 ## Install
