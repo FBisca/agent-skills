@@ -5,9 +5,7 @@ description: Test-driven development. Use when the user wants to build features 
 
 # Test-Driven Development
 
-TDD is the red → green loop. This skill is the reference that makes that loop produce tests worth keeping: what a good test is, where tests go, which tests earn admission, the anti-patterns, and the rules of the loop. Every section applies on every cycle: consult them before and during the loop, not after.
-
-TDD asks for **evidence** of behaviour, not a new test for every change. The goal is the most regression protection for the least test code, maintenance and run time. A red that comes from extending an existing test is as good as a red from a new one.
+TDD is the red → green loop, and it asks for **evidence** of behaviour, not a new test per change: the most regression protection for the least test code, maintenance and run time. Every section applies on every cycle: consult them before and during the loop, not after.
 
 When exploring the codebase, read `GLOSSARY.md` (if it exists) so test names and interface vocabulary match the project's domain language, and respect ADRs in the area you're touching.
 
@@ -25,39 +23,39 @@ A **seam** is the public boundary you test at: the interface where you observe b
 
 Ask: "What's the public interface, and which seams should we test?" Give each proposed seam a one-line note on what it catches and what it misses.
 
-### The cheapest level that proves it
+### The cheapest level
 
-Each seam sits at a level. Pick the lowest level that reliably shows the behaviour:
+Each seam sits at a level; pick the lowest that reliably shows the behaviour:
 
-- **Unit**: local decisions — state transitions, parsing, validation, policies, classification. In process, no process started.
-- **Integration**: real boundaries — a subprocess, persistence, IPC, a server, the network. Fakes behind the boundary are fine.
+- **Unit**: local decisions (state transitions, parsing, validation, scheduling and retry policies), in process.
+- **Integration**: real boundaries (a subprocess, persistence, IPC, a server, the network), with fakes behind them.
 - **End to end**: a few representative journeys that prove the whole system completes.
 
-A higher level proves its boundary, and leaves the cases to the level below. Ten validation cases belong in one parametrised unit test plus one integration test that shows a refusal crosses the boundary, not in ten integration tests. Expensive setup (a server, a repo, a full lifecycle) is built once and shared by the tests that only read its result.
+A higher level proves its boundary and leaves the cases to the level below: ten validation cases are one parametrised unit test plus one integration test showing a refusal crosses the boundary. Overlap across levels earns its place only when each level proves a different real boundary.
 
 ## Test admission
 
-Before you write a test, answer these five, one line each:
+Before you write a test, answer each of these in one line:
 
-1. Which observable behaviour, or credible failure mode, does it protect? Tie it to a requirement or a real risk.
-2. Is that behaviour already covered? Search the existing tests for it first.
+1. Which observable behaviour or credible failure mode does it protect, tied to a requirement or a real risk?
+2. Is it already covered: the same guarantee at the same boundary? Search the existing tests.
 3. Can an existing test be extended or parametrised instead?
-4. Is this the cheapest level that shows it reliably?
+4. Is this the cheapest reliable level?
 5. Would it fail on a regression someone could plausibly ship?
 
-Admit the test only when all five hold up; otherwise extend the existing test, or write none. When you report the work, name for each new test the behaviour it protects and why its level is the cheapest.
+Admit the test only when all five hold; otherwise extend an existing test, or write none. When you report, name for each new test the behaviour it protects and why its level is the cheapest.
 
-[rules.md](rules.md) holds the rules behind admission, each with the nuance that keeps it from being applied as a blunt count, plus the cost rules for shared setup, waits and seeded state. Read it before you admit a test whose answers are not clear-cut, and before you delete, merge or move any test.
+Before admitting a borderline test, or deleting, merging or moving any test, read [rules.md](rules.md): the admission and cost rules, each with its nuance.
 
 ## Anti-patterns
 
-- **Implementation-coupled**: mocks internal collaborators, tests private methods, or verifies through a side channel (querying the database instead of using the interface). The tell: the test breaks when you refactor but behavior hasn't changed.
+- **Implementation-coupled**: mocks internal collaborators, tests private methods, or verifies through a side channel (querying the database instead of using the interface). The tell: the test breaks when you refactor but behavior hasn't changed. An internal sequence is fair to assert when the sequence is the requirement ("refuse before anything launches").
 - **Tautological**: the assertion recomputes the expected value the way the code does (`expect(add(a, b)).toBe(a + b)`, a snapshot derived by hand the same way, a constant asserted equal to itself), so it passes by construction and can never disagree with the code. Expected values must come from an independent source of truth: a known-good literal, a worked example, the spec.
 - **Horizontal slicing**: writing all tests first, then all implementation. Bulk tests verify _imagined_ behavior: you test the _shape_ of things rather than user-facing behavior, the tests go insensitive to real changes, and you commit to test structure before understanding the implementation. Work in **vertical slices** instead: one test → one implementation → repeat, each test a **tracer bullet** that responds to what the last cycle taught you.
-- **Proliferation**: a new test per change, each re-proving a guarantee another test already holds, often at a costlier level. The tell: the suite grows faster than the behaviour, and its run time becomes the bottleneck.
+- **Proliferation**: tests that re-prove a guarantee another test already holds, often at a costlier level. The tell: the suite grows faster than the behaviour.
 
 ## Rules of the loop
 
-- **Red before green.** Make a test fail first — a new admitted test, or an existing one extended — then write only enough code to pass it. Don't anticipate future tests or add speculative features.
+- **Red before green.** Make a test go red first (a new admitted test, or an existing one extended), then write only enough code to pass it. Don't anticipate future tests or add speculative features.
 - **One slice at a time.** One seam, one test, one minimal implementation per cycle.
 - **Refactoring is not part of the loop.** It belongs to the review stage (see the `code-review` skill), not the red → green implementation cycle.
