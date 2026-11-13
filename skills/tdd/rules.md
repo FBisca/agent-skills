@@ -14,7 +14,7 @@ Each rule carries the nuance that keeps it from being applied as a blunt count. 
 - **Tests follow the contract.** When a contract changes, update or delete the tests of the old one in the same change.
   _Nuance:_ update any spec or plan that cites a test by name, and name the test that keeps a deleted duplicate's guarantee.
 - **Fault detection is the measure**, not test count or coverage percentage.
-  _Nuance:_ required safety, security and contract coverage stays even when slow. Make it cheaper with the cost rules, and keep its strength and its level.
+  _Nuance:_ required safety, security and contract coverage stays even when slow. Make it cheaper with the cost rules; deleting, weakening or reclassifying a useful test only to speed up the run is not an improvement.
 - **Proportionality.** A one-line fix adds or extends one case.
   _Nuance:_ re-running tests in the loop is not proliferation; count cases, not runs.
 
