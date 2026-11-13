@@ -10,7 +10,7 @@ Source: https://github.com/mattpocock/skills, Copyright (c) 2026 Matt Pocock.
 |---|---|
 | `handoff` | Derived: rewritten to ask for a path and to suggest next skills |
 | `zoom-out` | Unmodified copy; removed upstream, so `npx skills add` can no longer fetch it |
-| `tdd` | Derived: adds the cheapest-level rule, test admission and the proliferation anti-pattern |
+| `tdd` | Derived: adds the cheapest-level rule, test admission, `rules.md` (admission and cost rules with their nuances) and the proliferation anti-pattern |
 
 Upstream license text:
 

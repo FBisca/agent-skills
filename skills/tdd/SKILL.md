@@ -47,13 +47,7 @@ Before you write a test, answer these five, one line each:
 
 Admit the test only when all five hold up; otherwise extend the existing test, or write none. When you report the work, name for each new test the behaviour it protects and why its level is the cheapest.
 
-The rules behind admission:
-
-- **One behaviour, one primary test.** Variations of the same contract are parameters of that test (`pytest.mark.parametrize`, `subTest`, `test.each`). Independent failure modes of one feature — authentication, concurrency, failure recovery — each earn their own test.
-- **One level per scenario.** A scenario repeated at unit, integration and end to end needs a distinct boundary at each level to justify it.
-- **Edge cases come from requirements and credible risks.** A distinct failure mode earns a case; a hypothetical one does not.
-- **Tests follow the contract.** When a contract changes, update or delete the tests that asserted the old one, so the suite holds no historical assertions.
-- **Fault detection is the measure.** Test count and coverage percentage are not. Size the test change to the code change: a small fix adds a case, not a suite.
+[rules.md](rules.md) holds the rules behind admission, each with the nuance that keeps it from being applied as a blunt count, plus the cost rules for shared setup, waits and seeded state. Read it before you admit a test whose answers are not clear-cut, and before you delete, merge or move any test.
 
 ## Anti-patterns
 
