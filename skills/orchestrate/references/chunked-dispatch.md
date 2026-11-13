@@ -1,12 +1,12 @@
 # Chunked dispatch
 
-**The driver does not run chunked units.** `orchestrate.py run` refuses a plan with a `big` ticket: split it in the plan. This file describes a hand-driven run only; its wait, timer and checkpoint steps are manual commands, not driver behavior.
+**Manual only.** `orchestrate.py run` refuses `big` tickets; split them in the plan. Waits, timers, and checkpoints below are manual.
 
-A small model is a good **typist** and a poor planner. So a large **planner** designs once and writes one **brief** per chunk, and each chunk's worker types its brief with no reconnaissance. [Routing](routing.md) decides which units are chunked and routes each chunk. The planner is the cost to watch: on the calibration round it used ~339k tokens for 20 briefs.
+A large **planner** designs once; small **typists** implement self-contained briefs without reconnaissance. [Routing](routing.md) selects/routes chunks. Watch planner cost: calibration used ~339k tokens for 20 briefs.
 
 ## 1. Plan
 
-One fresh-context large-class planner reads the findings, the gap review, the Decisions, the scenarios and the code. It writes briefs only under `<run>/<unit>/chunks/`. It owns no files, so it never enters the ledger; only chunks do. Its output:
+A fresh-context large planner reads findings, gaps, Decisions, scenarios, and code. It writes only `<run>/<unit>/chunks/` briefs; it has no file ownership/ledger entry. Output:
 - `Cnn.md`: one brief per chunk, each within the `small` size;
 - `README.md`: the index, holding:
   - the order and dependencies;
@@ -20,7 +20,7 @@ Done when every finding or scenario sits in a chunk and no Point is open.
 
 ## 2. Brief
 
-A brief is complete: the worker reads only the contract, the brief and the files the brief names. It runs to ~60 lines, or ~100 with verbatim code.
+A self-contained brief names all worker reads: contract, brief, and listed files. Target ~60 lines (~100 with verbatim code).
 
 ```
 # Cnn — <change>
@@ -40,17 +40,17 @@ Report: <run>/<unit>/chunks/Cnn.report.json in the contract's shape; its checks 
 
 ## 3. Run chunks in sequence
 
-Chunks run one at a time in the unit's checkout, in index order. A test command compiles shared source, so concurrent chunks would break each other's builds.
+Run sequentially in index order in the unit's checkout; tests compile shared source, so concurrent chunks break builds.
 
 For each chunk:
 1. **Reserve**: task `<unit>-Cnn` with `unit: <unit>`. Its `owns` is the brief's Files, its `checks` are the brief's Red and Green commands, and its route comes from the chunk's cell.
 2. **Spawn** the cell's worker with: "Read <brief path> and follow it. You have 10 minutes." Bind the runtime ID.
-3. **Wait** with `wait(all)` and a 10-minute background timer as the **cutoff**. A message reaches a worker only on its next runtime tool call, so only the timer enforces the cutoff.
+3. **Wait** with `wait(all)` plus a 10-minute background **cutoff** timer. Messages arrive only on runtime tool calls; the timer enforces cutoff.
 4. **Check** with git, no model. A miss fails the chunk.
    - the commit's files are within Files (`git show --name-only --format= <sha>`);
    - the S-ID test is in the diff;
    - `git status --porcelain` is empty.
-5. **Close**: `checkpoint --report <run>/<unit>/chunks/Cnn.report.json`. If the helper rejects the report, send its error to the worker and wait again. Stop the worker once the checkpoint is COMPLETE.
+5. **Close**: `checkpoint --report <run>/<unit>/chunks/Cnn.report.json`. On rejection, send the error and wait again. Stop the worker after COMPLETE.
 
 **When the cutoff hits:**
 1. Stop the worker.

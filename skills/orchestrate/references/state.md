@@ -1,12 +1,12 @@
 # Deterministic state helper
 
-Use `scripts/orchestrate.py` with Python 3.9+ on macOS or Linux. It is a shim: it resolves the engine — the `agent-orchestrator` member of [agent-runtime](https://github.com/FBisca/agent-runtime) — and hands it the command. The shim uses only the standard library; the engine does not call models, execute packet check commands, or write native runtime files.
+`python3 <skill-dir>/scripts/orchestrate.py` requires Python 3.9+, macOS/Linux, and only stdlib. It forwards to [agent-runtime](https://github.com/FBisca/agent-runtime)'s `agent-orchestrator`. The helper does not call models, execute packet checks, or write native runtime files.
 
-**The driver (`run`, started by `launch`) writes this ledger.** It claims, binds, checkpoints and releases for every worker, reviewer and decider, so nobody follows the steps below during a normal run. The manual commands stay for diagnosis and for a hand-driven run: `show` reads the ledger, `show --unit` sums a unit's failures, `release --stopped` frees a unit whose worker is confirmed stopped. Do not edit a ledger a live driver holds. Report and gate JSON schemas live in the engine's `contracts.py`; the examples below show the ledger's own checkpoint shape.
+The driver (`run`, started by `launch`) owns claims, bindings, checkpoints, and releases for workers/reviewers/deciders. These commands are for diagnosis or manual runs. Only edit a ledger when its driver is stopped. Report/gate schemas: engine `contracts.py`; checkpoint examples below show ledger shape.
 
-Choose one private, durable, writable ledger path per active plan outside tracked product files: `~/.local/state/orchestrate/<slug>.json`, beside the plan's run directory `<slug>/`. Codex workers can shell-write the run directory only through the worker profile's `writable_roots`. Pass it with `--state`; record that absolute path in the active chat. All workers and orchestrators for this plan must use the same ledger. Separate ledgers cannot detect each other's assignments. Use a temporary directory only for a deliberately disposable run.
+For manual runs, choose one private, durable, writable ledger per plan outside product files, e.g. `~/.local/state/orchestrate/<slug>.json`, beside run directory `<slug>/`. Pass `--state` and record the absolute path in chat. Every participant shares it: separate ledgers cannot detect conflicts. Use temporary directories only for disposable runs. Codex workers need the run directory in their profile's `writable_roots`.
 
-`inspect --checkout <root>` reads Git HEAD, branch, status, and installed executable paths. These are observations, not proof of active model selection. The worktree status is a file inventory, not a content hash; re-read affected source after external edits.
+`inspect --checkout <root>` observes HEAD, branch, status, and installed executables; it cannot prove active model selection. Status inventories files, not content hashes: re-read source after external edits.
 
 ## Reserve, dispatch, bind
 
@@ -27,13 +27,15 @@ Write a compact JSON packet with the available file-edit tool. Example shape:
 }
 ```
 
-These are example values, not paths or commands to run unchanged. A routed packet adds its [route](routing.md): `"size"` (`small`, `regular`, `big`), `"difficulty"` (`simple`, `complex`), `"class"` (`small`, `medium`, `large`), `"effort"` (`low` through `max`) and the resolved `"model"`. plus `"unit"`, the logical unit's ID shared by every attempt at it (first build, fix rounds, chunks). `claim` rejects a route missing any of them. A packet with only `model` or `effort` stays unrouted metadata. `owns` accepts literal relative files/directories, including `.` for exclusive ownership of the checkout. It rejects globs and paths that escape the checkout. Add focused context, peers, exclusions, or plan excerpts to the packet when useful. `worker` is a logical worker key; `runtime_id` is bound after native dispatch.
+Example values require adaptation. Routed packets add [routing](routing.md) fields: `size` (`small|regular|big`), `difficulty` (`simple|complex`), `class` (`small|medium|large`), `effort` (`low` through `max`), resolved `model`, and `unit` (shared across build, fixes, chunks). `claim` requires all route fields; model/effort alone remain unrouted metadata.
+
+`owns` accepts literal relative files/directories (`.` = exclusive checkout), rejecting globs/escaping paths. Add focused context, peers, exclusions, or plan excerpts as needed. `worker` is logical; bind native `runtime_id` after dispatch.
 
 ```sh
 python3 <skill-dir>/scripts/orchestrate.py claim --state <ledger> --packet <packet.json>
 ```
 
-The helper checks ownership conflicts, unfinished assignments, and declared predecessor completion. It reserves before spawn. **Only `action: reserved` is a new reservation.** `action: existing` means inspect the recorded task and runtime; do not spawn again. A failed or lost spawn response keeps the reservation until the runtime proves there is no active worker.
+`claim` checks ownership conflicts, unfinished assignments, and declared predecessors before spawn. Only `action: reserved` permits a new spawn; `existing` requires inspecting the task/runtime. Failed/lost spawn responses retain the reservation until runtime proves no active worker.
 
 After a successful native spawn or approved reuse:
 
@@ -41,9 +43,9 @@ After a successful native spawn or approved reuse:
 python3 <skill-dir>/scripts/orchestrate.py bind --state <ledger> --task <task-id> --runtime-id <native-id>
 ```
 
-Use a unique runtime identifier, qualified by engine and parent session if needed. The same ID can serve sequential tasks, but cannot hold two unfinished tasks. `bind` also marks a resumed blocked/partial assignment active. Record model/configuration evidence in the handoff; a role name alone does not prove the effective model.
+Use a unique native runtime ID, qualified by engine/parent session if needed. Sequential reuse is allowed; simultaneous unfinished tasks are not. `bind` reactivates blocked/partial assignments. Record effective model/config evidence; role names prove nothing.
 
-The helper's dependency check only sees this ledger. The orchestrator must separately verify code in the consuming checkout. If a prerequisite existed before this run, include its concrete checkout evidence in the packet rather than inventing a completed ledger task.
+Dependencies cover this ledger only. Verify prerequisite code in the consumer checkout; pre-existing prerequisites need concrete packet evidence, not fabricated completed tasks.
 
 ## Checkpoint or complete
 
@@ -68,7 +70,9 @@ The worker writes its result as `<run>/<task>/report.json`; the driver validates
 python3 <skill-dir>/scripts/orchestrate.py checkpoint --state <ledger> --task <task-id> --report <report.json>
 ```
 
-`COMPLETE` requires a runtime ID, confirmed acceptance, no remaining work, and passing evidence for every required check. A routed task also requires `review_rounds` (the failed review rounds so far, 0 when the first review passed; a PARTIAL checkpoint may carry it too) and `usage` (the runtime's metric line for the worker, or `unknown`): the evidence for changing a routing cell. This validates the report contract; it does not independently prove the report true. `PARTIAL` keeps ownership. `BLOCKED` also requires `blocker` and a next action in `remaining`. A failed or omitted check needs a `reason`. Store short decisions, not transcripts. Optional `context` and `presentation` objects can preserve observed telemetry and verified runtime IDs.
+`COMPLETE` requires runtime ID, confirmed acceptance, no remaining work, and passing evidence for every required check. Routed tasks also require `review_rounds` (failed reviews; 0 for first-pass success; allowed on PARTIAL) and `usage` (runtime metric line or `unknown`) for routing calibration. Validation checks the report contract, not its truth.
+
+`PARTIAL` retains ownership. `BLOCKED` requires `blocker` and a next action in `remaining`. Failed/omitted checks require `reason`. Keep decisions short; optional `context`/`presentation` retain observed telemetry/verified runtime IDs.
 
 If replacing a worker for an unfinished task, first stop or confirm it stopped using native tools. Then:
 
@@ -76,9 +80,9 @@ If replacing a worker for an unfinished task, first stop or confirm it stopped u
 python3 <skill-dir>/scripts/orchestrate.py release --state <ledger> --task <task-id> --stopped --reason <reason>
 ```
 
-Add `--cutoff` when the worker was stopped at its cutoff. `show --unit <id>` sums failed review rounds and cutoffs over the unit's attempts and reports `escalate` at two of either. Release only releases ledger ownership; it does not stop an agent or remove a pane/worktree. Keep the old handoff and use a new task ID for the replacement attempt. Never pass `--stopped` based on a timeout or an idle-looking pane alone. There is no automatic stale-reservation expiry.
+Use `--cutoff` for cutoff stops. `show --unit <id>` sums failed reviews/cutoffs across attempts and reports `escalate` at two of either. Release frees ledger ownership only; it leaves agents, panes, and worktrees intact. Preserve the handoff; replacement gets a new task ID. Confirm worker stoppage through native tools before `--stopped`; timeout/idle appearance is insufficient. Reservations never auto-expire.
 
-`show --state <ledger>` returns a short task index. Add `--task <task-id>` for the full packet and latest handoff. Writes are locked and atomic. A lock conflict returns an error; retry after the other update. No full ledger is injected on each task.
+`show --state <ledger>` gives a short index; `--task <task-id>` adds full packet/latest handoff. Writes are locked/atomic; retry lock conflicts after the other update. Tasks do not receive the full ledger.
 
 ## Context measurement
 
@@ -95,24 +99,28 @@ Obtain telemetry from the **child** runtime. When available, normalize it as:
 }
 ```
 
-The numbers are illustrative. Use the effective window exposed by the running child. Never substitute cumulative usage or the model's advertised maximum. Update the timestamp only when collecting a new observation; do not relabel stale data as fresh.
+Use observed child-runtime occupancy and effective window, not cumulative usage or advertised capacity. Refresh timestamps only on new observations. Example numbers are illustrative.
 
 ```sh
 python3 <skill-dir>/scripts/orchestrate.py context --sample <sample.json> --reserve-tokens <estimate>
 ```
 
-The reserve estimates the next task's additional reads, tool results, and reasoning. The helper returns `room_available`, `checkpoint`, or `unknown`. A measurement expires after 300 seconds by default (`--max-age-seconds` changes this freshness bound). Missing values, wrong measurement kinds, invalid windows, and stale samples return `unknown`. The freshness bound is not a context-pressure threshold.
+Reserve estimates the next task's reads, results, and reasoning. Results:
 
-`room_available` is only a capacity check. The orchestrator still evaluates relevance, changed code, and errors. `checkpoint` means save state and compact through a supported runtime operation or assign a fresh worker. `unknown` means make a qualitative decision and state the measurement limit. No automatic replacement, compaction, or global threshold changes occur.
+- `room_available`: capacity only; still assess relevance, code changes, and errors.
+- `checkpoint`: save state, then compact through supported runtime operations or assign a fresh worker.
+- `unknown`: decide qualitatively and state the measurement limit.
 
-Claude subagent compaction events can inform a checkpoint, but pre-compaction token counts are not current occupancy after compaction. Never assume the parent's compaction also reduced child context.
+Samples expire after 300 seconds (`--max-age-seconds` overrides). Missing/invalid values, wrong kinds/windows, and stale samples return `unknown`. Freshness is not a pressure threshold; the helper never replaces, compacts, or changes global thresholds automatically.
+
+Claude child compaction events can inform checkpoints; pre-compaction counts do not measure post-compaction occupancy. Parent compaction says nothing about child context.
 
 ## Usage comparisons
 
 `metrics --samples <samples.json>` accepts an array of normalized **per-request** records with `kind: request`, unique `source` + `id`, `backend`, `model`, `strategy` (`fresh` or `reuse`), and `actor` (`orchestrator` or worker identifier).
 
-Optional numeric fields: `input_tokens`, `cached_input_tokens`, `cache_write_tokens`, `output_tokens`, `cost_usd`, and `duration_seconds`. Convert provider-specific definitions before recording them; keep the source reference. Do not submit cumulative counters as request increments or duplicate streaming usage events.
+Optional numbers: `input_tokens`, `cached_input_tokens`, `cache_write_tokens`, `output_tokens`, `cost_usd`, and `duration_seconds`. Normalize provider definitions and retain sources; record request increments once, excluding cumulative counters and duplicate stream events.
 
-The helper reports totals and observation counts per strategy/actor/backend/model. Missing measurements remain null. Partial cost coverage cannot establish total workflow cost. Summed request durations are not elapsed wall time for parallel work.
+Totals/counts group by strategy/actor/backend/model; missing values stay null. Partial costs cannot establish total cost; summed parallel request durations are not elapsed time.
 
-For a benchmark, use equivalent clean starting checkouts, identical tasks, model settings, and acceptance checks. Include parent work, workers, handoffs, failed attempts, and cache conditions. Measure whole-run elapsed time separately and compare correctness before cost. Do not launch a paid benchmark merely to fill missing telemetry.
+Benchmarks require equivalent clean checkouts, identical tasks/settings/acceptance, and accounting for parent, workers, handoffs, failures, and caches. Measure elapsed time separately; compare correctness before cost. Missing telemetry alone does not authorize paid benchmarks.
