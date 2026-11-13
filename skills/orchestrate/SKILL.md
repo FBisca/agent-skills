@@ -16,7 +16,7 @@ Arguments: `<plan-path>`.
 ## Gate
 
 - When the plan is missing or unapproved, refuse: name what is missing and point the user to `/start-planning`. Plan nothing and build nothing yourself. A PRD, Linear issue or vault note is a source, not a plan. `<engine> plan check <plan>` names what a plan lacks.
-- The plan is the ledger of scope and decisions, and its approval covers its bytes. When the user decides something or adds scope mid-run, write it into the plan (a decision line in the brief; a ticket, a scenario or a Paths change in the contract). A change to the contract or an acceptance file needs a new approval: stop the run, edit, `<engine> plan approve <plan>`, then `launch` again. The brief is not digested, so a decision line alone needs none.
+- The plan is the ledger of scope and decisions, and its approval covers its bytes. When the user decides something or adds scope mid-run, write it into the plan (a decision line in the brief; a ticket, a scenario or a Paths change in the contract). A change to the contract or an acceptance file needs the user's yes, then `<engine> plan amend <plan> --reason "<why>"`. Keep the driver running: the edit drains it (it dispatches nothing new) until the amendment lands, then it adopts it on its next round, dispatches the new tickets and resumes a changed in-flight ticket on its new packet. A COMPLETE ticket and its scenarios' `when`/`then` are frozen: new scope on merged work is a new ticket. The brief is not digested, so a decision line alone needs none.
 
 ## What to do
 
@@ -74,14 +74,18 @@ The schemas and field lists live in the member's `contracts.py` only.
 The driver pauses a unit when it needs a person: a scope or product question, a failure it could not settle, a worker that went idle. The request names the unit, the reason and a menu. Answer it:
 
 ```
+<engine> decide <plan> <unit> --json <file|->
 <engine> decide <plan> <unit> <action> --reason "<why>" [--answer "<text>"]
 ```
+
+The request's menu lists each option's `action`, `summary` and `inputs` (each marked `required` or not). Answer with `--json`: one object `{"action", "reason", "answer"?}` from a file or `-` for stdin. The decision comes back as JSON; a refusal is one JSON object `{error, reason, way_out}` on stderr, and the request stays open. The flag form writes the same decision.
 
 - `retry`, `retry one class up`, `fresh worker`: a new attempt of the same unit; escalation counts carry over.
 - `answer`: the same worker resumes with `--answer` as its next instruction. The driver refuses an answer that names a ticket ID: say "your Paths", not the ticket.
 - `mark blocked`, `skip`: the unit stops; its dependents stay blocked.
+- `amend`: the unit parks `awaiting-amendment` and its worker waits untouched. Change the plan (see Gate); the adopted amendment releases the unit.
 
-If the answer changes scope, change the plan first (see Gate).
+If the answer changes scope, decide `amend` and change the plan (see Gate).
 
 A person-owned ticket reads `needs you: <what it delivers>` once its blockers merge. Do the work it names, in its `repo` when it has one, then record it:
 
