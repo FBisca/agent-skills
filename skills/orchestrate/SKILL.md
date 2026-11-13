@@ -83,7 +83,13 @@ The driver pauses a unit when it needs a person: a scope or product question, a 
 
 If the answer changes scope, change the plan first (see Gate).
 
-A person-owned ticket reads `needs you: <what it delivers>` once its blockers merge. Do the work it names, in its `repo` when it has one. No command records it done yet: with no driver running, set its entry in the ledger's `ticket_status` to `COMPLETE <date> · <what landed>`, then `launch` again.
+A person-owned ticket reads `needs you: <what it delivers>` once its blockers merge. Do the work it names, in its `repo` when it has one, then record it:
+
+```
+<engine> complete <plan> <T#> --note "<what landed>" [--cover S<n>=<node>]...
+```
+
+Give one `--cover` per test node that proves a scenario the ticket satisfies; a node in another repository is `<repo-name>/<path>::<test>`. The archive lists each in its scenario's Coverage row. Verify starts once every agent ticket is COMPLETE, but the archive waits for every ticket, so a run with only person tickets open ends: after `complete`, `launch` again.
 
 ## Verify and accept
 
