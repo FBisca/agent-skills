@@ -1,6 +1,6 @@
 # Routing
 
-Every unit of work (a ticket, a review fix round, a chunk) routes by its **size** and **difficulty** to a **mode**, a model **class** and an **effort**. This file is the only place those terms are defined.
+Route each unit (ticket, fix round, chunk) by **size** and **difficulty** to **mode**, model **class**, and **effort**. Definitions live here.
 
 ## Size
 
@@ -8,10 +8,7 @@ Every unit of work (a ticket, a review fix round, a chunk) routes by its **size*
 - **regular**: within the ticket cap: ≤~800 lines, ≤~10 files.
 - **big**: past either limit, or cutting across modules.
 
-Calibration, 2026-11-06:
-- Small models finished small units in 1–9 min each, red-first.
-- A ticket of ~2,000 lines over 38 files cost a medium model 101M input tokens, with a 372k peak context.
-- That ticket's fix round (17 findings over the same files) was given to a small model as one unit: 45 min, 0 edits.
+Calibration (2026-11-06): small units took small models 1–9 min, red-first. A ~2,000-line/38-file ticket cost medium 101M input tokens (372k peak context); its 17-finding fix round given whole to small took 45 min with 0 edits.
 
 ## Difficulty
 
@@ -34,14 +31,9 @@ Calibration, 2026-11-06:
 
 ## Class to model
 
-The driver resolves each class to a model, a backend and (optionally) an effort. Two configs answer that, and
-the typed one wins when it is named:
+Resolve class → backend/model/effort:
 
-- **The typed route config** (`--routes-file`): a versioned document (JSON, or YAML when PyYAML is installed)
-  that names, per model class, the backend, the model and the effort. The schema lives in the engine's
-  `routes.py` and is strict: an unknown backend, an unknown class, an unknown field, an unknown effort
-  or a class the config leaves out is an error, and the run stops **before any worker is spawned** — it never
-  falls back to another billable model.
+- **Typed config** (`--routes-file`): versioned JSON (YAML requires PyYAML), schema in engine `routes.py`. Unknown backends/classes/fields/efforts or missing classes stop the run before spawn, without billable fallback.
 
   ```json
   {"version": 1,
@@ -52,32 +44,22 @@ the typed one wins when it is named:
    ]}
   ```
 
-  The backends a worker may run on are `claude` and `codex`. `pi` is **lead-only** until worker launch is
-  enabled: a route on `pi` is refused with that explanation, and neither Claude nor Codex launches in its
-  place.
+  Workers support `claude` and `codex`. `pi` is lead-only; Pi worker routes fail explicitly without substitution. A named config is self-sufficient: the legacy table is never read or required.
 
-  A named route config is self-sufficient: the legacy table is a fallback, not a prerequisite, so it is not
-  read at all and a missing `~/.claude/CLAUDE.md` does not stop the run.
+- **Legacy default** (`--models-file`): `Model classes` in `~/.claude/CLAUDE.md`; used without `--routes-file`, with a deprecation notice. Effort comes from the matrix. Missing classes/backend columns—including `--brain-cli`'s—are errors.
 
-- **The legacy config** (the default): the "Model classes" table in `~/.claude/CLAUDE.md` (`--models-file`).
-  A run with no `--routes-file` resolves the classes exactly as it did before; the run says so, because the
-  legacy table is deprecated and will be phased out. The effort still comes from the size/difficulty matrix.
-  A class missing from the table is an error, not a fallback — including the class of a brain backend
-  (`--brain-cli`) the table has no column for.
-
-The model is chosen at spawn, the cache boundary, so a fix round for a live worker keeps its model; a dead pane
-gets a fresh worker in the same cell.
+Model selection occurs at spawn (the cache boundary). Live workers keep their model for fixes; dead panes get fresh workers in the same cell.
 
 ## Escalation
 
-A **unit** keeps one ID across every attempt at it: the first build and each fix round. The driver handles a known gate failure itself, up to two fix rounds. The unit's third failed gate, a worker that blocks or exits without a report, or conflicting reports go to a fresh large-class **decider**, which writes `decision.json` with one action from a fixed menu (the menu and schema live in the engine's `contracts.py`). The driver validates and applies it. A unit gets at most two decider calls; after that, and for any scope or product question, the ticket pauses for the user (`needs you: …` in its Status, and `attention.md`).
+A **unit** retains its ID across build/fix attempts. The driver handles known gate failures for up to two fix rounds. A third failed gate, worker that blocks or exits without a report, or conflicting reports invokes a fresh large **decider**. It writes `decision.json` from the fixed `contracts.py` menu; the driver validates/applies it. After two decider calls, or any scope/product question, pause for the user (`needs you: …`, `attention.md`).
 
-The user picks among the options in `attention.md`: one class up, re-plan, or split the unit. They answer by setting the ticket's Status in the plan: `TO-DO` retries it as a fresh attempt of the same unit, `COMPLETE` marks it done by hand. The cell rules are in the skill's *When the run pauses*.
+Answer through the skill's *Resolve pauses* menu (e.g. class up, re-plan, split). Legacy Markdown Status cells: `TO-DO` retries the same unit; `COMPLETE` records manual completion.
 
-A unit the runtime reports `working` holds an **idle window**: the tick passes over it until the window has run for `--working-minutes`, and the request says how long. The window opens at the first tick that counts the agent `working`, clears at every tick that does not count the unit, and lives in memory — a restart starts it empty. `--idle-minutes` is the tick: a unit whose agent and CI show nothing new is idle, and two in a row ask the Lead.
+**Idle window:** runtime `working` starts a window on its first counted tick; ticks skip it until `--working-minutes` elapses. Any uncounted tick clears the window; restart resets it. Requests show duration. `--idle-minutes` sets ticks: no agent/CI progress means idle; two consecutive idle ticks ask the Lead.
 
-`show --unit <id>` still sums a unit's failed review rounds and cutoffs for diagnosis.
+`show --unit <id>` sums failed review rounds/cutoffs for diagnosis.
 
 ## Changing a cell
 
-Ledger rows record each unit's cell, model, review rounds and usage. Once at least 3 completed units in one cell show a better route, propose the change to the user with those rows. This file changes on their approval.
+Ledger rows record cell, model, review rounds, and usage. After ≥3 completed units in a cell support a better route, propose it with those rows; edit this file after user approval.
