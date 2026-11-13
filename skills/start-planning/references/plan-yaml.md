@@ -1,12 +1,14 @@
 # The contract: `plan/1`
 
-The skeleton to write `<name>.plan.yaml` from. The engine's loader is strict: an unknown or duplicate key, a missing field or a wrong type is refused, and `plan check` names the field and the fix. Never write `approval`: `plan approve` writes it.
+The skeleton to write `<plans.dir>/YYYY-MM-DD-<slug>/plan.yaml` from. The engine's loader is strict: an unknown or duplicate key, a missing field or a wrong type is refused, and `plan check` names the field and the fix. Never write `approval`: `plan approve` writes it.
 
 ```yaml
 schema: plan/1
 slug: <slug>
 goal: <one sentence: what is true for whom once the plan is built>
-spec: docs/specs/<area>.md          # the living spec the scenarios archive into
+spec: docs/specs/<area>.md          # the living spec the scenarios archive into; optional when the plan discards
+domain: <area>                      # the folder under <package>/<acceptance.dir>/ promoted tests join; required to promote
+archive: promote                    # promote | discard, optional: the repo config's archive.mode when absent
 outcome: [S7]                       # the scenarios that prove the goal; each has evidence
 
 scenarios:
@@ -17,14 +19,13 @@ scenarios:
     when: <condition>
     then: <observable outcome>
     evidence:                       # one of check (+ baseline) or human
-      check: uv run pytest tests/test_feature.py -q --junitxml="$EEC_JUNIT"
+      check: uv run pytest pkg/acceptance/<area>/test_feature.py -q --junitxml="$EEC_JUNIT"
       baseline: fail                # pass | fail: what the check does at base today
-      oracle: [test_feature.py.oracle]   # files in <name>.oracle/, optional
-      place: tests/                 # repo directory each oracle is copied to, `.oracle` dropped
+      acceptance: [test_feature.py] # files in the plan folder's acceptance/, optional
+      package: pkg                  # the package each acceptance file belongs to; `.` for the repository root
       timeout: 600                  # seconds, optional
       env: [API_TOKEN]              # names passed through to the check, optional
-      negative: break.patch         # a patch in <name>.oracle/ that breaks the behaviour: the check must then fail on an assertion, optional
-      promote: true                 # copy the oracle into the repo at archive (default true)
+      negative: negatives/break.patch   # relative to the plan folder: a patch that breaks the behaviour; the check must then fail on an assertion, optional
   - id: S8
     when: <condition>
     then: <what only a person can observe>
@@ -52,12 +53,13 @@ tickets:
 ## Rules the loader enforces
 
 - IDs: scenarios `S<n>` with an optional letter (`S4a`), tickets `T<n>`, each unique; every reference names a declared ID; `blocked_by` has no cycle.
-- Paths (`paths`, `place`, `oracle`, `negative`): literal and repo-relative, no globs, no `..`, not absolute. A directory ends `/`.
+- Paths (`paths`, `package`, `acceptance`, `negative`): literal and relative, no globs, no `..`, not absolute. A directory ends `/`. `paths` and `package` are repo-relative and stay inside the repository; `acceptance` names files in the plan folder's `acceptance/`, `negative` a file relative to the plan folder.
 - Evidence is exactly one kind: `check` with `baseline`, or `human` alone.
-- An oracle `place` stays inside the repository, and the promoted file must not exist yet.
+- A promoting plan has a `domain`. Each acceptance file's destination, `<package>/<acceptance.dir>/<domain>/<file>`, does not exist yet, and its basename matches no test module already in the package.
+- A discarding plan needs neither `spec` nor `domain`.
 - An agent ticket carries `size` and `difficulty`; `repo` is only for a person's ticket.
 - A risk-tagged ticket satisfies a scenario with evidence or carries `evidence_waiver`.
 
 ## The check's environment
 
-The engine runs `check` in a scratch checkout of the phase's commit, each oracle already copied to its `place`, and `EEC_JUNIT` set to the path for a JUnit XML report. A check that writes `--junitxml="$EEC_JUNIT"` lets the receipt name the tests that ran.
+The engine runs `check` in a scratch checkout of the phase's commit, each acceptance file already placed at its destination, and `EEC_JUNIT` set to the path for a JUnit XML report. A check that writes `--junitxml="$EEC_JUNIT"` lets the receipt name the tests that ran.

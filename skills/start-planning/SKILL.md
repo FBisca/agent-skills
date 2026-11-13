@@ -6,11 +6,11 @@ description: Plan one feature spec-driven, from its sources to WHEN/THEN scenari
 # Start planning
 
 **Input:** a feature, idea or task, plus whatever already describes it: a PRD, Linear issues, vault notes, a living spec, or only the request itself.
-**Output:** one approved **plan**: three files in the repository's plan directory, named `YYYY-MM-DD-<slug>` for the day they are written and never re-dated:
+**Output:** one approved **plan**: one folder in the repository's plan directory, `<plans.dir>/YYYY-MM-DD-<slug>/`, named for the day it is written and never re-dated:
 
-- `<name>.plan.yaml`, the **contract** (`plan/1`): goal, scenarios, evidence, tickets. `plan approve` digests it.
-- `<name>.brief.md`, the **brief**: the plan's diff in plain words, and its decisions. Not digested.
-- `<name>.oracle/`, the **oracles**: test files the evidence runs, each named `<file>.oracle`.
+- `plan.yaml`, the **contract** (`plan/1`): goal, scenarios, evidence, tickets. `plan approve` digests it.
+- `brief.md`, the **brief**: the plan's diff in plain words, and its decisions. Not digested.
+- `acceptance/`, the **acceptance tests** the evidence runs, under the names they keep once promoted; `negatives/` beside it when evidence carries a `negative` patch. `plan approve` digests both.
 
 **Hand-off:** `/orchestrate <plan.yaml>` builds it.
 
@@ -42,7 +42,7 @@ The **lane** sizes the planning to the work. Judge the request by orchestrate's 
 | Step | Standard | Full |
 |---|---|---|
 | 2. Gather | small class | medium class |
-| 7. Evidence review | only when the plan adds an oracle; medium class | always; large class |
+| 7. Evidence review | only when the plan adds an acceptance test; medium class | always; large class |
 
 Every other step runs the same in both lanes.
 
@@ -50,16 +50,17 @@ Say the lane and its reason in one line; the user may override it. When a later 
 
 Done when the user has seen the lane and its reason; for Fast, when the in-session build has started.
 
-## 1. Find the plan directory
+## 1. Read the repo config
 
-Run `<engine> plans list --json`.
+The repo config, `<repo>/.orchestrate/config.yaml`, names three things; an absent file or node means its default:
 
-- The user named a plan path or directory: use it, and pass it to every later `plans list`.
-- One directory holds the listed plans: write there.
-- It refuses, naming several directories: ask the user which one.
-- The list is empty: ask once, suggesting `docs/plans/`, and create it on the first write.
+- `plans.dir` (default `docs/plans`): where the plan folder goes. It may sit outside the repository, with the config itself gitignored, so a repository the user keeps untouched still hosts plans.
+- `acceptance.dir` (default `acceptance`): the directory inside each package that promoted acceptance tests join.
+- `archive.mode` (default `promote`): `promote` moves the acceptance tests into the package and writes the living spec; `discard` deletes the plan folder and writes nothing.
 
-Done when one directory is chosen.
+Run `<engine> plans list --json` to see the plans already there; it refuses an unknown config key, naming it. Create `plans.dir` on the first write.
+
+Done when the plans dir, the acceptance dir and the archive mode are known.
 
 ## 2. Gather
 
@@ -79,25 +80,29 @@ Done when the grilling frontier is empty; with no decision open, it is empty alr
 
 ## 4. Write the scenarios and their evidence
 
-In `<name>.plan.yaml`, from [the skeleton](references/plan-yaml.md): `goal` in one sentence, `spec` the living spec, then the scenarios.
+In `plan.yaml`, from [the skeleton](references/plan-yaml.md): `goal` in one sentence, `spec` the living spec, `domain` when the plan promotes, then the scenarios.
 
 Each scenario is one observable behaviour that a test would catch if it broke: `id`, `when`, `then`. IDs are `S<n>`, with an optional letter suffix (`S4a`). Every requirement becomes a scenario; one you can't phrase as WHEN/THEN is an open decision, so take it back to step 3.
 
 `outcome` lists the scenarios that prove the goal on the integrated tree; each carries evidence. Evidence is for the outcome and for the scenarios a risk-tagged ticket satisfies. Every other scenario is covered by the tests its ticket writes, the reviewer and CI.
 
-Write evidence by the **oracle ladder**, taking the first rung that holds:
+Write evidence by the **evidence ladder**, taking the first rung that holds:
 
 1. **Reuse**: a `check` that runs an existing test.
 2. **Command**: a `check` over an observable (a CLI's output, a file, an exit code).
-3. **Black-box oracle**: a new test at an existing seam.
-4. **Contract-first oracle**: a new test against an interface a settled decision fixes.
+3. **Black-box acceptance test**: a new test at an existing seam.
+4. **Contract-first acceptance test**: a new test against an interface a settled decision fixes.
 5. **Human**: `human: <what a person confirms>`.
 
-An oracle targets only an interface that exists or that a settled decision fixes; when neither holds, the decision is open: back to step 3. An oracle drives the outermost stable seam and imports the system under test lazily, so it collects cleanly at base. `baseline` is what the check does at base today: `fail` for behaviour still to build, `pass` for behaviour it must keep.
+An acceptance test targets only an interface that exists or that a settled decision fixes; when neither holds, the decision is open: back to step 3. It drives the outermost stable seam and imports the system under test lazily, so it collects cleanly at base. `baseline` is what the check does at base today: `fail` for behaviour still to build, `pass` for behaviour it must keep.
 
-After writing or editing each Python oracle, run `python3 <skill-dir>/scripts/format_oracle.py --repo <repo> <oracle file> <place>`. It formats the file as the repository's formatter formats its promoted path, so the byte-identical copy promoted at archive passes the repository's format gate.
+An acceptance test lives in the plan folder's `acceptance/`; its evidence names it in `acceptance:` with `package:`, the package directory it belongs to (`.` at the root of a single-package repository). The engine places it at `<package>/<acceptance.dir>/<domain>/<file>` for every check, and a promoting archive moves it there for good. Its basename differs from every test module already in the package: pytest imports modules by basename.
 
-Done when every outcome scenario has evidence and every Python oracle has been through `format_oracle.py` since its last edit.
+The **`domain`** is the area of behaviour the promoted tests join: a `[a-z0-9-]+` slug naming a folder under `<package>/<acceptance.dir>/`. Reuse an existing one when the plan's tests belong with it; otherwise propose a name for the area (`archive`, `discovery`), never the plan's slug or the package's name, which change or repeat. A plan whose acceptance tests are not worth keeping sets `archive: discard`, and then needs neither `spec` nor `domain`.
+
+After writing or editing each Python acceptance file, run `python3 <skill-dir>/scripts/format_acceptance.py --repo <repo> <file> <package>/<acceptance.dir>/<domain>/`. When the repository configures ruff, it formats the file as ruff formats its destination, so the byte-identical copy promoted at archive passes the format gate; otherwise it leaves the file as written.
+
+Done when every outcome scenario has evidence, a promoting plan has its `domain`, and every Python acceptance file has been through `format_acceptance.py` since its last edit.
 
 ## 5. Slice into tickets
 
@@ -118,12 +123,12 @@ Done when every scenario appears in some ticket's `satisfies`, and every risk-ta
 
 ## 6. Write the brief
 
-Write `<name>.brief.md`: the plan's **diff** in plain words, what a person reads before approving. It cites scenario and ticket IDs; their text lives in the contract.
+Write `brief.md`: the plan's **diff** in plain words, what a person reads before approving. It cites scenario and ticket IDs; their text lives in the contract.
 
 ```markdown
 # Brief: <feature>
 
-Slug: `<slug>`. Contract: `<name>.plan.yaml`. Lane: <lane>, <its reason>.
+Slug: `<slug>`. Contract: `plan.yaml`. Lane: <lane>, <its reason>.
 
 ## What changes   (one line per behaviour: `<path or area>`: before → after (T<n>))
 ## Decisions      (one line each: D<n> <choice>, over <rejected>: <why> (<source>))
@@ -138,8 +143,8 @@ Done when every ticket's `delivers` reads as a What changes line, and every deci
 ## 7. Check and review
 
 1. Run `<engine> plan check <plan.yaml>` and fix every line it prints, until it exits 0.
-2. When the lane calls for it, dispatch one fresh-context evidence reviewer on the lane's class (see Delegation). Its packet: the contract, the oracle files, and the brief's Decisions; never this session's reasoning. It returns, for each scenario with evidence, the assertion that checks its `then` (or none), and for each outcome scenario one counterexample: a wrong implementation its evidence would still pass.
-3. Fix the findings you agree with, then run `plan check` and `format_oracle.py` again on what changed.
+2. When the lane calls for it, dispatch one fresh-context evidence reviewer on the lane's class (see Delegation). Its packet: the contract, the acceptance files, and the brief's Decisions; never this session's reasoning. It returns, for each scenario with evidence, the assertion that checks its `then` (or none), and for each outcome scenario one counterexample: a wrong implementation its evidence would still pass.
+3. Fix the findings you agree with, then run `plan check` and `format_acceptance.py` again on what changed.
 
 The review is advisory: what you leave open goes to the approval.
 
@@ -147,8 +152,8 @@ Done when `plan check` exits 0 on the final contract and the review, when the la
 
 ## 8. Approve
 
-Show the lane, the three paths, the decisions, the scenarios with their evidence, the tickets with each size and difficulty, and the evidence review's open findings; then stop for one approval. Build nothing at this point.
+Show the lane, the plan folder, the decisions, the scenarios with their evidence, the tickets with each size and difficulty, and the evidence review's open findings; then stop for one approval. Build nothing at this point.
 
-On the user's yes, run `<engine> plan approve <plan.yaml>`. It records the approval in the contract, snapshots the contract and its oracles, and runs every evidence item at base against its `baseline`. When it refuses, fix what it names; a fix that changes the plan needs the user's yes again. Any later edit to the contract or an oracle needs a new `plan approve`.
+On the user's yes, run `<engine> plan approve <plan.yaml>`. It records the approval in the contract, snapshots the contract and its acceptance and negative files, and runs every evidence item at base against its `baseline`. When it refuses, fix what it names; a fix that changes the plan needs the user's yes again. Any later edit to the contract or a file in `acceptance/` or `negatives/` needs a new `plan approve`.
 
 Then hand off to `/orchestrate <plan.yaml>`.

@@ -5,8 +5,9 @@ S2: the two steps that need another context (gather, grill) have a Pi path that 
 fails loudly; neither may be skipped.
 S3: the Claude Code and Codex paths are still there, unchanged in substance.
 test-suite/R2: the plan the skill documents is the plan the engine reads.
-yaml-eec/S26, S30: the plan is the engine's YAML contract, its brief and its oracles; a Python
-oracle is formatted under its promoted path before the plan is checked and approved.
+yaml-eec/S26: the plan is the engine's YAML contract and its brief.
+plan-layout/S14: the plan is one folder with its acceptance tests and a domain, and a Python
+acceptance file is formatted under its destination before the plan is checked and approved.
 """
 
 import pytest
@@ -27,10 +28,9 @@ PLAN_HEADINGS = ("What changes", "Decisions", "Out of scope", "Risks")
 
 # The engine (agent-runtime's `plan/1` loader) reads the contract the skill writes: its top-level
 # keys, the scenario and ticket fields, and the values it accepts for size and difficulty.
-TOP_KEYS = ("schema", "slug", "goal", "spec", "outcome", "scenarios", "tickets")
+TOP_KEYS = ("schema", "slug", "goal", "spec", "domain", "archive", "outcome", "scenarios", "tickets")
 SCENARIO_KEYS = ("id", "when", "then", "evidence")
-EVIDENCE_KEYS = ("check", "baseline", "oracle", "place", "timeout", "env", "negative", "promote",
-                 "human")
+EVIDENCE_KEYS = ("check", "baseline", "acceptance", "package", "timeout", "env", "negative", "human")
 TICKET_KEYS = ("id", "delivers", "satisfies", "paths", "size", "difficulty", "blocked_by", "owner",
                "risk", "evidence_waiver", "repo")
 SIZE_VALUES = ("small", "regular")
@@ -40,7 +40,7 @@ DIFFICULTY_VALUES = ("simple", "complex")
 # that disappears is a behaviour that changed under Claude Code or Codex.
 CLAUDE_CODEX_CONTRACT = (
     "**Input:** a feature, idea or task",
-    "**Output:** one approved **plan**: three files in the repository's plan directory",
+    "**Output:** one approved **plan**: one folder in the repository's plan directory",
     "**Hand-off:** `/orchestrate <plan.yaml>` builds it.",
     "A PRD is not a gate.",
     "It lists every source with its link (the request, the PRD if any, the Linear project and "
@@ -71,8 +71,8 @@ class PlanContract(unittest.TestCase):
 
     def test_S1_the_plan_writes_a_brief_not_a_narrative(self):
         """S1: the third plan file is the brief, the plan's diff in plain words."""
-        self.assertIn("`<name>.brief.md`", TEXT)
-        self.assertNotIn("`<name>.plan.md`", TEXT)
+        self.assertIn("`brief.md`", TEXT)
+        self.assertNotIn("plan.md`", TEXT)
         for heading in ("Why now", "Sources", "Seams"):
             self.assertNotIn("## " + heading, TEXT)
 
@@ -87,10 +87,30 @@ class PlanContract(unittest.TestCase):
         self.assertIn("plan approve <plan.yaml>", TEXT)
         self.assertIn("Never write `approval`", REFERENCE)
 
-    def test_S30_a_python_oracle_is_formatted_before_the_plan_is_checked(self):
-        """yaml-eec/S30: the oracle step runs the formatter script before `plan check` and approval."""
-        self.assertIn("scripts/format_oracle.py --repo <repo> <oracle file> <place>", TEXT)
-        self.assertLess(TEXT.index("format_oracle.py"), TEXT.index("plan check <plan.yaml>"))
+    def test_S14_a_python_acceptance_file_is_formatted_before_the_plan_is_checked(self):
+        """plan-layout/S14: the evidence step formats under the destination before `plan check` and approval."""
+        self.assertIn(
+            "scripts/format_acceptance.py --repo <repo> <file> <package>/<acceptance.dir>/<domain>/", TEXT
+        )
+        self.assertLess(TEXT.index("format_acceptance.py"), TEXT.index("plan check <plan.yaml>"))
+
+    def test_S14_the_plan_is_one_folder_named_by_the_repo_config(self):
+        """plan-layout/S14: the plan folder lives under the repo config's plans dir, with its acceptance tests."""
+        self.assertIn(".orchestrate/config.yaml", TEXT)
+        self.assertIn("`<plans.dir>/YYYY-MM-DD-<slug>/`", TEXT)
+        for part in ("`plan.yaml`", "`brief.md`", "`acceptance/`"):
+            self.assertIn(part, TEXT)
+
+    def test_S14_the_plan_proposes_a_domain_reusing_an_existing_one(self):
+        """plan-layout/S14: a promoting plan names its domain, reusing a folder under the acceptance dir."""
+        self.assertIn("`domain`", TEXT)
+        self.assertIn("`<package>/<acceptance.dir>/`", TEXT)
+        self.assertRegex(TEXT, r"[Rr]euse an existing")
+
+    def test_S14_neither_the_skill_nor_the_skeleton_names_oracles(self):
+        """plan-layout/S14: the tests are acceptance tests; the old word is gone."""
+        self.assertNotIn("oracle", TEXT.lower())
+        self.assertNotIn("oracle", REFERENCE.lower())
 
 
 class EngineContract(unittest.TestCase):
