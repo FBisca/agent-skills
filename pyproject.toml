@@ -8,7 +8,9 @@ dependencies = []
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "pytest-impacted>=0.37.0",
     "pytest-xdist>=3.6",
+    "PyYAML>=6.0",
     "ruff==0.14.14",
 ]
 
@@ -27,6 +29,21 @@ filterwarnings = [
     # A leaked file or stream is a bug in the test or in the code under test, not a warning to hide.
     "error::ResourceWarning",
     "error::pytest.PytestUnraisableExceptionWarning",
+]
+
+# The affected check tier (`pytest --impacted`, .orchestrate/config.yaml). The skills' scripts run
+# as files, not imports, so import analysis selects no test for a change to one: the map routes each
+# source to its tests. Globs are right-anchored and `*` is one segment; test_check_tiers_repo checks
+# every script is covered.
+impacted_module = "scripts"
+impacted_map = [
+    "conftest.py=tests",
+    "scripts/*=tests",
+    "skills/excalidraw/scripts/*=tests",
+    "skills/explain-video/scripts/*=tests",
+    "skills/idea-frame/scripts/*=skills/idea-frame/tests",
+    "skills/orchestrate/scripts/*=skills/orchestrate/tests",
+    "skills/start-planning/scripts/*=skills/start-planning/tests",
 ]
 
 [tool.ruff]
