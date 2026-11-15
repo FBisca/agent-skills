@@ -8,7 +8,7 @@
 - **Bounded.** It runs under a timeout and stops when it exceeds it.
 - **Limited actions.** It reads; it does not change the repository.
 - **Structured result.** It returns the Sources table, the decisions with their sources, the findings, the counts and the edge cases.
-- **Loud failure.** A timeout, a crash or a malformed answer fails the step: the plan stops instead of continuing on evidence the gatherer did not produce.
+- **Loud failure.** A timeout, a crash or a malformed answer fails the step; it never passes as a result.
 
 ## Which mechanism to use
 
@@ -45,7 +45,9 @@ The gatherer reads by default. When a plan needs live counts, run the read-only 
 | 6 | the answer was not a valid result |
 | 7 | the packet carried a credential |
 
-Every one of them stops the plan. Report the reason; do not gather in this session instead.
+A failed gather stops the plan. Report the reason; do not gather in this session instead.
+
+A failed review does not: retry it once, narrowed to one scenario or one test. When that also fails, the review is unperformed and the approval says the evidence is unreviewed.
 
 ## The `grilling` dependency
 
