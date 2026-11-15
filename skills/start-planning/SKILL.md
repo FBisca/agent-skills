@@ -76,7 +76,7 @@ Done when the gatherer has returned the Sources table, every settled decision wi
 
 Invoke the `grilling` skill on the decisions the sources leave open or contradict, bringing Gather's counts and edge cases into the questions. Settled decisions enter the plan unasked, with their source.
 
-Write each decision into `brief.md`'s `## Decisions` as it settles, one line: `D<n> <choice>, over <rejected>: <why> (<source>)`.
+Create `brief.md` when the first decision settles and write each decision into its `## Decisions` as it settles, one line: `D<n> <choice>, over <rejected>: <why> (<source>)`.
 
 Done when the grilling frontier is empty (with no decision open, it is empty already) and every decision, settled or grilled, has its line naming what it rejected and its source.
 
@@ -126,7 +126,7 @@ Done when every scenario appears in some ticket's `satisfies`, and every risk-ta
 ## 6. Check and review
 
 1. Run `<engine> plan check <plan.yaml>` and fix every line it prints, until it exits 0.
-2. When the lane calls for it, dispatch one fresh-context evidence reviewer on the lane's class (see Delegation). Its packet: the contract, the acceptance files, and the brief's Decisions; never this session's reasoning. It cites `path:line` for every finding and every counterexample: the assertion it names, and the code its evidence would let through. It returns, for each scenario with evidence, the assertion that checks its `then` (or none), and for each outcome scenario one counterexample: a wrong implementation its evidence would still pass.
+2. When the lane calls for it, dispatch one fresh-context evidence reviewer on the lane's class (see Delegation). Its packet: the contract, the acceptance files, and the brief's Decisions; never this session's reasoning. Each finding cites `path:line` of the assertion it names, and each counterexample cites `path:line` of the code its evidence would let through. It returns, for each scenario with evidence, the assertion that checks its `then` (or none), and for each outcome scenario one counterexample: a wrong implementation its evidence would still pass.
 3. Fix the findings you agree with, run `plan check` and `format_acceptance.py` on what changed, and stop: one round. `plan approve` is the confirmation, running every evidence item at base against its `baseline`.
 
 The review is advisory: what you leave open goes to the approval. A review that fails or times out is retried once, narrowed to one scenario or one test; when that also fails, the review is unperformed and the approval says the evidence is unreviewed.
