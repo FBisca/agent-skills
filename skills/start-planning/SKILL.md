@@ -20,12 +20,12 @@ Three documents, three jobs: the **PRD**, when there is one, says why and for wh
 
 ## Delegation
 
-Steps 2 and 7 need another context; step 3 needs another skill.
+Steps 2 and 6 need another context; step 3 needs another skill.
 
 - **Gather** and **evidence review**: a fresh-context agent — a subagent with no inherited context and no fork of this session.
 - **Grill**: the `grilling` skill, which asks the user.
 
-Each delegation must be bounded and explicit: it runs under a timeout, it returns structured findings, and it fails loudly. When it times out, fails or returns anything else, stop: never continue into the plan on evidence it did not produce.
+Each delegation must be bounded and explicit: it runs under a timeout, it returns structured findings, and it fails loudly. When the gather times out, fails or returns anything else, stop: never continue into the plan on evidence it did not produce. A failed review is the exception (step 6).
 
 `grilling` is an upstream skill, installed separately. When it is missing, stop and name the install command; never answer its questions yourself and never skip the grill.
 
@@ -42,7 +42,7 @@ The **lane** sizes the planning to the work. Judge the request by orchestrate's 
 | Step | Standard | Full |
 |---|---|---|
 | 2. Gather | small class | medium class |
-| 7. Evidence review | only when the plan adds an acceptance test; medium class | always; large class |
+| 6. Evidence review | only when the plan adds an acceptance test; medium class | always; large class |
 
 Every other step runs the same in both lanes.
 
@@ -76,7 +76,9 @@ Done when the gatherer has returned the Sources table, every settled decision wi
 
 Invoke the `grilling` skill on the decisions the sources leave open or contradict, bringing Gather's counts and edge cases into the questions. Settled decisions enter the plan unasked, with their source.
 
-Done when the grilling frontier is empty; with no decision open, it is empty already.
+Create `brief.md` when the first decision settles and write each decision into its `## Decisions` as it settles, one line: `D<n> <choice>, over <rejected>: <why> (<source>)`.
+
+Done when the grilling frontier is empty (with no decision open, it is empty already) and every decision, settled or grilled, has its line naming what it rejected and its source.
 
 ## 4. Write the scenarios and their evidence
 
@@ -121,9 +123,19 @@ When the repo is tracked in Linear, create one sub-issue per ticket under the fe
 
 Done when every scenario appears in some ticket's `satisfies`, and every risk-tagged ticket has evidence or a waiver.
 
-## 6. Write the brief
+## 6. Check and review
 
-Write `brief.md`: the plan's **diff** in plain words, what a person reads before approving. It cites scenario and ticket IDs; their text lives in the contract.
+1. Run `<engine> plan check <plan.yaml>` and fix every line it prints, until it exits 0.
+2. When the lane calls for it, dispatch one fresh-context evidence reviewer on the lane's class (see Delegation). Its packet: the contract, the acceptance files, and the brief's Decisions; never this session's reasoning. Each finding cites `path:line` of the assertion it names, and each counterexample cites `path:line` of the code its evidence would let through. It returns, for each scenario with evidence, the assertion that checks its `then` (or none), and for each outcome scenario one counterexample: a wrong implementation its evidence would still pass.
+3. Fix the findings you agree with, run `plan check` and `format_acceptance.py` on what changed, and stop: one round. `plan approve` is the confirmation, running every evidence item at base against its `baseline`.
+
+The review is advisory: what you leave open goes to the approval. A review that fails or times out is retried once, narrowed to one scenario or one test; when that also fails, the review is unperformed and the approval says the evidence is unreviewed.
+
+Done when `plan check` exits 0 on the final contract and the review, when the lane runs it, has returned or been declared unperformed.
+
+## 7. Write the brief
+
+Finish `brief.md` around the Decisions step 3 wrote: the plan's **diff** in plain words, what a person reads before approving. It cites scenario and ticket IDs; their text lives in the contract.
 
 ```markdown
 # Brief: <feature>
@@ -131,28 +143,18 @@ Write `brief.md`: the plan's **diff** in plain words, what a person reads before
 Slug: `<slug>`. Contract: `plan.yaml`. Lane: <lane>, <its reason>.
 
 ## What changes   (one line per behaviour: `<path or area>`: before → after (T<n>))
-## Decisions      (one line each: D<n> <choice>, over <rejected>: <why> (<source>))
+## Decisions      (written at step 3)
 ## Out of scope   (one line; drop the heading when nothing is)
 ## Risks          (one line per tagged risk: where it is verified; drop the heading when none)
 ```
 
 Write each line as the change itself, the way a commit message would; the reasoning behind it belongs to its decision line.
 
-Done when every ticket's `delivers` reads as a What changes line, and every decision line names what it rejected and its source.
-
-## 7. Check and review
-
-1. Run `<engine> plan check <plan.yaml>` and fix every line it prints, until it exits 0.
-2. When the lane calls for it, dispatch one fresh-context evidence reviewer on the lane's class (see Delegation). Its packet: the contract, the acceptance files, and the brief's Decisions; never this session's reasoning. It returns, for each scenario with evidence, the assertion that checks its `then` (or none), and for each outcome scenario one counterexample: a wrong implementation its evidence would still pass.
-3. Fix the findings you agree with, then run `plan check` and `format_acceptance.py` again on what changed.
-
-The review is advisory: what you leave open goes to the approval.
-
-Done when `plan check` exits 0 on the final contract and the review, when the lane runs it, has returned.
+Done when every ticket's `delivers` reads as a What changes line.
 
 ## 8. Approve
 
-Show the lane, the plan folder, the decisions, the scenarios with their evidence, the tickets with each size and difficulty, and the evidence review's open findings; then stop for one approval. Build nothing at this point.
+Show the lane, the plan folder, the decisions, the scenarios with their evidence, the tickets with each size and difficulty, and the evidence review's open findings (or that it went unperformed); then stop for one approval. Build nothing at this point.
 
 On the user's yes, run `<engine> plan approve <plan.yaml>`. It records the approval in the contract, snapshots the contract and its acceptance and negative files, and runs every evidence item at base against its `baseline`. When it refuses, fix what it names; a fix that changes the plan needs the user's yes again. Any later edit to the contract or a file in `acceptance/` or `negatives/` needs a new `plan approve`.
 
