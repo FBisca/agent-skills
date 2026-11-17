@@ -46,6 +46,10 @@ SOFTWARE.
 
 `skills/process-business-writing` and `skills/analytics-data-storytelling` are copied from `plugins/core-skills/skills/` in https://github.com/aleberriz/agent-skills. Apache License 2.0; full text in each skill's `LICENSE`, attribution and change note (both load only when invoked; `process-git` is not carried) in each skill's `NOTICE.md`.
 
+## in-your-own-words: cursor/plugins (MIT)
+
+`skills/in-your-own-words` is an unmodified copy of `pstack/skills/in-your-own-words` from https://github.com/cursor/plugins, Copyright (c) 2026 Lauren Tan. MIT License; full text and pinned commit in `skills/in-your-own-words/NOTICE.md`.
+
 ## Used, not distributed
 
 - **HyperFrames** (https://github.com/heygen-com/hyperframes, Apache-2.0, Copyright HeyGen). `explain-video` drives the HyperFrames CLI and, for its frozen v0.8.184 workflow pieces, fetches them with `skills/explain-video/scripts/fetch-hyperframes.sh`. The `hyperframes`, `hyperframes-cli`, `hyperframes-registry` and `media-use` skills are installed from upstream (`skills.lock.json`), not copied here.
