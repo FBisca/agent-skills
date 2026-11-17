@@ -5,8 +5,8 @@ description: Implement an approved plan or its next ticket through agents, scena
 
 # Orchestrate
 
-**Input:** `<plan-path>`: an approved `plan/1` folder (`plan.yaml`, `brief.md`), approved with `plan approve`. Legacy layouts also run: `<name>.plan.yaml`, `<name>.brief.md` (or `<name>.plan.md`); Markdown plans are described below.
-**Output:** tickets merged and COMPLETE, each with CI green; archive by mode: `promote` adds the scenarios to the living spec and deletes the plan folder; `discard` deletes the plan folder without writing a spec.
+**Input:** `<plan-path>`: an approved `plan/2` folder (`plan.yaml`, `brief.md`), approved with `plan approve`. Legacy layouts also run: `<name>.plan.yaml`, `<name>.brief.md` (or `<name>.plan.md`); Markdown plans are described below.
+**Output:** tickets merged and COMPLETE, each with CI green; archive by mode: `promote` applies the plan's requirement changes to its spec and deletes the plan folder; `discard` deletes the plan folder without writing a spec.
 **Scope:** new scope returns to start-planning.
 
 `<engine>` means `python3 <skill-dir>/scripts/orchestrate.py`; this shim forwards commands and arguments unchanged.
@@ -21,17 +21,19 @@ The Python driver handles dispatch, the ticket gate, review/fix rounds, CI, unbl
 
 ## The ticket gate
 
-An implementation provides its evidence. Each scenario the ticket satisfies needs a covering test the ticket changed, mapped in its report's `covers` (`S<n>` → `path::test_name`), and seen red first: the report's `red` (`S<n>` → the failing output from before the fix, naming the node) proves it. CI green on the same head proves the tests pass. The gate, `verify`, checks scope (the diff stays in the ticket's `paths`), integrity (the ticket leaves its plan folder untouched), covers (every satisfied scenario maps to test nodes that exist and changed in the ticket) and red (every satisfied scenario has an excerpt naming one of its nodes); the reviewer judges whether each excerpt is a genuine assertion failure. Say the same when you answer a worker: the tests it writes, seen red, are the ticket's only evidence.
+An implementation provides its evidence. Each scenario the ticket satisfies needs a covering test the ticket changed, tagged with its requirement's title and mapped in its report's `covers` (`S<n>` → `path::test_name`), and seen red first: the report's `red` (`S<n>` → the failing output from before the fix, naming the node) proves it. CI green on the same head proves the tests pass. The gate, `verify`, checks scope (the diff stays in the ticket's `paths`), integrity (the ticket leaves its plan folder untouched), covers (every satisfied scenario maps to test nodes that exist and changed in the ticket) and red (every satisfied scenario has an excerpt naming one of its nodes); the reviewer judges whether each excerpt is a genuine assertion failure. Say the same when you answer a worker: the tests it writes, seen red, are the ticket's only evidence.
 
-## Amend scope
+## Change the plan: re-approve
 
-The plan records scope and decisions; approval covers its bytes. Record user decisions in the brief and scope changes in contract tickets, scenarios, or Paths. Contract edits require the user's yes, then:
+The plan records scope and decisions; approval covers its bytes. Record user decisions in the brief and scope changes in the contract's requirements, tickets or `paths`. A contract edit needs the user's yes, then:
 
 ```
-<engine> plan amend <plan> --reason "<why>"
+<engine> plan approve <plan> --reason "<why>"
 ```
 
-Keep the driver running: edits drain dispatch until amendment; next round adopts it, dispatches new tickets, and resumes changed in-flight tickets with new packets. COMPLETE tickets and their scenarios' `when`/`then` are frozen; merged work needs a new ticket. The brief is not digested; decision-only edits need no amendment.
+Keep the driver running: the edit drains dispatch until the re-approval; the next round adopts the new digest, dispatches new tickets, and resumes changed in-flight tickets with new packets. COMPLETE tickets and their scenarios are frozen; merged work needs a new ticket. The brief is not digested; a decision-only edit needs no re-approval.
+
+The covers gate says a ticket's `paths` can hold no test → add the test location to its `paths`, re-approve, then decide `retry`.
 
 ## Engine and panes
 
@@ -92,9 +94,8 @@ Prefer JSON: `{"action": "…", "reason": "…", "answer": "…"}` (`answer` opt
 | `retry`, `retry one class up`, `fresh worker` | New attempt of same unit; escalation counts persist |
 | `answer` | Same worker resumes with `--answer`; ticket IDs are refused—say "your Paths" |
 | `mark blocked`, `skip` | Stops unit; dependents remain blocked |
-| `amend` | Parks `awaiting-amendment`, worker untouched; adopted plan amendment releases it |
 
-Scope-changing answers use `amend`, then the amendment procedure above.
+A scope-changing answer is a plan change: re-approve (above), then `retry` the unit.
 
 Person-owned tickets show `needs you: <deliverable>` after blockers merge. Complete the work in its `repo`, when specified, then:
 
@@ -102,7 +103,7 @@ Person-owned tickets show `needs you: <deliverable>` after blockers merge. Compl
 <engine> complete <plan> <T#> --note "<what landed>" [--cover S<n>=<node>]...
 ```
 
-Supply one `--cover` per proving test node; cross-repo nodes: `<repo-name>/<path>::<test>`. Archive records them in scenario Coverage rows. The plan is ACCEPTED when every agent ticket is COMPLETE; archive requires every ticket. A run with only person tickets remaining exits: after `complete`, `launch` again.
+Supply one `--cover` per proving test node; cross-repo nodes: `<repo-name>/<path>::<test>`. The plan is ACCEPTED when every agent ticket is COMPLETE; archive requires every ticket. A run with only person tickets remaining exits: after `complete`, `launch` again.
 
 ## Accept, resume
 
@@ -123,4 +124,4 @@ A run exits when only paused units remain. Answer, then `launch` again to resume
 - [State helper](references/state.md): ledger and manual diagnosis commands.
 - [Chunked dispatch](references/chunked-dispatch.md), [cross-repository work](references/cross-repository.md): manual-only workflows, outside the driver.
 
-Keep plan ticket numbers out of product code, commits, and PR descriptions; describe behavior. Scenario/requirement IDs belong only in test names or a Python test docstring's first line.
+Keep plan ticket and scenario IDs out of product code, test names, commits, and PR descriptions; describe behavior. A test names its requirement by title in its tag (the `tdd` skill).

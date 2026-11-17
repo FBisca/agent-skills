@@ -29,6 +29,21 @@ Calibration (2026-11-06): small units took small models 1–9 min, red-first. A 
   - The planner marks a chunk simple only when the chunk touches nothing sensitive.
 - Implementers are small or medium. The large class plans, reviews and decides.
 
+## Lane
+
+A request's size and difficulty also pick its **lane**, before any plan exists:
+
+| Size | simple | complex |
+|---|---|---|
+| **small** | Direct | Plan |
+| **regular** | Plan | Plan |
+| **big** | Plan | Plan |
+
+- **Direct**: build it directly in this session (a red test, the fix, the spec's requirement change, one PR) with no plan.
+- **Plan**: run start-planning.
+
+Judge the request from the request itself plus a glance at the code it names, and state the cell and why in one line. A lane only moves up. Propose moving a cell only after several requests in it support the change; edit this file after the user approves.
+
 ## Class to model
 
 Resolve class → backend/model/effort:

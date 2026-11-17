@@ -15,6 +15,16 @@ Tests verify behavior through public interfaces, not implementation details. Cod
 
 See [tests.md](tests.md) for examples and [mocking.md](mocking.md) for mocking guidelines.
 
+### Names and spec tags
+
+Name a test for the behaviour it checks (`test_an_expired_token_is_refused`), never for a plan or scenario ID (`test_S3_…`). A test that proves a spec requirement carries that requirement's exact title as its tag:
+
+- pytest: `@pytest.mark.spec("<Title>")`
+- Vitest: `describe("spec: <Title>", …)`
+- Rust: a `// spec: <Title>` comment on the test
+
+The spec coverage check fails on a requirement no test tags and on a tag that names no requirement.
+
 ## Seams: where tests go
 
 A **seam** is the public boundary you test at: the interface where you observe behavior without reaching inside. Tests live at seams, never against internals.
@@ -38,7 +48,7 @@ A higher level proves its boundary and leaves the cases to the level below: ten 
 Before you write a test, answer each of these in one line:
 
 1. Which observable behaviour or credible failure mode does it protect, tied to a requirement or a real risk?
-2. Is it already covered: the same guarantee at the same boundary? Search the existing tests by the function, the error text, the requirement id and the scenario name.
+2. Is it already covered: the same guarantee at the same boundary? Search the existing tests by the function, the error text and the requirement's title tag.
 3. Can an existing test be extended or parametrised instead?
 4. Is this the cheapest reliable level?
 5. Would it fail on a regression someone could plausibly ship?
