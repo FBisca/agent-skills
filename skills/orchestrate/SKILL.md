@@ -25,7 +25,7 @@ An implementation provides its evidence. Each scenario the ticket satisfies need
 
 ## Change the plan: re-approve
 
-The plan records scope and decisions; approval covers its bytes. Record user decisions in the brief and scope changes in the contract's requirements, tickets or `paths`. A contract edit needs the user's yes, then:
+The plan records scope and decisions; approval covers its bytes. Record user decisions in the brief and scope changes in the contract's requirements, tickets or `paths`. A file outside a ticket's `paths` needs no re-approval: the gate refuses only a file another unfinished ticket lists. A contract edit needs the user's yes, then:
 
 ```
 <engine> plan approve <plan> --reason "<why>"

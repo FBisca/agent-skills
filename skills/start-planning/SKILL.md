@@ -64,7 +64,7 @@ Read the spec first: a requirement's exact title decides whether the plan adds o
 - **`modified`**: a requirement the spec holds, by its exact title, restated whole: the archive replaces it.
 - **`removed`**: a requirement the spec holds, by its exact title, with `why`.
 
-An added or modified requirement is one `shall` sentence with SHALL and 1–3 scenarios. A scenario is one observable behaviour a test would catch if it broke: `id` (`S<n>`, plan-local), `when`, `then`, and an optional `name` for its spec heading. Write `then` as what that test asserts, at a seam the gather named or an interface a decision fixes. A behaviour you can't phrase as a WHEN/THEN is an open decision: take it back to step 3.
+An added or modified requirement is one `shall` sentence with SHALL and 1–3 scenarios. A scenario is one observable behaviour a test would catch if it broke: `id` (`S<n>`, plan-local), `when`, `then`, and an optional `name` for its spec heading. Write `then` as what that test asserts, at a seam the gather named or an interface a decision fixes: an observable behaviour, with no timing, size or count threshold unless that number is itself the product requirement (`daily at 09:00`). A behaviour you can't phrase as a WHEN/THEN is an open decision: take it back to step 3.
 
 Done when every behaviour the plan changes sits under a requirement and each `then` names an outcome a test can observe.
 
@@ -74,7 +74,7 @@ Each ticket is a **tracer bullet**: one narrow path through every layer it needs
 
 - **`satisfies`**: the scenario IDs the ticket makes true. Every scenario sits in some ticket's `satisfies`.
 - **`blocked_by`**: the tickets that must merge first. A blocked ticket branches from main after they merge; stacked branches break under squash merge.
-- **`paths`**: the literal repo-relative files and directories (ending `/`) the ticket may change; no globs. The build is fenced to them, so an agent ticket's `paths` hold its tests' file or directory, and a ticket that breaks another ticket's test owns that test too.
+- **`paths`**: the literal repo-relative files and directories (ending `/`) the ticket starts from; no globs. They are a starting map and the conflict map between tickets, so the worker edits any file the change needs and the gate refuses only one another unfinished ticket lists. An agent ticket's `paths` hold its tests' file or directory, and a ticket that breaks another ticket's test lists that test too.
 - **`size`** (`small | regular`) and **`difficulty`** (`simple | complex`): by orchestrate's [routing](../orchestrate/references/routing.md); they pick the worker. Work past `regular` is two tickets.
 - **`owner`**: `agent` for code. Each step a person runs or approves (prod data apply, sign-off, deploy, work in another repository) is its own ticket with that person as owner, no `size` or `difficulty`, and `repo` when it is elsewhere.
 - **`risk`**: a ticket touching [sensitive](../orchestrate/references/routing.md#difficulty) code gets its tag (`security`, `concurrency`, `retry-idempotency`, `migration`, `external` or `state`) and a scenario that pins it.

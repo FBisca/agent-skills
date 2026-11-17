@@ -51,9 +51,9 @@ tickets:
 - `plan check` refuses an `added` title the spec already holds, and a `modified` or `removed` title it lacks. Titles match exactly.
 - A requirement's `shall` holds the word SHALL; it has 1 to 3 scenarios. `added`, `modified` and `removed` each default to empty.
 - IDs: scenarios `S<n>` with an optional letter (`S4a`), plan-local; tickets `T<n>`; each unique; every reference names a declared ID; `blocked_by` has no cycle.
-- `paths`: literal, repo-relative, no globs, no `..`, not absolute; a directory ends `/`. An agent ticket's `paths` hold a test file or directory.
+- `paths`: literal, repo-relative, no globs, no `..`, not absolute; a directory ends `/`. An agent ticket's `paths` hold a test file or directory. They are a starting map and the conflict map between tickets, not a fence: a worker may edit any other file the change needs.
 - A discarding plan needs no `spec`.
 - An agent ticket carries `size` and `difficulty`; `repo` is only for a person's ticket.
-- A scenario is `id`, `when`, `then` and an optional `name`: the tests the implementing ticket writes are its evidence.
+- A scenario is `id`, `when`, `then` and an optional `name`: the tests the implementing ticket writes are its evidence. `then` states observable behaviour; a timing, size or count threshold appears only when that number is the product requirement.
 
 On archive the engine applies the changes to the spec: it appends each added requirement, replaces each modified one whole and deletes each removed one.
