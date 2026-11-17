@@ -14,10 +14,9 @@ flowchart LR
     B -->|cold-read + gate 2| C["to-spec<br/>PRD"]
     C --> D["start-planning<br/>scenarios + vertical<br/>tickets, stop for approval"]
     D --> E["orchestrate<br/>implementer agents<br/>build ticket by ticket"]
-    E -->|ticket gates| F{"scope, covers,<br/>review, CI<br/>all pass?"}
+    E -->|ticket gates| F{"scope, covers, red,<br/>review, CI<br/>all pass?"}
     F -->|no| E
-    F -->|yes| H["run the whole suite<br/>on the integrated tree"]
-    H --> G["archive plan into<br/>the living spec"]
+    F -->|yes| G["archive plan into<br/>the living spec"]
 ```
 
 The full walkthrough, with the method behind each step and the findings from two backtests, is in **[docs/workflow.md](docs/workflow.md)**.

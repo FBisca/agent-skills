@@ -43,7 +43,7 @@ Before you write a test, answer each of these in one line:
 4. Is this the cheapest reliable level?
 5. Would it fail on a regression someone could plausibly ship?
 
-Admit the test only when all five hold; otherwise extend an existing test, or write none. When you report, name for each new test the behaviour it protects and why its level is the cheapest.
+Admit the test only when all five hold; otherwise extend an existing test, or write none. When you report, name for each new test the behaviour it protects and why its level is the cheapest, and keep its red: the failing output from before the fix, naming the test and its assertion failure (a plan ticket's report carries it under `red`).
 
 Before admitting a borderline test, writing one that needs expensive setup or a wait, or deleting, merging or moving any test, read [rules.md](rules.md): the admission and cost rules, each with its nuance.
 
