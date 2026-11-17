@@ -1,6 +1,6 @@
 ---
 name: start-planning
-description: Plan one feature spec-driven, from its sources to WHEN/THEN scenarios, their evidence and vertical tickets, then stop for approval. Use when the user wants to plan a feature, idea or task, says "let's plan X", or hands over a PRD, Linear issue or vault note to build.
+description: Plan one feature spec-driven, from its sources to WHEN/THEN scenarios and the vertical tickets whose tests prove them, then stop for approval. Use when the user wants to plan a feature, idea or task, says "let's plan X", or hands over a PRD, Linear issue or vault note to build.
 ---
 
 # Start planning
@@ -8,28 +8,35 @@ description: Plan one feature spec-driven, from its sources to WHEN/THEN scenari
 **Input:** a feature, idea or task, plus whatever already describes it: a PRD, Linear issues, vault notes, a living spec, or only the request itself.
 **Output:** one approved **plan**: one folder in the repository's plan directory, `<plans.dir>/YYYY-MM-DD-<slug>/`, named for the day it is written and never re-dated:
 
-- `plan.yaml`, the **contract** (`plan/1`): goal, scenarios, evidence, tickets. `plan approve` digests it.
+- `plan.yaml`, the **contract** (`plan/1`): goal, scenarios, tickets. `plan approve` digests it.
 - `brief.md`, the **brief**: the plan's diff in plain words, and its decisions. Not digested.
-- `acceptance/`, the **acceptance tests** the evidence runs, under the names they keep once promoted; `negatives/` beside it when evidence carries a `negative` patch. `plan approve` digests both.
 
 **Hand-off:** `/orchestrate <plan.yaml>` builds it.
 
 Three documents, three jobs: the **PRD**, when there is one, says why and for whom; the **plan** turns one piece of the work into testable scenarios and tickets; the **living spec** (the contract's `spec`) records what the system does today.
 
+The plan's one invariant: **an implementation provides its evidence.** The plan declares what must become true; the ticket that makes a scenario true writes the tests that prove it, and its report's `covers` maps the scenario to those test nodes. The plan holds no tests and runs nothing.
+
 `<engine>` below is `python3 <skill-dir>/../orchestrate/scripts/orchestrate.py`, the orchestrate skill's hand-off to the engine. The engine owns the plan format: its `plan check` is the authority on the contract, and [references/plan-yaml.md](references/plan-yaml.md) is the skeleton to write from.
 
 ## Delegation
 
-Steps 2 and 6 need another context; step 3 needs another skill.
+Steps 2 and 6 need a fresh-context agent; step 3 needs another skill.
 
-- **Gather** and **evidence review**: a fresh-context agent — a subagent with no inherited context and no fork of this session.
+- **Gather** and **scenario review**: dispatch through agent-runtime's `spawn` (`kind: worker`, `cli` this session's harness, the lane's class as `model`), with the packet as its `task`. `wait` on it; its report is the answer.
 - **Grill**: the `grilling` skill, which asks the user.
 
-Each delegation must be bounded and explicit: it runs under a timeout, it returns structured findings, and it fails loudly. When the gather times out, fails or returns anything else, stop: never continue into the plan on evidence it did not produce. A failed review is the exception (step 6).
+Each delegation must be bounded and explicit:
 
-`grilling` is an upstream skill, installed separately. When it is missing, stop and name the install command; never answer its questions yourself and never skip the grill.
+- **No inherited context**: the agent starts from its packet alone, never from this conversation.
+- **Bounded**: it runs under a timeout, the `wait` you give it.
+- **Read-only**: it reads; it changes nothing in the repository.
+- **Structured findings**: it answers with the JSON object its packet's return format names.
+- **Fails loudly**: a spawn failure, a timeout, a missing report or a malformed answer fails the step. `collect` diagnoses a missing report; it never stands in for one.
 
-A harness with no subagent of its own dispatches through the adapter this skill ships, `scripts/fresh_context.py`. [references/delegation.md](references/delegation.md) has the per-harness dispatch, the packet, the result schema and the failure codes.
+When the gather fails, stop: never continue into the plan on evidence it did not produce. A failed review is the exception (step 6).
+
+`grilling` is an upstream skill (`skills.lock.json`), installed separately. Before the grill run `python3 <skill-dir>/scripts/check_deps.py grilling`: it prints `FOUND grilling: <path>`, or exits non-zero naming the install command (`scripts/install-upstream.sh grilling`). When it is missing, stop and name that command; never answer its questions yourself and never skip the grill.
 
 ## 0. Pick the lane
 
@@ -42,7 +49,7 @@ The **lane** sizes the planning to the work. Judge the request by orchestrate's 
 | Step | Standard | Full |
 |---|---|---|
 | 2. Gather | small class | medium class |
-| 6. Evidence review | only when the plan adds an acceptance test; medium class | always; large class |
+| 6. Scenario review | skipped | large class |
 
 Every other step runs the same in both lanes.
 
@@ -52,21 +59,20 @@ Done when the user has seen the lane and its reason; for Fast, when the in-sessi
 
 ## 1. Read the repo config
 
-The repo config, `<repo>/.orchestrate/config.yaml`, names three things; an absent file or node means its default:
+The repo config, `<repo>/.orchestrate/config.yaml`, names two things; an absent file or node means its default:
 
 - `plans.dir` (default `docs/plans`): where the plan folder goes. It may sit outside the repository, with the config itself gitignored, so a repository the user keeps untouched still hosts plans.
-- `acceptance.dir` (default `acceptance`): the directory inside each package that promoted acceptance tests join.
-- `archive.mode` (default `promote`): `promote` moves the acceptance tests into the package and writes the living spec; `discard` deletes the plan folder and writes nothing.
+- `archive.mode` (default `promote`): `promote` writes the scenarios into the living spec and deletes the plan folder; `discard` deletes the plan folder and writes nothing.
 
 Run `<engine> plans list --json` to see the plans already there; it refuses an unknown config key, naming it. Create `plans.dir` on the first write.
 
-Done when the plans dir, the acceptance dir and the archive mode are known.
+Done when the plans dir and the archive mode are known.
 
 ## 2. Gather
 
 A PRD is not a gate. Plan an idea or task from the request and whatever sources exist; the request itself is a source. Suggest `/to-spec` only when the work hinges on a product decision (who it is for, what users get, whether to build it) that no PRD settles, and keep planning unless the user chooses to write one. A product question that surfaces later goes to the PRD owner, or to the user when there is no PRD, not into the plan.
 
-Dispatch a fresh-context gatherer (see Delegation): where the harness has model classes, on the lane's [class](../orchestrate/references/routing.md#class-to-model). It lists every source with its link (the request, the PRD if any, the Linear project and issues, the vault project note and its decision notes, RFCs, the living spec for the area), extracts each decision they already settle with its source, and reads the code the feature touches, naming its seams: the CLI, HTTP, tool and public entry points, and the test fixtures, where a test can drive the feature from outside. When a decision depends on real data (backfill, migration, existing records), it runs read-only queries and returns the counts and edge cases: empty sets, conflicts, departed or archived owners.
+Dispatch a fresh-context gatherer (see Delegation) with [the gather packet](references/gather-packet.md). It lists every source with its link (the request, the PRD if any, the Linear project and issues, the vault project note and its decision notes, RFCs, the living spec for the area), extracts each decision they already settle with its source, and reads the code the feature touches, naming its seams: the CLI, HTTP, tool and public entry points, and the test fixtures, where a test can drive the feature from outside. When a decision depends on real data (backfill, migration, existing records), it runs read-only queries and returns the counts and edge cases: empty sets, conflicts, departed or archived owners.
 
 The gatherer's answer is the only evidence you may use: its Sources table and the decisions it settled with their sources. Do not fill a gap it left with your own recollection of the conversation.
 
@@ -80,56 +86,38 @@ Create `brief.md` when the first decision settles and write each decision into i
 
 Done when the grilling frontier is empty (with no decision open, it is empty already) and every decision, settled or grilled, has its line naming what it rejected and its source.
 
-## 4. Write the scenarios and their evidence
+## 4. Write the scenarios
 
-In `plan.yaml`, from [the skeleton](references/plan-yaml.md): `goal` in one sentence, `spec` the living spec, `domain` when the plan promotes, then the scenarios.
+In `plan.yaml`, from [the skeleton](references/plan-yaml.md): `goal` in one sentence, `spec` the living spec, then the scenarios.
 
-Each scenario is one observable behaviour that a test would catch if it broke: `id`, `when`, `then`. IDs are `S<n>`, with an optional letter suffix (`S4a`). Every requirement becomes a scenario; one you can't phrase as WHEN/THEN is an open decision, so take it back to step 3.
+Each scenario is one observable behaviour that a test would catch if it broke: `id`, `when`, `then`. IDs are `S<n>`, with an optional letter suffix (`S4a`). Write `then` as what that test asserts, at a seam the gather named or an interface a settled decision fixes. Every requirement becomes a scenario; one you can't phrase as a WHEN/THEN a test proves is an open decision, so take it back to step 3.
 
-`outcome` lists the scenarios that prove the goal on the integrated tree; each carries evidence. Evidence is for the outcome and for the scenarios a risk-tagged ticket satisfies. Every other scenario is covered by the tests its ticket writes, the reviewer and CI.
-
-Write evidence by the **evidence ladder**, taking the first rung that holds:
-
-1. **Reuse**: a `check` that runs an existing test.
-2. **Command**: a `check` over an observable (a CLI's output, a file, an exit code).
-3. **Black-box acceptance test**: a new test at an existing seam.
-4. **Contract-first acceptance test**: a new test against an interface a settled decision fixes.
-5. **Human**: `human: <what a person confirms>`.
-
-An acceptance test targets only an interface that exists or that a settled decision fixes; when neither holds, the decision is open: back to step 3. It drives the outermost stable seam and imports the system under test lazily, so it collects cleanly at base. `baseline` is what the check does at base today: `fail` for behaviour still to build, `pass` for behaviour it must keep.
-
-An acceptance test lives in the plan folder's `acceptance/`; its evidence names it in `acceptance:` with `package:`, the package directory it belongs to (`.` at the root of a single-package repository). The engine places it at `<package>/<acceptance.dir>/<domain>/<file>` for every check, and a promoting archive moves it there for good. Its basename differs from every test module already in the package: pytest imports modules by basename.
-
-The **`domain`** is the area of behaviour the promoted tests join: a `[a-z0-9-]+` slug naming a folder under `<package>/<acceptance.dir>/`. Reuse an existing one when the plan's tests belong with it; otherwise propose a name for the area (`archive`, `discovery`), never the plan's slug or the package's name, which change or repeat. A plan whose acceptance tests are not worth keeping sets `archive: discard`, and then needs neither `spec` nor `domain`.
-
-After writing or editing each Python acceptance file, run `python3 <skill-dir>/scripts/format_acceptance.py --repo <repo> <file> <package>/<acceptance.dir>/<domain>/`. When the repository configures ruff, it formats the file as ruff formats its destination, so the byte-identical copy promoted at archive passes the format gate; otherwise it leaves the file as written.
-
-Done when every outcome scenario has evidence, a promoting plan has its `domain`, and every Python acceptance file has been through `format_acceptance.py` since its last edit.
+Done when every requirement is a scenario and each `then` names an outcome a test can observe.
 
 ## 5. Slice into tickets
 
-Each ticket is a **tracer bullet**: one narrow path through every layer it needs (schema, API, UI, test), landing as one PR under ~800 hand-written lines.
+Each ticket is a **tracer bullet**: one narrow path through every layer it needs (schema, API, UI, test), landing as one PR under ~800 hand-written lines. It writes the tests that prove the scenarios it satisfies.
 
 - **`satisfies`**: the scenario IDs the ticket makes true. Every scenario sits in some ticket's `satisfies`.
 - **`blocked_by`**: the ticket IDs that must merge first. A blocked ticket branches from main after its blockers merge; stacked branches break under squash merge.
-- **`paths`**: the literal repo-relative files and directories (ending `/`) the ticket may change; no globs. The build is fenced to them, and a ticket that changes a test some other ticket's behaviour breaks owns that test too.
+- **`paths`**: the literal repo-relative files and directories (ending `/`) the ticket may change; no globs. The build is fenced to them, so an agent ticket's `paths` hold the test file or directory its covering tests go in, and a ticket that changes a test some other ticket's behaviour breaks owns that test too.
 - **`size`** (`small | regular`) and **`difficulty`** (`simple | complex`): judged by orchestrate's [routing](../orchestrate/references/routing.md), they pick the ticket's worker. `big` is not a size: split the work into two tickets.
 - **`owner`**: `agent` for code. Every step a person runs or approves (prod data apply, sign-off, deploy, work in another repository) is its own ticket with that person as owner, no `size` or `difficulty`, and `repo` when it is elsewhere; a code PR never closes it.
-- **`risk`**: tag a ticket `security`, `concurrency`, `retry-idempotency`, `migration`, `external` or `state` when it carries that risk. It then satisfies a scenario with evidence, or carries an `evidence_waiver` naming where the risk *is* verified.
+- **`risk`**: tag a ticket `security`, `concurrency`, `retry-idempotency`, `migration`, `external` or `state` when it carries that risk, and give the risk a scenario its tests prove.
 
 A wide mechanical refactor runs as expand–contract: expand, one ticket per migrate batch, then contract.
 
 When the repo is tracked in Linear, create one sub-issue per ticket under the feature issue. The plan stays the source of truth.
 
-Done when every scenario appears in some ticket's `satisfies`, and every risk-tagged ticket has evidence or a waiver.
+Done when every scenario appears in some ticket's `satisfies` and every agent ticket's `paths` hold a test location.
 
 ## 6. Check and review
 
 1. Run `<engine> plan check <plan.yaml>` and fix every line it prints, until it exits 0.
-2. When the lane calls for it, dispatch one fresh-context evidence reviewer on the lane's class (see Delegation). Its packet: the contract, the acceptance files, and the brief's Decisions; never this session's reasoning. Each finding cites `path:line` of the assertion it names, and each counterexample cites `path:line` of the code its evidence would let through. It returns, for each scenario with evidence, the assertion that checks its `then` (or none), and for each outcome scenario one counterexample: a wrong implementation its evidence would still pass.
-3. Fix the findings you agree with, run `plan check` and `format_acceptance.py` on what changed, and stop: one round. `plan approve` is the confirmation, running every evidence item at base against its `baseline`.
+2. In the Full lane, dispatch one fresh-context scenario reviewer on the large class (see Delegation). Its packet: the contract, the brief's Decisions and the gather's seams; never this session's reasoning. It returns, for each scenario, the test that would prove it (the seam it drives, the assertion on `then`) or `untestable` with the reason, and for each risk-tagged ticket, the scenario that pins its risk or none.
+3. Fix the findings you agree with, run `plan check` on what changed, and stop: one round.
 
-The review is advisory: what you leave open goes to the approval. A review that fails or times out is retried once, narrowed to one scenario or one test; when that also fails, the review is unperformed and the approval says the evidence is unreviewed.
+The review is advisory: what you leave open goes to the approval. A review that fails or times out is retried once, narrowed to one scenario or one ticket; when that also fails, the review is unperformed and the approval says the scenarios are unreviewed.
 
 Done when `plan check` exits 0 on the final contract and the review, when the lane runs it, has returned or been declared unperformed.
 
@@ -145,7 +133,7 @@ Slug: `<slug>`. Contract: `plan.yaml`. Lane: <lane>, <its reason>.
 ## What changes   (one line per behaviour: `<path or area>`: before → after (T<n>))
 ## Decisions      (written at step 3)
 ## Out of scope   (one line; drop the heading when nothing is)
-## Risks          (one line per tagged risk: where it is verified; drop the heading when none)
+## Risks          (one line per tagged risk: the scenario that proves it; drop the heading when none)
 ```
 
 Write each line as the change itself, the way a commit message would; the reasoning behind it belongs to its decision line.
@@ -154,8 +142,8 @@ Done when every ticket's `delivers` reads as a What changes line.
 
 ## 8. Approve
 
-Show the lane, the plan folder, the decisions, the scenarios with their evidence, the tickets with each size and difficulty, and the evidence review's open findings (or that it went unperformed); then stop for one approval. Build nothing at this point.
+Show the lane, the plan folder, the decisions, the scenarios, the tickets with each size and difficulty, and the scenario review's open findings (or that it went unperformed); then stop for one approval. Build nothing at this point.
 
-On the user's yes, run `<engine> plan approve <plan.yaml>`. It records the approval in the contract, snapshots the contract and its acceptance and negative files, and runs every evidence item at base against its `baseline`. When it refuses, fix what it names; a fix that changes the plan needs the user's yes again. Any later edit to the contract or a file in `acceptance/` or `negatives/` needs a new `plan approve`.
+On the user's yes, run `<engine> plan approve <plan.yaml>`. It records the approval in the contract and digests `plan.yaml`; it runs nothing. When it refuses, fix what it names; a fix that changes the plan needs the user's yes again. Any later edit to the contract needs a new `plan approve`.
 
 Then hand off to `/orchestrate <plan.yaml>`.

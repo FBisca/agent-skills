@@ -5,8 +5,8 @@ description: Implement an approved plan or its next ticket through agents, scena
 
 # Orchestrate
 
-**Input:** `<plan-path>`: an approved `plan/1` folder (`plan.yaml`, `brief.md`, `acceptance/`), approved with `plan approve`. Legacy layouts also run: `<name>.plan.yaml`, `<name>.brief.md` (or `<name>.plan.md`), `<name>.oracle/`; Markdown plans are described below.
-**Output:** tickets merged and COMPLETE; outcome verified on the integrated tree; archive by mode: `promote` adds scenarios to the living spec and moves acceptance tests to `<package>/<acceptance.dir>/<domain>/`; `discard` deletes the plan folder without writing a spec.
+**Input:** `<plan-path>`: an approved `plan/1` folder (`plan.yaml`, `brief.md`), approved with `plan approve`. Legacy layouts also run: `<name>.plan.yaml`, `<name>.brief.md` (or `<name>.plan.md`); Markdown plans are described below.
+**Output:** tickets merged and COMPLETE; the repo's whole suite green on the integrated tree; archive by mode: `promote` adds the scenarios to the living spec and deletes the plan folder; `discard` deletes the plan folder without writing a spec.
 **Scope:** new scope returns to start-planning.
 
 `<engine>` means `python3 <skill-dir>/scripts/orchestrate.py`; this shim forwards commands and arguments unchanged.
@@ -17,11 +17,15 @@ description: Implement an approved plan or its next ticket through agents, scena
 2. Run `<engine> launch <plan>`.
 3. Exit 2: relay the deficiency and stop; nothing started. Otherwise report the printed pane name, `orchestrate-<slug>`, and end the turn. Re-launching a live driver returns its name without duplicating it.
 
-The Python driver handles dispatch, ticket gates (scope, integrity, covers, evidence), review/fix rounds, CI, unblocking after user merges, integration, outcome verification, and archive through agent-runtime. It never merges PRs. Answer its requests and complete person-owned tickets. Options: `<engine> run --help`.
+The Python driver handles dispatch, the ticket gate, review/fix rounds, CI, unblocking after user merges, integration, and archive through agent-runtime. It never merges PRs. Answer its requests and complete person-owned tickets. Options: `<engine> run --help`.
+
+## The ticket gate
+
+An implementation provides its evidence. Each scenario the ticket satisfies needs a covering test the ticket changed, mapped in its report's `covers` (`S<n>` → `path::test_name`); CI green on the same head proves the tests pass. The gate, `verify`, checks scope (the diff stays in the ticket's `paths`), integrity (the ticket leaves its plan folder untouched) and covers (every satisfied scenario maps to test nodes that exist and changed in the ticket). Say the same when you answer a worker: the tests it writes are the ticket's only evidence.
 
 ## Amend scope
 
-The plan records scope and decisions; approval covers its bytes. Record user decisions in the brief and scope changes in contract tickets, scenarios, or Paths. Contract/acceptance edits require the user's yes, then:
+The plan records scope and decisions; approval covers its bytes. Record user decisions in the brief and scope changes in contract tickets, scenarios, or Paths. Contract edits require the user's yes, then:
 
 ```
 <engine> plan amend <plan> --reason "<why>"
@@ -71,7 +75,6 @@ Agent-to-driver handoffs are versioned JSON, code-validated. Missing/invalid fil
 | `<run>/<task>/findings.json` | Driver: fix round |
 | `<run>/<task>/request.<n>.json` | Driver |
 | `<run>/<task>/decision.<n>.json` | Lead through `decide` |
-| `<run>/receipts/` | Driver: every evidence run, receipt, log |
 | `<run>/attention.md`, `<run>/deferred.md`, `<run>/metrics.json` | Driver: human-facing artifacts |
 | `<run>/gaps.md` | Gaps reviewer |
 
@@ -101,19 +104,11 @@ Person-owned tickets show `needs you: <deliverable>` after blockers merge. Compl
 <engine> complete <plan> <T#> --note "<what landed>" [--cover S<n>=<node>]...
 ```
 
-Supply one `--cover` per proving test node; cross-repo nodes: `<repo-name>/<path>::<test>`. Archive records them in scenario Coverage rows. Verification starts when all agent tickets are COMPLETE; archive requires every ticket. A run with only person tickets remaining exits: after `complete`, `launch` again.
+Supply one `--cover` per proving test node; cross-repo nodes: `<repo-name>/<path>::<test>`. Archive records them in scenario Coverage rows. Integration starts when every agent ticket is COMPLETE; archive requires every ticket. A run with only person tickets remaining exits: after `complete`, `launch` again.
 
-## Verify, accept, resume
+## Integrate, resume
 
-Once every ticket is COMPLETE, the driver runs evidence on one pinned default-branch commit containing every merge. `<engine> verify <plan>` checks the receipts; failed outcomes exit non-zero.
-
-Failed evidence and `human` items await personal verification. After checking:
-
-```
-<engine> accept <plan> <scenario> --note "<what you checked>"
-```
-
-The note records person, time, and tree; state becomes ACCEPTED_WITH_HUMAN. Acceptance starts archive.
+Once every agent ticket is merged, the driver pins one default-branch commit containing every merge and runs the repo's whole suite there (`checks.full.run`; `--skip-full` skips it). The plan is ACCEPTED or REJECTED on that run alone; ACCEPTED starts archive.
 
 - `stranded <unit>`: agent fate unknown; no release/spawn; non-zero exit. Inspect its terminal, then restart the drive.
 - `not-dispatched <ticket>`: dispatch failed; `status` gives the reason.

@@ -28,7 +28,7 @@ Ask: "What's the public interface, and which seams should we test?" Give each pr
 Each seam sits at a level; pick the lowest that reliably shows the behaviour:
 
 - **Unit**: local decisions, in process. In an orchestrator: scheduling and retry policies, state transitions, plan and config parsing, routing precedence, refusal rules, classifying results.
-- **Integration**: real boundaries, with fakes behind them. In an orchestrator: driver-to-worker execution, persistence, subprocess and signal handling, IPC, evidence run against a real tree.
+- **Integration**: real boundaries, with fakes behind them. In an orchestrator: driver-to-worker execution, persistence, subprocess and signal handling, IPC, the full suite run against a real tree.
 - **End to end**: a few representative journeys that prove the whole system completes, such as one approved plan driven to an archived result.
 
 A higher level proves its boundary and leaves the cases to the level below: ten validation cases are one parametrised unit test plus one integration test showing a refusal crosses the boundary. Overlap across levels earns its place only when each level proves a different real boundary.

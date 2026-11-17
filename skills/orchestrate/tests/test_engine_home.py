@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[3]
 SKILLS = ROOT / "skills"
 
 # The modules the engine is made of. A file that imports one of them is reaching for the engine.
-ENGINE_MODULES = ("contracts", "evidence", "events", "routes", "wait_checks")
+ENGINE_MODULES = ("contracts", "events", "routes", "verify", "wait_checks")
 
 SKIPPED = {".git", ".venv", "__pycache__", "node_modules", ".ruff_cache", ".pytest_cache"}
 

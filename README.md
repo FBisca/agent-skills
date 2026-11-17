@@ -14,9 +14,9 @@ flowchart LR
     B -->|cold-read + gate 2| C["to-spec<br/>PRD"]
     C --> D["start-planning<br/>scenarios + vertical<br/>tickets, stop for approval"]
     D --> E["orchestrate<br/>implementer agents<br/>build ticket by ticket"]
-    E -->|ticket gates| F{"scope, covers,<br/>evidence, review,<br/>CI all pass?"}
+    E -->|ticket gates| F{"scope, covers,<br/>review, CI<br/>all pass?"}
     F -->|no| E
-    F -->|yes| H["verify the outcome<br/>on the integrated tree"]
+    F -->|yes| H["run the whole suite<br/>on the integrated tree"]
     H --> G["archive plan into<br/>the living spec"]
 ```
 
@@ -107,7 +107,7 @@ The same `SKILL.md` serves every harness. Each one discovers a skill natively â€
 
 `start-planning` needs one upstream skill, `grilling`, which is not vendored here: install it with `scripts/install-upstream.sh grilling` (see [Upstream skills](#upstream-skills)). The plan refuses to continue without it, and never skips the grill.
 
-A harness with no subagent of its own dispatches the fresh-context gather through the adapter the skill ships (`skills/start-planning/scripts/fresh_context.py`), which runs a bounded, isolated session and validates its answer. The per-harness dispatch is in `skills/start-planning/references/delegation.md`; the supported methods and the known limitations are in **[docs/specs/harness-portability.md](docs/specs/harness-portability.md)**.
+Every harness dispatches the fresh-context gather the same way: through [agent-runtime](https://github.com/FBisca/agent-runtime)'s `spawn`, with `skills/start-planning/references/gather-packet.md` as the task. The known limitations are in **[docs/specs/harness-portability.md](docs/specs/harness-portability.md)**.
 
 ### Configuration
 
