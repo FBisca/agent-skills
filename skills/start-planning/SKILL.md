@@ -1,13 +1,13 @@
 ---
 name: start-planning
-description: Plan one feature spec-driven, from its sources to the requirement changes, their WHEN/THEN scenarios and the vertical tickets whose tests prove them, then stop for approval. Use when the user wants to plan a feature, idea or task, says "let's plan X", or hands over a PRD, Linear issue or vault note to build.
+description: Plan one feature spec-driven, from its sources to the requirement changes. Use when the user wants to plan a feature, idea or task, says "let's plan X".
 ---
 
 # Start planning
 
 **You own the contract, not the code.** Gather, decide, write the plan, check it, stop for approval.
 
-**Input:** a feature, idea or task, plus whatever describes it: a PRD, Linear issues, vault notes, the spec, or only the request.
+**Input:** a feature, idea or task, plus whatever describes it: a PRD, issues, documentation, the spec, or only the request.
 **Output:** one plan folder, `<plans.dir>/YYYY-MM-DD-<slug>/`, dated the day it is written:
 
 - `plan.yaml`, the **contract** (`plan/2`): the requirements the plan adds to, modifies in or removes from its spec, each with its scenarios, and the tickets. `plan approve` digests it.
