@@ -64,7 +64,7 @@ Read the spec first: a requirement's exact title decides whether the plan adds o
 - **`modified`**: a requirement the spec holds, by its exact title, restated whole: the archive replaces it.
 - **`removed`**: a requirement the spec holds, by its exact title, with `why`.
 
-An added or modified requirement is one `shall` sentence with SHALL and 1–3 scenarios. A scenario is one observable behaviour a test would catch if it broke: `id` (`S<n>`, plan-local), `when`, `then`, and an optional `name` for its spec heading. Write `then` as what that test asserts, at a seam the gather named or an interface a decision fixes: an observable behaviour, with no timing, size or count threshold unless that number is itself the product requirement (`daily at 09:00`). A behaviour you can't phrase as a WHEN/THEN is an open decision: take it back to step 3.
+An added or modified requirement is one `shall` sentence with SHALL and 1–3 scenarios. A scenario is one observable behaviour a test would catch if it broke: `id` (`S<n>`, plan-local), `when`, `then`, and an optional `name` for its spec heading. Write `then` as what that test asserts, at a seam the gather named or an interface a decision fixes: an observable behaviour. A scenario holds one behaviour: one WHEN, one THEN; a `when` or `then` that joins two behaviours (an "and", an "until", a second clause) is two scenarios, because a compound scenario gets half-tested. A threshold, limit or timeout cites a measurement in the brief, or the ticket's first job is to measure it and the scenario says so, because guessed numbers get disproved by the code and force plan amendments; a number that is itself the product requirement (`daily at 09:00`) needs neither. A behaviour you can't phrase as a WHEN/THEN is an open decision: take it back to step 3.
 
 Done when every behaviour the plan changes sits under a requirement and each `then` names an outcome a test can observe.
 
@@ -104,6 +104,8 @@ Slug: `<slug>`. Contract: `plan.yaml`. Lane: Plan, <its cell and why>.
 ```
 
 Write each line as the change itself, the way a commit message would; its reasoning belongs to its D-line.
+
+The brief has two readers: the user, who approves the plan, and the worker, who builds it. A decision that must be enforced becomes a scenario (testable behaviour) or a rule in the repository's rulebook; any other decision is guidance for the worker, and review does not check it. The reviewer judges code against the scenarios and the rulebook only, so an implementation instruction in the brief ("inject it as a callable") would make it police coding choices instead of behaviour.
 
 Done when every ticket's `delivers` reads as a What changes line.
 
