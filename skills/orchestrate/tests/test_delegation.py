@@ -159,11 +159,11 @@ class DocumentedSeamTests(unittest.TestCase):
             self.assertNotIn("scripts/routes.py", text, reference)
 
     @pytest.mark.unit
-    def test_S10_a_person_ticket_is_closed_with_complete_and_its_cover_nodes(self):
-        """engine-gaps/S10: the skill closes a person ticket with `complete ... --cover`, not a ledger edit."""
+    def test_S10_a_person_ticket_is_closed_with_complete(self):
+        """engine-gaps/S10: the skill closes a person ticket with `complete`, not a ledger edit."""
         skill = self.read("skills/orchestrate/SKILL.md")
         self.assertIn("<engine> complete <plan> <T#> --note", skill)
-        self.assertIn("--cover S<n>=<node>", skill)
+        self.assertNotIn("--cover", skill)
         self.assertNotIn("ticket_status", skill)
 
 
