@@ -100,10 +100,10 @@ A scope-changing answer is a plan change: re-approve (above), then `retry` the u
 Person-owned tickets show `needs you: <deliverable>` after blockers merge. Complete the work in its `repo`, when specified, then:
 
 ```
-<engine> complete <plan> <T#> --note "<what landed>" [--cover S<n>=<node>]...
+<engine> complete <plan> <T#> --note "<what landed>"
 ```
 
-Supply one `--cover` per proving test node; cross-repo nodes: `<repo-name>/<path>::<test>`. The plan is ACCEPTED when every agent ticket is COMPLETE; archive requires every ticket. A run with only person tickets remaining exits: after `complete`, `launch` again.
+The plan is ACCEPTED when every agent ticket is COMPLETE; archive requires every ticket. A run with only person tickets remaining exits: after `complete`, `launch` again.
 
 ## Accept, resume
 
