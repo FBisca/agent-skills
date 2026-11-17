@@ -1,13 +1,13 @@
 """The start-planning contract, as it must read from every harness.
 
 S1: the planning contract survives the portability work, and Pi has a native invocation.
-S2: the two steps that need another context (gather, grill) have a Pi path that runs or
-fails loudly; neither may be skipped.
-S3: the Claude Code and Codex paths are still there, unchanged in substance.
+S2: the two steps that need another context (gather, grill) run the same way in every harness
+or fail loudly; neither may be skipped.
+S3: the planning contract's sentences are still there, unchanged in substance.
 test-suite/R2: the plan the skill documents is the plan the engine reads.
 yaml-eec/S26: the plan is the engine's YAML contract and its brief.
-plan-layout/S14: the plan is one folder with its acceptance tests and a domain, and a Python
-acceptance file is formatted under its destination before the plan is checked and approved.
+A plan declares scenarios and tickets; the ticket's tests are the evidence, so a scenario carries
+no evidence of its own.
 """
 
 import pytest
@@ -28,11 +28,10 @@ PLAN_HEADINGS = ("What changes", "Decisions", "Out of scope", "Risks")
 
 # The engine (agent-runtime's `plan/1` loader) reads the contract the skill writes: its top-level
 # keys, the scenario and ticket fields, and the values it accepts for size and difficulty.
-TOP_KEYS = ("schema", "slug", "goal", "spec", "domain", "archive", "outcome", "scenarios", "tickets")
-SCENARIO_KEYS = ("id", "when", "then", "evidence")
-EVIDENCE_KEYS = ("check", "baseline", "acceptance", "package", "timeout", "env", "negative", "human")
+TOP_KEYS = ("schema", "slug", "goal", "spec", "archive", "scenarios", "tickets")
+SCENARIO_KEYS = ("id", "when", "then")
 TICKET_KEYS = ("id", "delivers", "satisfies", "paths", "size", "difficulty", "blocked_by", "owner",
-               "risk", "evidence_waiver", "repo")
+               "risk", "repo")
 SIZE_VALUES = ("small", "regular")
 DIFFICULTY_VALUES = ("simple", "complex")
 
@@ -87,30 +86,12 @@ class PlanContract(unittest.TestCase):
         self.assertIn("plan approve <plan.yaml>", TEXT)
         self.assertIn("Never write `approval`", REFERENCE)
 
-    def test_S14_a_python_acceptance_file_is_formatted_before_the_plan_is_checked(self):
-        """plan-layout/S14: the evidence step formats under the destination before `plan check` and approval."""
-        self.assertIn(
-            "scripts/format_acceptance.py --repo <repo> <file> <package>/<acceptance.dir>/<domain>/", TEXT
-        )
-        self.assertLess(TEXT.index("format_acceptance.py"), TEXT.index("plan check <plan.yaml>"))
-
     def test_S14_the_plan_is_one_folder_named_by_the_repo_config(self):
-        """plan-layout/S14: the plan folder lives under the repo config's plans dir, with its acceptance tests."""
+        """plan-layout/S14: the plan folder lives under the repo config's plans dir: the contract and its brief."""
         self.assertIn(".orchestrate/config.yaml", TEXT)
         self.assertIn("`<plans.dir>/YYYY-MM-DD-<slug>/`", TEXT)
-        for part in ("`plan.yaml`", "`brief.md`", "`acceptance/`"):
+        for part in ("`plan.yaml`", "`brief.md`"):
             self.assertIn(part, TEXT)
-
-    def test_S14_the_plan_proposes_a_domain_reusing_an_existing_one(self):
-        """plan-layout/S14: a promoting plan names its domain, reusing a folder under the acceptance dir."""
-        self.assertIn("`domain`", TEXT)
-        self.assertIn("`<package>/<acceptance.dir>/`", TEXT)
-        self.assertRegex(TEXT, r"[Rr]euse an existing")
-
-    def test_S14_neither_the_skill_nor_the_skeleton_names_oracles(self):
-        """plan-layout/S14: the tests are acceptance tests; the old word is gone."""
-        self.assertNotIn("oracle", TEXT.lower())
-        self.assertNotIn("oracle", REFERENCE.lower())
 
 
 class EngineContract(unittest.TestCase):
@@ -123,8 +104,9 @@ class EngineContract(unittest.TestCase):
         self.assertEqual(top, list(TOP_KEYS), "the top-level keys, in order")
         self.assertIn("schema: plan/1\n", skeleton)
         nested = set(re.findall(r"^ {2,6}(?:- )?([a-z_]+):", skeleton, re.M))
-        for key in SCENARIO_KEYS + EVIDENCE_KEYS + TICKET_KEYS:
+        for key in SCENARIO_KEYS + TICKET_KEYS:
             self.assertIn(key, nested, "the documented field %s" % key)
+        self.assertEqual(nested, set(SCENARIO_KEYS + TICKET_KEYS), "no field the engine refuses")
         for column, values in (("size", SIZE_VALUES), ("difficulty", DIFFICULTY_VALUES)):
             found = re.search(r"\*\*`%s`\*\* \(`([^`]+)`\)" % column, TEXT)
             self.assertIsNotNone(found, "the documented %s vocabulary" % column)
@@ -134,12 +116,11 @@ class EngineContract(unittest.TestCase):
 
 
 class Delegation(unittest.TestCase):
-    """The skill states the requirement; the reference carries the per-harness detail."""
+    """One dispatch for every harness, bounded and loud."""
 
-    def test_S2_the_gather_has_an_adapter(self):
-        """S2: the fresh-context gather runs through the adapter the skill ships."""
-        self.assertIn("scripts/fresh_context.py", TEXT)
-        self.assertTrue((SKILL.parent / "scripts" / "fresh_context.py").is_file())
+    def test_S2_the_gather_is_dispatched_through_the_runtime(self):
+        """S2: every harness dispatches the fresh-context gather the same way: agent-runtime's `spawn`."""
+        self.assertIn("`spawn`", TEXT)
         self.assertTrue((SKILL.parent / "references" / "gather-packet.md").is_file())
 
     def test_S2_the_gather_may_not_be_skipped_when_it_fails(self):
@@ -147,11 +128,9 @@ class Delegation(unittest.TestCase):
         self.assertIn("never continue into the plan on evidence it did not produce", TEXT)
 
     def test_S2_a_delegation_must_be_bounded_and_explicit(self):
-        """S2: the requirement holds whatever mechanism the harness uses."""
-        self.assertIn("no inherited context", TEXT)
-        self.assertIn("timeout", TEXT)
-        self.assertIn("structured findings", TEXT)
-        self.assertIn("fails loudly", TEXT)
+        """S2: the requirement holds whatever harness dispatches it."""
+        for guarantee in ("no inherited context", "timeout", "read-only", "structured findings", "fails loudly"):
+            self.assertIn(guarantee, TEXT.lower())
 
     def test_S2_a_missing_grilling_stops_the_plan(self):
         """S2: no silent skip of the grill."""
@@ -162,13 +141,6 @@ class Delegation(unittest.TestCase):
         """S2: the missing dependency is detected by a script, not by hope."""
         self.assertTrue((SKILL.parent / "scripts" / "check_deps.py").is_file())
 
-    def test_S3_the_claude_and_codex_paths_are_kept(self):
-        """S3: Claude Code keeps the Task subagent and the Skill tool; Codex keeps its skill."""
-        reference = (SKILL.parent / "references" / "delegation.md").read_text(encoding="utf-8")
-        self.assertIn("Task subagent", reference)
-        self.assertIn("the Skill tool with `grilling`", reference)
-        self.assertIn("Codex", reference)
-
     def test_S3_the_pre_portability_contract_is_unchanged(self):
         """S3: every sentence the skill had before the portability work is still there."""
         for sentence in CLAUDE_CODEX_CONTRACT:
@@ -178,14 +150,6 @@ class Delegation(unittest.TestCase):
         """The skill names scripts that exist: a broken path is a broken step."""
         for name in set(re.findall(r"(?:\.\./[a-z-]+/)?scripts/[A-Za-z_]+\.py", TEXT)):
             self.assertTrue((SKILL.parent / name).is_file(), name)
-
-    def test_the_reference_carries_the_harness_detail_not_the_skill(self):
-        """The per-harness dispatch lives in the reference, so the main context stays small."""
-        reference = (SKILL.parent / "references" / "delegation.md").read_text(encoding="utf-8")
-        self.assertIn("Claude Code", reference)
-        self.assertIn("Pi", reference)
-        self.assertNotIn("Task subagent", TEXT)
-        self.assertNotIn("Claude Code", TEXT)
 
 
 if __name__ == "__main__":

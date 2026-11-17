@@ -13,25 +13,16 @@ What the shared skills do in each harness, and where a harness still lacks a too
 
 Discovery is the same everywhere: a skill is a directory with a `SKILL.md` whose frontmatter carries `name` and `description`. Each harness invokes it its own way, so no skill body teaches the invocation — the skill states the workflow, the reference states the mechanism.
 
-What differs is how the two delegated steps are dispatched. That table lives with the skill, loaded on demand: `skills/start-planning/references/delegation.md`.
+The two delegated steps are dispatched the same way in every harness:
 
-| Step | Claude Code | Codex | A harness with no subagent |
-|---|---|---|---|
-| gather (fresh context) | a Task subagent, no fork of the session | its subagent run | the adapter `skills/start-planning/scripts/fresh_context.py` |
-| grill | the Skill tool with `grilling` | the `grilling` skill | the `grilling` skill |
+| Step | Every harness |
+|---|---|
+| gather (fresh context) | agent-runtime's `spawn` (`cli: claude`, `codex` or `pi`), the gather packet as its task; `wait` returns its report |
+| grill | the `grilling` skill |
+
+agent-runtime gives every harness a fresh agent with no inherited context, so the skill ships no adapter of its own. The gather is bounded (the `wait` timeout), read-only (its packet's rules), structured (one JSON object with exactly `sources`, `decisions`, `findings`, `counts`, `edge_cases`) and loud: a spawn failure, a timeout, a missing report or a malformed answer stops the plan, which never carries evidence the gatherer did not produce.
 
 `/orchestrate` stays out of Pi at P1 (see Limitations).
-
-## The gatherer adapter
-
-A harness with no subagent of its own dispatches the fresh-context gather through the adapter the skill ships: `skills/start-planning/scripts/fresh_context.py`.
-
-- **Isolation.** A separate `pi --print` session: `--no-session`, its own `--session-dir`, no `--continue`, no `--resume`, no extensions, no MCP. The parent conversation is never part of the prompt; the packet is.
-- **Bounded.** A timeout (`--timeout`, default 600s) and a restricted tool set (`read,ls,grep,find`). `--allow-bash` adds `bash` for read-only queries; `--inherit-env` passes the whole parent environment.
-- **Structured.** The answer must be one JSON object with exactly `sources`, `decisions`, `findings`, `counts`, `edge_cases`. Anything else is malformed.
-- **Loud on failure.** Exit codes: `0` ok, `2` usage, `3` pi not found, `4` pi failed, `5` timeout, `6` malformed answer, `7` packet refused. Planning stops on any non-zero exit; the plan never carries evidence the gatherer did not produce.
-- **Why it ships with the skill.** Pi has a subagent extension, but as an example: it must be installed by hand before any skill can call it, and it spawns the same kind of separate `pi` process. A skill has to work for someone who installed Pi and nothing else.
-- **No credentials in the packet.** A packet carrying a secret-looking string is refused before the subprocess starts.
 
 ## Frontmatter
 
@@ -82,8 +73,7 @@ scripts/install-upstream.sh grilling
 ## Known limitations
 
 - **`/orchestrate` does not run under Pi yet.** The driver needs the agent-runtime tools, which Pi does not expose. The driver itself now lives in [agent-runtime](https://github.com/FBisca/agent-runtime), in the `agent-orchestrator` member, and this skill's script hands the command to it; the Pi path for orchestration is later work (out of scope in this plan).
-- **The Pi gatherer cannot run commands by default.** Counts that need a live database or script are either run by the parent or opted into with `--allow-bash`, which widens the subprocess's powers.
-- **Pi has no plan mode and no review subagent.** Steps that rely on a second opinion must go through a delegation: the harness's own, or the adapter the skill ships.
+- **Pi has no plan mode and no review subagent.** Steps that rely on a second opinion go through agent-runtime's `spawn`, like every other harness.
 - **`grilling` must be installed separately.** The plan refuses to continue without it; it does not install it.
 - **Frontmatter must be quoted when it holds a colon.** Pi's YAML parser rejects an unquoted `description:` with a colon inside it ("Nested mappings are not allowed in compact mappings") and skips the skill without failing loudly. `assemble-crew` and `deep-prompt` hit this; both descriptions are quoted now, and `tests/test_pi_discovery.py` fails if any skill in this repo stops loading in Pi.
 - **A `#` in an unquoted description is worse than a colon.** YAML starts a comment there, so the description is silently cut at that word. Every harness does it: Pi, Claude Code and Codex all read `Friday, his #heritage-updates reply` as `Friday, his`. The skill still loads, so nothing reports the loss. Quote the value.
@@ -95,7 +85,7 @@ scripts/install-upstream.sh grilling
 scripts/run-tests.sh
 ```
 
-The portability contracts live in `tests/test_portability.py` (discovery, the shared skills' harness contracts, the plan Markdown contract), `tests/test_pi_discovery.py` (Pi's own loader finds the skills: offline, no model) and in `skills/start-planning/tests/` (the gatherer's isolation, timeouts, malformed answers and the dependency check). They run offline: no network, no model, no Pi process.
+The portability contracts live in `tests/test_portability.py` (discovery, the shared skills' harness contracts, the plan Markdown contract), `tests/test_pi_discovery.py` (Pi's own loader finds the skills: offline, no model) and in `skills/start-planning/tests/` (the plan contract and the dependency check). They run offline: no network, no model, no Pi process.
 
 ## The manual acceptance test (T3)
 

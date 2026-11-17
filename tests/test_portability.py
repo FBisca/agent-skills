@@ -6,7 +6,6 @@ test-suite/R2: the engine reads the plans this repository tracks.
 yaml-eec/S26: the tree carries no converge skill; the engine's `plan check` reads a YAML plan.
 """
 
-import importlib.util
 import pytest
 from pathlib import Path
 import re
@@ -56,7 +55,7 @@ def ticket_table(text):
 SHARED_CONTRACTS = {
     "cold-read": ("Claude:", "Codex:"),
     "orchestrate": ("<engine> launch <plan>", "plan approve"),
-    "start-planning": ("scripts/fresh_context.py", "references/delegation.md"),
+    "start-planning": ("`spawn`", "references/gather-packet.md"),
 }
 
 
@@ -110,19 +109,6 @@ class SharedSkills(unittest.TestCase):
             text = (SKILLS / name / "SKILL.md").read_text(encoding="utf-8")
             for needle in needles:
                 self.assertIn(needle, text, "%s: %s" % (name, needle))
-
-
-class NoHarnessInstructions(unittest.TestCase):
-    """A skill body states the workflow; the harness's own discovery states the invocation."""
-
-    @pytest.mark.unit
-    def test_the_harness_detail_lives_in_a_reference(self):
-        """The per-harness dispatch is loaded on demand, not with the skill."""
-        reference = SKILLS / "start-planning" / "references" / "delegation.md"
-        self.assertTrue(reference.is_file())
-        text = reference.read_text(encoding="utf-8")
-        for harness in ("Claude Code", "Codex", "Pi"):
-            self.assertIn(harness, text)
 
 
 class PlanContract(unittest.TestCase):
@@ -197,13 +183,6 @@ class MarkerMeaning(unittest.TestCase):
         """The partition markers a test function carries."""
         return {mark.name for mark in getattr(function, "pytestmark", [])} & {"unit", "integration"}
 
-    @staticmethod
-    def load(path):
-        spec = importlib.util.spec_from_file_location("s31_" + path.stem, path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
-
     @pytest.mark.unit
     def test_the_marker_text_and_the_suite_agree(self):
         """test-suite/R12: `unit` is in-process, inside the test's own temporary directory; `integration`
@@ -216,12 +195,7 @@ class MarkerMeaning(unittest.TestCase):
         self.assertIn("real component boundary", markers["integration"])
         self.assertIn("A temporary directory is not a boundary.", (ROOT / "AGENTS.md").read_text(encoding="utf-8"))
 
-        gatherer = self.load(SKILLS / "start-planning" / "tests" / "test_fresh_context.py").GathererTests
-        for name in unittest.TestLoader().getTestCaseNames(gatherer):
-            expected = {"integration"} if name.startswith("test_printed_answer") else {"unit"}
-            self.assertEqual(self.kinds(getattr(gatherer, name)), expected, name)
-
-        for case in (Discovery, SharedSkills, NoHarnessInstructions, PlanContract, EnginePlanContract, NoConverge):
+        for case in (Discovery, SharedSkills, PlanContract, EnginePlanContract, NoConverge):
             for name in unittest.TestLoader().getTestCaseNames(case):
                 expected = {"integration"} if name in GIT_READERS else {"unit"}
                 self.assertEqual(self.kinds(getattr(case, name)), expected, "%s.%s" % (case.__name__, name))

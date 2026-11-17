@@ -10,4 +10,4 @@ Fallback class→model table for a backend column absent from `--models-file`. T
 | medium | `minimax/MiniMax-M3.1-Flash` |
 | large | `minimax/MiniMax-M3.1-Flash` |
 
-Pi models launch as `pi --print --model <model>`. Codex/Claude columns remain canonical in `~/.claude/CLAUDE.md`.
+The driver passes the Pi column's model to each Pi worker. Codex/Claude columns remain canonical in `~/.claude/CLAUDE.md`.

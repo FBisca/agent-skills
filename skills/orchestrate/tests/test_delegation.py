@@ -78,14 +78,12 @@ class DelegationTests(unittest.TestCase):
 
     @pytest.mark.integration
     def test_S26_the_plan_commands_reach_the_member_unchanged(self):
-        """yaml-eec/S26: `plan check`, `plan approve`, `plans list`, `verify`, `accept` and `status` are
+        """yaml-eec/S26: `plan check`, `plan approve`, `plans list` and `status` are
         handed to the member as they were given, and the tree carries no converge skill."""
         commands = (
             ["plan", "check", "docs/plans/x.plan.yaml", "--repo", "."],
             ["plan", "approve", "docs/plans/x.plan.yaml", "--base", "HEAD"],
             ["plans", "list", "--json"],
-            ["verify", "docs/plans/x.plan.yaml"],
-            ["accept", "docs/plans/x.plan.yaml", "S3", "--note", "checked by hand"],
             ["status", "docs/plans/x.plan.yaml", "--json"],
         )
         with tempfile.TemporaryDirectory() as tmp:

@@ -28,7 +28,7 @@ Ask: "What's the public interface, and which seams should we test?" Give each pr
 Each seam sits at a level; pick the lowest that reliably shows the behaviour:
 
 - **Unit**: local decisions, in process. In an orchestrator: scheduling and retry policies, state transitions, plan and config parsing, routing precedence, refusal rules, classifying results.
-- **Integration**: real boundaries, with fakes behind them. In an orchestrator: driver-to-worker execution, persistence, subprocess and signal handling, IPC, evidence run against a real tree.
+- **Integration**: real boundaries, with fakes behind them. In an orchestrator: driver-to-worker execution, persistence, subprocess and signal handling, IPC, the full suite run against a real tree.
 - **End to end**: a few representative journeys that prove the whole system completes, such as one approved plan driven to an archived result.
 
 A higher level proves its boundary and leaves the cases to the level below: ten validation cases are one parametrised unit test plus one integration test showing a refusal crosses the boundary. Overlap across levels earns its place only when each level proves a different real boundary.
@@ -43,7 +43,7 @@ Before you write a test, answer each of these in one line:
 4. Is this the cheapest reliable level?
 5. Would it fail on a regression someone could plausibly ship?
 
-Admit the test only when all five hold; otherwise extend an existing test, or write none. When you report, name for each new test the behaviour it protects and why its level is the cheapest.
+Admit the test only when all five hold; otherwise extend an existing test, or write none. When you report, name for each new test the behaviour it protects and why its level is the cheapest, and keep its red: the failing output from before the fix, naming the test and its assertion failure (a plan ticket's report carries it under `red`).
 
 Before admitting a borderline test, writing one that needs expensive setup or a wait, or deleting, merging or moving any test, read [rules.md](rules.md): the admission and cost rules, each with its nuance.
 
