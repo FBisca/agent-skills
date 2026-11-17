@@ -47,7 +47,7 @@ A higher level proves its boundary and leaves the cases to the level below: ten 
 
 Before you write a test, answer each of these in one line:
 
-1. Which observable behaviour or credible failure mode does it protect, tied to a requirement or a real risk?
+1. Which observable behaviour or credible failure mode does it protect, tied to a requirement or a real risk? It asserts the behaviour, never a timing, size or count threshold unless that number is the requirement.
 2. Is it already covered: the same guarantee at the same boundary? Search the existing tests by the function, the error text and the requirement's title tag.
 3. Can an existing test be extended or parametrised instead?
 4. Is this the cheapest reliable level?
