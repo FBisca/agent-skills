@@ -12,7 +12,7 @@ Agent skills for [Claude Code](https://claude.com/claude-code), [Codex](https://
 flowchart LR
     A["idea-frame<br/>grill the idea, map<br/>the open questions"] -->|idea_check gate 1| B["idea-answer<br/>route each question,<br/>write the Brief"]
     B -->|cold-read + gate 2| C["to-spec<br/>PRD"]
-    C --> D["start-planning<br/>scenarios + vertical<br/>tickets, stop for approval"]
+    C --> D["start-planning<br/>requirement changes + vertical<br/>tickets, stop for approval"]
     D --> E["orchestrate<br/>implementer agents<br/>build ticket by ticket"]
     E -->|ticket gates| F{"scope, covers, red,<br/>review, CI<br/>all pass?"}
     F -->|no| E

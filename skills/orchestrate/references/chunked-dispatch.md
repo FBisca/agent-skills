@@ -62,6 +62,6 @@ For each chunk:
 
 ## 4. Final gate
 
-Run the full formatter, linter and suite, check the diff stays in the ticket's Paths and that each scenario the ticket satisfies has its S-ID test in the diff (the unit's report maps it in `covers`), then push (never forced). The large review and CI follow. Their findings are a fix round for the same unit.
+Run the full formatter, linter and suite, check the diff stays in the ticket's Paths and that each scenario the ticket satisfies has a covering test in the diff, tagged with its requirement's title (the unit's report maps it in `covers`), then push (never forced). The large review and CI follow. Their findings are a fix round for the same unit.
 
 Done when the gate passes and every chunk is COMPLETE.

@@ -12,7 +12,7 @@ Each rule carries the nuance that keeps it from being applied as a blunt count. 
   _Nuance:_ different input data alone adds nothing; each case must be able to fail on its own.
 - **An observed failure earns a regression test,** even when it resembles an existing one: it pins a path that already broke.
 - **Tests follow the contract.** When a contract changes, update or delete the tests of the old one in the same change.
-  _Nuance:_ update any spec or plan that cites a test by name, and name the test that keeps a deleted duplicate's guarantee.
+  _Nuance:_ a deleted duplicate's requirement tag moves to the test that keeps its guarantee; name that test.
 - **Fault detection is the measure**, not test count or coverage percentage.
   _Nuance:_ required safety, security and contract coverage stays even when slow. Make it cheaper with the cost rules; deleting, weakening or reclassifying a useful test only to speed up the run is not an improvement.
 - **Proportionality.** A one-line fix adds or extends one case.
