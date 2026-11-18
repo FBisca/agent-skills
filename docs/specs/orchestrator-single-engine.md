@@ -10,29 +10,15 @@ hands it the command.
 This file states what this repository guarantees about that seam. What the engine itself guarantees is
 `agent-runtime`'s `docs/specs/orchestrator-engine.md`; the scenarios below are this repository's own.
 
-## Requirements
-
-- **R1** WHEN the orchestrate skill runs, THEN it drives the member, and the skill's tree carries no copy of
-  the engine. (from orchestrator-single-engine/S1)
-- **R2** WHEN the member is not installed, THEN the skill refuses with an actionable message naming the install
-  command and the `AGENT_RUNTIME_HOME` escape hatch, and it never falls back to a second engine. (from
-  orchestrator-single-engine/S2)
-- **R3** WHEN the skill's suite runs, THEN it holds the skill's own behaviour, and the engine's internals are
-  tested where the engine lives. (from orchestrator-single-engine/S3)
-- **R4** WHEN the delegation is exercised, THEN the member's CLI answers with the same commands, exit codes and
-  ledger as the copy it replaces. (from orchestrator-single-engine/S4)
-- **R5** WHEN the skill's documents are read, THEN the seam, the resolution order and the way out are named, and
-  `AGENT_RUNTIME_HOME` keeps its documented meaning. (from orchestrator-single-engine/S5)
-
 ## Coverage
 
 | Scenario | Requirement | Test |
 |---|---|---|
-| S1 | R1 | `skills/orchestrate/tests/test_engine_home.py`: `test_S1_the_skill_tree_carries_no_copy_of_the_engine` |
-| S2 | R2 | `skills/orchestrate/tests/test_delegation.py`: `test_S2_without_a_member_the_skill_refuses_and_names_the_way_out` |
-| S3 | R3 | `skills/orchestrate/tests/test_engine_home.py`: `test_S3_the_engine_internals_are_tested_where_the_engine_lives` |
-| S4 | R4 | `skills/orchestrate/tests/test_delegation.py`: `test_S4_the_member_answers_with_the_same_commands_and_exit_codes` |
-| S5 | R5 | `skills/orchestrate/tests/test_delegation.py`: `test_S5_the_documents_name_the_seam_the_order_and_the_way_out` |
+| S1 | The skill drives the member | `skills/orchestrate/tests/test_engine_home.py`: `test_S1_the_skill_tree_carries_no_copy_of_the_engine` |
+| S2 | A missing member refuses with the way out | `skills/orchestrate/tests/test_delegation.py`: `test_S2_without_a_member_the_skill_refuses_and_names_the_way_out` |
+| S3 | Engine internals are tested where the engine lives | `skills/orchestrate/tests/test_engine_home.py`: `test_S3_the_engine_internals_are_tested_where_the_engine_lives` |
+| S4 | The member answers like the copy it replaced | `skills/orchestrate/tests/test_delegation.py`: `test_S4_the_member_answers_with_the_same_commands_and_exit_codes` |
+| S5 | The documents name the seam | `skills/orchestrate/tests/test_delegation.py`: `test_S5_the_documents_name_the_seam_the_order_and_the_way_out` |
 
 ## The seam
 
@@ -53,3 +39,40 @@ checkout the user named is never shadowed by an older install.
 implemented scenarios are archived in `agent-runtime`'s `docs/specs/orchestrator-engine.md`, next to the tests
 that answer them. The tickets they still hold open are the engine's backlog, and they belong to the member's
 repository.
+
+## Requirements
+
+### Requirement: The skill drives the member
+The orchestrate skill SHALL drive the member, and its tree SHALL carry no copy of the engine.
+
+#### Scenario: the orchestrate skill runs
+- WHEN the orchestrate skill runs
+- THEN it drives the member, and the skill's tree carries no copy of the engine
+
+### Requirement: A missing member refuses with the way out
+When the member is not installed, the skill SHALL refuse with an actionable message naming the install command and the `AGENT_RUNTIME_HOME` escape hatch, and SHALL never fall back to a second engine.
+
+#### Scenario: the member is not installed
+- WHEN the member is not installed
+- THEN the skill refuses with an actionable message naming the install command and the `AGENT_RUNTIME_HOME` escape hatch, and it never falls back to a second engine
+
+### Requirement: Engine internals are tested where the engine lives
+The skill's suite SHALL hold the skill's own behaviour, and the engine's internals SHALL be tested where the engine lives.
+
+#### Scenario: the skill's suite runs
+- WHEN the skill's suite runs
+- THEN it holds the skill's own behaviour, and the engine's internals are tested where the engine lives
+
+### Requirement: The member answers like the copy it replaced
+The member's CLI SHALL answer the delegation with the same commands, exit codes and ledger as the copy it replaces.
+
+#### Scenario: the delegation is exercised
+- WHEN the delegation is exercised
+- THEN the member's CLI answers with the same commands, exit codes and ledger as the copy it replaces
+
+### Requirement: The documents name the seam
+The skill's documents SHALL name the seam, the resolution order and the way out, and `AGENT_RUNTIME_HOME` SHALL keep its documented meaning.
+
+#### Scenario: the skill's documents are read
+- WHEN the skill's documents are read
+- THEN the seam, the resolution order and the way out are named, and `AGENT_RUNTIME_HOME` keeps its documented meaning

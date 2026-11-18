@@ -2,7 +2,7 @@
 
 S3: the shared skills keep the Claude Code and Codex behaviour they had.
 S4: the test suite runs offline and enforces the Markdown plan contract.
-test-suite/R2: the engine reads the plans this repository tracks.
+test-suite "Plan ticket table contract": the engine reads the plans this repository tracks.
 yaml-eec/S26: the tree carries no converge skill; the engine's `plan check` reads a YAML plan.
 """
 
@@ -17,7 +17,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 SKILLS = ROOT / "skills"
 
-# These read the plans through `git ls-files`: a subprocess, so an integration boundary (test-suite/R12).
+# These read the plans through `git ls-files`: a subprocess, so an integration boundary (test-suite "Unit and integration markers").
 GIT_READERS = {
     "test_S4_every_tracked_plan_keeps_the_plan_contract",
     "test_the_engine_reads_every_tracked_plan",
@@ -134,11 +134,11 @@ class PlanContract(unittest.TestCase):
 
 
 class EnginePlanContract(unittest.TestCase):
-    """test-suite/R2: the engine reads the plans this repository tracks."""
+    """test-suite "Plan ticket table contract": the engine reads the plans this repository tracks."""
 
     @pytest.mark.integration
     def test_the_engine_reads_every_tracked_plan(self):
-        """test-suite/R2: the engine's contract, asserted by name, holds for every plan it reads."""
+        """test-suite "Plan ticket table contract": the engine's contract, asserted by name, holds for every plan it reads."""
         for plan in tracked_plans():
             text = plan.read_text(encoding="utf-8")
             columns, rows = ticket_table(text)
@@ -176,7 +176,7 @@ class NoConverge(unittest.TestCase):
 
 
 class MarkerMeaning(unittest.TestCase):
-    """test-suite/R12: the marker text and the suite agree on what `unit` and `integration` mean."""
+    """test-suite "Unit and integration markers": the marker text and the suite agree on what `unit` and `integration` mean."""
 
     @staticmethod
     def kinds(function):
@@ -185,7 +185,7 @@ class MarkerMeaning(unittest.TestCase):
 
     @pytest.mark.unit
     def test_the_marker_text_and_the_suite_agree(self):
-        """test-suite/R12: `unit` is in-process, inside the test's own temporary directory; `integration`
+        """test-suite "Unit and integration markers": `unit` is in-process, inside the test's own temporary directory; `integration`
         is a real boundary; the tests that guard pure logic carry `unit`."""
         config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         markers = {text.split(":", 1)[0]: text for text in config["tool"]["pytest"]["ini_options"]["markers"]}
