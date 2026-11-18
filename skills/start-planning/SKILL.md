@@ -7,112 +7,101 @@ description: Plan one feature spec-driven, from its sources to the requirement c
 
 **You own the contract, not the code.** Gather, decide, write the plan, check it, stop for approval.
 
-**Input:** a feature, idea or task, plus whatever describes it: a PRD, issues, documentation, the spec, or only the request.
-**Output:** one plan folder, `<plans.dir>/YYYY-MM-DD-<slug>/`, dated the day it is written:
+**Input:** a feature, idea or task, and whatever describes it: a PRD, issues, docs, the spec, or only the request.
+**Output:** `<plans.dir>/YYYY-MM-DD-<slug>/`, dated the day it is written:
 
-- `plan.yaml`, the **contract** (`plan/2`): the requirements the plan adds to, modifies in or removes from its spec, each with its scenarios, and the tickets. `plan approve` digests it.
-- `brief.md`, the **brief**: the human-readable design doc the user reviews and comments on in place. Its shape is in [references/brief.md](references/brief.md). The requirements and tickets live in `plan.yaml` only. Not digested.
+- `plan.yaml`, the **contract** (`plan/2`, from [the skeleton](references/plan-yaml.md)): the requirement changes with their scenarios, and the tickets. `plan check` is its authority; `plan approve` digests it.
+- `brief.md`, the **brief** (from [the template](references/brief.md)): the design doc the user reads and comments on. It cites the contract's IDs, never copies its text, and is not digested.
 
-The **spec** (`spec`, one capability per file) states what the system does today; the archive applies the plan's changes to it.
+The **spec** (one capability per file) is what the system does today; the archive applies the plan's changes to it. **The implementation brings the evidence:** the ticket that satisfies a scenario writes its tests, tagged with the requirement's title, and maps them in its report's `covers`. The plan holds no tests.
 
-**An implementation provides its evidence.** The ticket that satisfies a scenario writes the tests that prove it, each tagged with its requirement's title, and maps the scenario to them in its report's `covers`. The plan holds no tests.
+`<engine>` is `python3 <skill-dir>/../orchestrate/scripts/orchestrate.py`. `<deps> <name>` is `python3 <skill-dir>/scripts/check_deps.py <name>`: it prints `FOUND <name>: <path>`, or exits non-zero naming the install command.
 
-`<engine>` is `python3 <skill-dir>/../orchestrate/scripts/orchestrate.py`. Its `plan check` is the authority on the contract; [references/plan-yaml.md](references/plan-yaml.md) is the skeleton to write from.
+A **fresh agent** is agent-runtime's `spawn` (`kind: worker`, `cli` this session's harness, the class as `model`, the task), then `wait`; its report is the answer. A spawn failure, a timeout or a missing report fails it; `collect` diagnoses a missing report and never stands in for one.
 
-## Delegation
+## 0. Lane
 
-The gather (step 2) runs in a fresh agent: agent-runtime's `spawn` (`kind: worker`, `cli` this session's harness, the medium class as `model`) with the packet as its `task`, then `wait`; its report is the answer. The agent works with no inherited context (its packet alone), under the `wait`'s timeout, read-only, answers with the structured JSON its packet names, and fails loudly: a spawn failure, a timeout, a missing report or a malformed answer fails the step. `collect` diagnoses a missing report; it never stands in for one.
-
-`grilling` (step 3) is an upstream skill (`skills.lock.json`), installed separately. Before the grill run `python3 <skill-dir>/scripts/check_deps.py grilling`: it prints `FOUND grilling: <path>`, or exits non-zero naming the install command (`scripts/install-upstream.sh grilling`). When it is missing, stop and name that command; the grill runs through the skill or not at all.
-
-The unslop review (step 7) runs the same way, with the small class as `model` and [the unslop packet](references/unslop-packet.md) as its `task`. It is read-only and fails loudly; step 7 skips it on failure.
-
-## 0. Pick the lane
-
-Pick the lane from [routing](../orchestrate/references/routing.md#lane); Direct builds it directly in this session and stops here.
+Pick the lane from [routing](../orchestrate/references/routing.md#lane). Direct builds it in this session and stops here.
 
 Done when the user has seen the lane and its reason.
 
-## 1. Read the repo config
+## 1. Config
 
-`<engine> plans list --json` reads `.orchestrate/config.yaml`'s `plans.dir` (default `docs/plans`) and `archive.mode` (default `promote`; `discard` is for a repository with no living spec) and lists the plans already there. Create `plans.dir` on the first write.
+`<engine> plans list --json` gives `plans.dir` (default `docs/plans`), `archive.mode` (default `promote`; `discard` when the repo keeps no living spec) and the plans already there. Create `plans.dir` on the first write.
 
 Done when the plans dir and the archive mode are known.
 
 ## 2. Gather
 
-Plan from the request and whatever sources exist; a PRD is not a gate. A product decision no source settles (who it is for, whether to build it) → suggest `/to-spec`, and keep planning unless the user chooses to write one.
+A PRD is not a gate. A product call no source settles (who it is for, whether to build it) → suggest `/to-spec`, and keep planning unless the user writes one.
 
-Dispatch the gatherer (see Delegation) with [the gather packet](references/gather-packet.md). It returns every source with its link, each decision the sources settle with its source, the code the feature touches with its seams (the CLI, HTTP, tool and public entry points, and the test fixtures a test drives it from), and, when a decision depends on real data, read-only counts and edge cases.
+Spawn a fresh agent (medium class) with [the gather packet](references/gather-packet.md) as its task. It returns the sources with their links, the decisions they settle, the code the feature touches with its seams (CLI, HTTP, tool and public entry points; the test fixtures that drive them), and read-only counts and edge cases when a decision depends on real data.
 
-Its answer is the only evidence: fill no gap from your recollection of the conversation. When the gather fails, stop: never continue into the plan on evidence it did not produce.
+Its answer is the only evidence: fill no gap from your memory of the conversation. When the gather fails, stop.
 
 Done when the gatherer has returned its sources, its settled decisions and the seams.
 
 ## 3. Decide
 
-Create `brief.md` with the first decision and write each into its `## Decisions` as it settles, one line: `D<n> <choice>, over <rejected>: <why> (<source>)`. Decisions the gather settled enter unasked, with their source.
+At the first decision, create `brief.md` from the template; add each decision to its Decisions as a D-line as it settles. Decisions the gather settled enter unasked, with their source.
 
-- A fork a run can settle (prototype, query) → run it and record the D-line with its evidence.
-- A product or preference call → the `grilling` skill, with the gather's counts and edge cases in the questions.
+- A fork a run can settle (prototype, query) → run it; the D-line cites the result.
+- A product or preference call → the `grilling` skill, with the gather's counts and edge cases in the questions. Run `<deps> grilling` first; when it is missing, stop and name its install command: the grill runs through the skill or not at all.
 
-Run `python3 <skill-dir>/scripts/check_deps.py i-have-adhd`. When FOUND, read its `SKILL.md` and apply its rules to every grill round and to the step 8 reply. Its list cap means at most 5 questions per round, and the rest of the frontier waits for the next round. When missing, go on without it.
+When `<deps> i-have-adhd` finds it, read its `SKILL.md` and apply it to every grill round (at most 5 questions; the rest of the frontier waits) and to the step 8 reply.
 
-Done when no decision is open and every decision has its D-line naming what it rejected and its source.
+Done when no decision is open and every D-line names what it rejected and its source.
 
 ## 4. Write the requirement changes
 
-Read the spec first: a requirement's exact title decides whether the plan adds or modifies it. In `plan.yaml`, from [the skeleton](references/plan-yaml.md): `goal` in one sentence, `spec` the capability's file, then `requirements`:
+Read the spec first: a requirement's exact title decides added or modified. Fill `goal` (one sentence), `spec`, then `requirements`:
 
-- **`added`**: a behaviour the spec lacks, under a title the spec does not hold.
-- **`modified`**: a requirement the spec holds, by its exact title, restated whole: the archive replaces it.
-- **`removed`**: a requirement the spec holds, by its exact title, with `why`.
+- **`added`**: a behaviour the spec lacks, under a title it does not hold.
+- **`modified`**: a title the spec holds, restated whole; the archive replaces it.
+- **`removed`**: a title the spec holds, with `why`.
 
-An added or modified requirement is one `shall` sentence with SHALL and 1–3 scenarios. A scenario is one observable behaviour a test would catch if it broke: `id` (`S<n>`, plan-local), `when`, `then`, and an optional `name` for its spec heading. Write `then` as what that test asserts, at a seam the gather named or an interface a decision fixes: an observable behaviour. A scenario holds one behaviour: one WHEN, one THEN; a `when` or `then` that joins two behaviours (an "and", an "until", a second clause) is two scenarios, because a compound scenario gets half-tested. A threshold, limit or timeout cites a measurement in the brief, or the ticket's first job is to measure it and the scenario says so, because guessed numbers get disproved by the code and force plan amendments; a number that is itself the product requirement (`daily at 09:00`) needs neither. A behaviour you can't phrase as a WHEN/THEN is an open decision: take it back to step 3.
+An added or modified requirement is one SHALL sentence and 1–3 scenarios. Scenarios are what gets built and tested; write each with care:
 
-Done when every behaviour the plan changes sits under a requirement and each `then` names an outcome a test can observe.
+- **One behaviour.** One WHEN, one THEN. An "and", an "until" or a second clause is two scenarios: a compound one gets half-tested.
+- **Observable.** `then` is what a test asserts, at a seam the gather named or an interface a decision fixes.
+- **Measured numbers.** A threshold, limit or timeout cites a measurement in the brief, or the ticket's first job measures it and the scenario says so: guessed numbers get disproved by the code. A number that is the requirement itself (`daily at 09:00`) needs neither.
+- **No WHEN/THEN, no scenario.** A behaviour you cannot phrase that way is an open decision: back to step 3.
+
+Done when every behaviour the plan changes sits under a requirement and every `then` names an outcome a test can observe.
 
 ## 5. Slice into tickets
 
-Each ticket is a **tracer bullet**: one narrow path through every layer it needs, landing as one PR under ~800 hand-written lines. It writes the tests that prove the scenarios it satisfies.
+Each ticket is a **tracer bullet**: one narrow path through every layer it needs, one PR under ~800 hand-written lines, writing the tests for the scenarios it satisfies.
 
-- **`satisfies`**: the scenario IDs the ticket makes true. Every scenario sits in some ticket's `satisfies`.
-- **`blocked_by`**: the tickets that must merge first. A blocked ticket branches from main after they merge; stacked branches break under squash merge.
-- **`paths`**: the literal repo-relative files and directories (ending `/`) the ticket starts from; no globs. They are a starting map and the conflict map between tickets, so the worker edits any file the change needs and the gate refuses only one another unfinished ticket lists. An agent ticket's `paths` hold its tests' file or directory, and a ticket that breaks another ticket's test lists that test too.
-- **`size`** (`small | regular`) and **`difficulty`** (`simple | complex`): by orchestrate's [routing](../orchestrate/references/routing.md); they pick the worker. Work past `regular` is two tickets.
-- **`owner`**: `agent` for code. Each step a person runs or approves (prod data apply, sign-off, deploy, work in another repository) is its own ticket with that person as owner, no `size` or `difficulty`, and `repo` when it is elsewhere.
-- **`risk`**: a ticket touching [sensitive](../orchestrate/references/routing.md#difficulty) code gets its tag (`security`, `concurrency`, `retry-idempotency`, `migration`, `external` or `state`) and a scenario that pins it.
+- **`satisfies`**: the scenario IDs it makes true. Every scenario sits in some ticket.
+- **`blocked_by`**: the tickets that merge first. A blocked ticket branches from main after they merge; stacked branches break under squash merge.
+- **`paths`**: literal repo-relative files and directories (ending `/`), no globs. They are the starting map and the conflict map: the worker edits any file the change needs, and the gate refuses only a file another unfinished ticket lists. An agent ticket lists its tests' location; a ticket that breaks another ticket's test lists that test.
+- **`size`** (`small | regular`) and **`difficulty`** (`simple | complex`): by [routing](../orchestrate/references/routing.md); they pick the worker. Work past `regular` is two tickets.
+- **`owner`**: `agent` for code. A step a person runs or approves (prod data apply, sign-off, deploy, work in another repository) is its own ticket with that person as owner, no `size` or `difficulty`, and `repo` when it is elsewhere.
+- **`risk`**: a ticket touching [sensitive](../orchestrate/references/routing.md#difficulty) code gets its tag (`security`, `concurrency`, `retry-idempotency`, `migration`, `external`, `state`) and a scenario that pins it.
 
-A wide mechanical refactor runs as expand–contract: expand, one ticket per migrate batch, then contract. In a repository tracked in Linear, create one sub-issue per ticket under the feature issue; the plan stays the source of truth.
+A wide mechanical refactor runs expand–contract: expand, one ticket per migrate batch, contract. In a repository tracked in Linear, one sub-issue per ticket under the feature issue; the plan stays the source of truth.
 
-Done when every scenario appears in some ticket's `satisfies` and every agent ticket's `paths` hold a test location.
+Done when every scenario is in some `satisfies` and every agent ticket's `paths` hold a test location.
 
 ## 6. Check
 
-Run `<engine> plan check <plan.yaml>` and fix every line it prints until it exits 0.
+Run `<engine> plan check <plan.yaml>` and fix every line it prints.
 
-Done when `plan check` exits 0 on the final contract.
+Done when it exits 0.
 
 ## 7. Write the brief
 
-Finish `brief.md` per [references/brief.md](references/brief.md): every section and the header. Its Decisions were written at step 3.
+Fill every section of `brief.md`. Its readers are the user, who approves, and the worker, who builds. A decision that must be enforced becomes a scenario or a rule in the repository's rulebook, and review checks only those; any other decision is guidance. Keep implementation instructions ("inject it as a callable") out, or review polices coding choices instead of behaviour.
 
-Then run `python3 <skill-dir>/scripts/check_deps.py unslop`.
+When `<deps> unslop` finds it, spawn a fresh agent (small class) with the task: "Use the unslop skill at `<path>`: run cleanup in report mode, crisp preset, on `<plan-dir>/brief.md`. Edit nothing. Report each finding as section, span and suggestion." Apply the suggestions that keep the meaning and every ID, path and source.
 
-- **FOUND:** dispatch the unslop review with `<unslop-dir>` set to the folder of the printed `SKILL.md`. Apply each confirmed finding; reject any that touches an ID, a path, a source, a D-line's format, or changes meaning.
-- **Missing, or the review fails:** skip it.
-
-Either way, the reply carries one line: `unslop: <n> found, <m> applied`, or `unslop: skipped (<why>)`.
-
-The brief has two readers: the user, who approves the plan, and the worker, who builds it. A decision that must be enforced becomes a scenario (testable behaviour) or a rule in the repository's rulebook; any other decision is guidance for the worker, and review does not check it. The reviewer judges code against the scenarios and the rulebook only, so an implementation instruction in the brief ("inject it as a callable") would make it police coding choices instead of behaviour.
-
-Done when every heading of [references/brief.md](references/brief.md) is present, every scenario ID and ticket ID in `plan.yaml` is cited in What Changes, and the unslop line is known.
+Done when every section is filled, every scenario and ticket ID appears in What Changes, and the unslop line is known: `unslop: <n> found, <m> applied` or `unslop: skipped (<why>)`.
 
 ## 8. Approve
 
-Reply, then stop for one approval; build nothing yet. On a mark in brief.md, run the review round from [references/brief.md](references/brief.md) on it, reply again, and stop again. On the user's yes, run the round's grep: if it prints a mark, handle each one and reply again; approve only once it prints nothing. Then run `<engine> plan approve <plan.yaml>`: it records the approval and digests `plan.yaml`. When it refuses, fix what it names. A fix or any later edit that changes the contract needs the user's yes and a new `plan approve <plan.yaml> --reason "<why>"`.
+Reply, then stop; build nothing yet. The reply opens with "Comment in brief.md, or say yes to approve (`plan approve <plan.yaml>`)." Then: the lane and its cell, the plan path, the decisions, the requirement changes by title (added, modified, removed), the tickets with size and difficulty, what stays open, and the unslop line.
 
-Then hand off to `/orchestrate <plan.yaml>`.
+Resolve the user's marks per [the brief's review](references/brief.md#review), reply again and stop again. On the user's yes, with the review's grep empty, run `<engine> plan approve <plan.yaml>` and fix whatever it refuses. A later contract change needs the user's yes and `plan approve <plan.yaml> --reason "<why>"`. Then hand off to `/orchestrate <plan.yaml>`.
 
-**Reply:** the first line is the action: "Comment in brief.md, or say yes to approve (`plan approve <plan.yaml>`)." Then the lane and its cell, the plan path, the decisions, the requirement changes (added, modified, removed, by title), the tickets with size and difficulty, and what stays open.
-Done when the grep prints nothing on brief.md and `plan approve` exits 0.
+Done when the review's grep prints nothing and `plan approve` exits 0.

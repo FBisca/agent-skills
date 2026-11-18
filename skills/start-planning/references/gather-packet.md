@@ -1,6 +1,6 @@
 # Gather packet
 
-The task packet for the fresh-context gatherer. Copy everything below the line, fill the placeholders, and dispatch it as the `task` of an agent-runtime `spawn` (see the skill's Delegation). The answer is the JSON object in the gatherer's report; a missing report, a missing key or anything other than that object fails the gather, and the plan stops.
+The task packet for the fresh-context gatherer. Copy everything below the line, fill the placeholders, and dispatch it as the `task` of an agent-runtime `spawn` (see the skill's fresh agent). The answer is the JSON object in the gatherer's report; a missing report, a missing key or anything other than that object fails the gather, and the plan stops.
 
 ---
 
