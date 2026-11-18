@@ -10,8 +10,10 @@ Slug: `<slug>`. Contract: `plan.yaml`. Lane: Plan, <cell>: <why>.
 <!-- 1–2 sentences: the problem, and why now. -->
 
 ## What Changes
-<!-- One line per behaviour, written as a commit subject: `<path or area>`: before → after (S<n>, T<n>).
-     **BREAKING** when a caller breaks. Every scenario and ticket in plan.yaml appears. -->
+<!-- Grouped under ### headings by who notices the change: each user role, the model, the system's rules, rollout.
+     One line per behaviour, plain words first: **New:**, **Changed:** or **Removed:**, what that reader now sees,
+     then (S<n>, S<n> · T<n> · <path or area>). **BREAKING** when a caller breaks.
+     Every scenario and ticket in plan.yaml appears, each ID written out, never a range. -->
 
 ## Capabilities
 <!-- The plan's `spec` file: new or modified. -->
@@ -21,6 +23,10 @@ Slug: `<slug>`. Contract: `plan.yaml`. Lane: Plan, <cell>: <why>.
 
 ## Context
 <!-- What the reader needs to judge the rest. -->
+
+## Example
+<!-- One request traced start to finish through the change, on synthetic data, each step citing its S<n>.
+     Then one line per variant: each refusal and edge case, with its S<n>. -->
 
 ## Goals / Non-Goals
 <!-- What this delivers; what it deliberately leaves out. -->
