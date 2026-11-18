@@ -128,6 +128,8 @@ scripts/install-upstream.sh            # or: scripts/install-upstream.sh --dry-r
 |---|---|
 | [mattpocock/skills](https://github.com/mattpocock/skills) (MIT) | `diagnosing-bugs`, `domain-modeling`, `grilling`, `prototype`, `retro`, `setup-matt-pocock-skills`, `to-spec`, `writing-for-agents` |
 | [heygen-com/hyperframes](https://github.com/heygen-com/hyperframes) (Apache-2.0) | `hyperframes`, `hyperframes-cli`, `hyperframes-registry`, `media-use` |
+| [theclaymethod/unslop](https://github.com/theclaymethod/unslop) (MIT) | `unslop` |
+| [ayghri/i-have-adhd](https://github.com/ayghri/i-have-adhd) (MIT) | `i-have-adhd` |
 
 ## Tests
 
