@@ -40,7 +40,7 @@ Own = written for this repo. Derivative = modified from an upstream, with attrib
 | [`score-steering`](skills/score-steering) | Scores how the human steered a coding session, advisory only, against the one rubric it ships | Own |
 | [`excalidraw`](skills/excalidraw) | Hand-drawn Excalidraw diagrams written as a Python spec, linted and checked by rendering | Own |
 | [`explain-video`](skills/explain-video) | Narrated tutorial videos built as HyperFrames films with a local voice | Own |
-| [`assemble-crew`](skills/assemble-crew) | Proposes a crew for a task, including an adversary who tries to break the result | Own |
+| [`assemble-crew`](skills/assemble-crew) | Designs the graph of specialists for a problem: nodes, edges, shared state and a verifier that can send work back | Own |
 | [`deep-prompt`](skills/deep-prompt) | Deepens a task prompt with what a top professional would add before rewriting it | Own |
 | [`gh-pr-create`](skills/gh-pr-create) | Opens pull requests safely with `gh` | Own |
 | [`git-commit`](skills/git-commit) | Conventional Commits with project conventions | Own |
