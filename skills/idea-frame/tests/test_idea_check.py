@@ -83,7 +83,7 @@ class IdeaCheckTests(unittest.TestCase):
         self.write("Brief.md", BRIEF)
 
     def test_the_fixture_registers_removal_of_its_temporary_directory(self):
-        """test-suite/R18: The directory the fixture makes is removed when the test ends, not left behind."""
+        """test-suite "The idea gate suite loads the script once": The directory the fixture makes is removed when the test ends, not left behind."""
         owners = [getattr(fn, "__self__", None) for fn, _, _ in self._cleanups]
         self.assertTrue(any(isinstance(owner, tempfile.TemporaryDirectory) for owner in owners),
                         "setUp registers no cleanup for its temporary directory")
@@ -346,9 +346,9 @@ class IdeaCheckTests(unittest.TestCase):
         (self.dir / "answers.md").unlink()
         self.assertIn("PASS answers-sourced", self.run_check("--gate", "2")[1])
 
-    # --- test-suite/R11
+    # --- test-suite "Dates are injected"
     def test_the_date_the_gate_compares_against_is_injected(self):
-        """test-suite/R11: IDEA_CHECK_TODAY is the today the gate compares against, so crossing midnight changes nothing."""
+        """test-suite "Dates are injected": IDEA_CHECK_TODAY is the today the gate compares against, so crossing midnight changes nothing."""
         with patch.dict(os.environ, {"IDEA_CHECK_TODAY": "2026-10-20"}):
             self.assertIn("PASS answers-sourced", self.run_check("--gate", "2")[1])
         with patch.dict(os.environ, {"IDEA_CHECK_TODAY": "2026-10-19"}):
@@ -441,10 +441,10 @@ class IdeaCheckTests(unittest.TestCase):
 
 
 class GateScriptLoading(unittest.TestCase):
-    """test-suite/R18: the gate script is loaded once for the module, and each test cleans up what it made."""
+    """test-suite "The idea gate suite loads the script once": the gate script is loaded once for the module, and each test cleans up what it made."""
 
     def test_the_gate_script_is_loaded_once_for_the_module(self):
-        """test-suite/R18: Every call to the loader returns the one module object the suite already holds."""
+        """test-suite "The idea gate suite loads the script once": Every call to the loader returns the one module object the suite already holds."""
         first = load()
         second = load()
         self.assertIs(first, second)

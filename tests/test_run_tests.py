@@ -30,7 +30,7 @@ def load_runner():
 
 @pytest.mark.unit
 def test_the_runner_refuses_a_root_that_is_no_test_suite(tmp_path, capsys):
-    """test-suite/R17: A root that is not a directory, a directory with no test file, and `--help` each exit non-zero and name what they were given."""
+    """test-suite "The runner refuses an empty root": A root that is not a directory, a directory with no test file, and `--help` each exit non-zero and name what they were given."""
     runner = load_runner()
     missing = tmp_path / "no-such-root"
     (tmp_path / "notes").mkdir()
@@ -47,7 +47,7 @@ def test_the_runner_refuses_a_root_that_is_no_test_suite(tmp_path, capsys):
 
 @pytest.mark.integration
 def test_the_runner_names_the_file_that_hangs(tmp_path):
-    """test-suite/R6: A hanging file is named, fails the run, and does not outlive `TEST_TIMEOUT`."""
+    """test-suite "A hanging test file is named": A hanging file is named, fails the run, and does not outlive `TEST_TIMEOUT`."""
     suite = tmp_path / "tests"
     suite.mkdir()
     (suite / "test_fast.py").write_text("def test_fast():\n    assert True\n", encoding="utf-8")

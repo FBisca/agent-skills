@@ -4,11 +4,6 @@ Paths: skills/start-planning/, tests/, docs/, README.md
 
 What the shared skills do in each harness, and where a harness still lacks a tool the skill needs. This is the living spec of the portability work; the plan that started it is `docs/plans/2026-11-07-pi-skills-compatibility.plan.md`.
 
-- **R1** WHEN `start-planning` is invoked in Pi as `/skill:start-planning`, THEN it loads the same planning contract and writes a plan with the required headings, scenarios and ticket columns (from pi-skills-compatibility/S1).
-- **R2** WHEN a skill needs `grilling` or a fresh-context gatherer under Pi, THEN a supported Pi invocation runs, or the skill fails with a concrete missing-dependency message, and never skips the step (from pi-skills-compatibility/S2).
-- **R3** WHEN the same skill runs under Claude Code or Codex, THEN its commands, gates and validation behaviour are unchanged (from pi-skills-compatibility/S3).
-- **R4** WHEN the test suite runs offline, THEN skill discovery, the plan Markdown contract and the portability contracts are enforced (from pi-skills-compatibility/S4).
-
 ## How a harness reaches the skill
 
 Discovery is the same everywhere: a skill is a directory with a `SKILL.md` whose frontmatter carries `name` and `description`. Each harness invokes it its own way, so no skill body teaches the invocation — the skill states the workflow, the reference states the mechanism.
@@ -112,4 +107,34 @@ Step 3 also has to show the gather step running: the plan's Sources table and de
 
 ## Tests
 
-The portability contracts are enforced by `tests/test_portability.py` (the plan reader and the engine's plan contract, `test-suite/R1`, `test-suite/R2`, `test-suite/R12`), `tests/test_pi_discovery.py` (`test-suite/R16`) and `skills/start-planning/tests/test_portability.py` (`test-suite/R2`). Their living spec is `docs/specs/test-suite.md`.
+The portability contracts are enforced by `tests/test_portability.py` (the engine's plan contract: test-suite's "Plan ticket table contract" and "Unit and integration markers"), `tests/test_pi_discovery.py` ("Pi discovers every skill") and `skills/start-planning/tests/test_portability.py` ("Plan ticket table contract"). Their living spec is `docs/specs/test-suite.md`.
+
+## Requirements
+
+### Requirement: Pi runs the planning skill
+`start-planning`, invoked in Pi as `/skill:start-planning`, SHALL load the same planning contract and write a plan with the required headings, scenarios and ticket columns.
+
+#### Scenario: invoked in Pi
+- WHEN `start-planning` is invoked in Pi as `/skill:start-planning`
+- THEN it loads the same planning contract and writes a plan with the required headings, scenarios and ticket columns
+
+### Requirement: Pi dependencies fail loudly
+A skill that needs `grilling` or a fresh-context gatherer under Pi SHALL run a supported Pi invocation, or fail with a concrete missing-dependency message, and never skip the step.
+
+#### Scenario: a dependency under Pi
+- WHEN a skill needs `grilling` or a fresh-context gatherer under Pi
+- THEN a supported Pi invocation runs, or the skill fails with a concrete missing-dependency message, and never skips the step
+
+### Requirement: Claude Code and Codex unchanged
+A skill that runs under Claude Code or Codex SHALL keep its commands, gates and validation behaviour unchanged.
+
+#### Scenario: the same skill in Claude Code or Codex
+- WHEN the same skill runs under Claude Code or Codex
+- THEN its commands, gates and validation behaviour are unchanged
+
+### Requirement: Portability enforced offline
+The offline test suite SHALL enforce skill discovery, the plan Markdown contract and the portability contracts.
+
+#### Scenario: the suite runs offline
+- WHEN the test suite runs offline
+- THEN skill discovery, the plan Markdown contract and the portability contracts are enforced

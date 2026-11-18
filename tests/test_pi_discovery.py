@@ -82,7 +82,7 @@ class PiDiscoveryTests(unittest.TestCase):
         cls.tmp.cleanup()
 
     def test_pi_discovers_every_skill_of_this_repo(self):
-        """test-suite/R16: Pi discovers every skill of this repository and reports no problem with any of them.
+        """test-suite "Pi discovers every skill": Pi discovers every skill of this repository and reports no problem with any of them.
 
         One test over every skill: a skill Pi cannot parse disappears from the list without a
         word, so the whole set is checked at once, and the description Pi routes on is the one
