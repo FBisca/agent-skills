@@ -94,7 +94,7 @@ Done when it exits 0.
 
 Fill every section of `brief.md`. Its readers are the user, who approves, and the worker, who builds. A decision that must be enforced becomes a scenario or a rule in the repository's rulebook, and review checks only those; any other decision is guidance. Keep implementation instructions ("inject it as a callable") out, or review polices coding choices instead of behaviour.
 
-When `<deps> unslop` finds it, spawn a fresh agent (small class) with the task: "Use the unslop skill at `<path>`: run cleanup in report mode, crisp preset, on `<plan-dir>/brief.md`. Edit nothing. Report each finding as section, span and suggestion." Apply the suggestions that keep the meaning and every ID, path and source.
+When `<deps> unslop` finds it, spawn a fresh agent (small class) with the task: "Use the unslop skill at `<path>`: run cleanup in report mode, crisp preset, on the What Changes and Example sections of `<plan-dir>/brief.md`. Edit nothing. Also flag density: a line packing several facts, a code name where plain words would do. Report each finding as section, span and suggestion." Apply the suggestions that keep the meaning and every ID, path and source.
 
 Done when every section is filled, every scenario and ticket ID appears in What Changes, and the unslop line is known: `unslop: <n> found, <m> applied` or `unslop: skipped (<why>)`.
 
