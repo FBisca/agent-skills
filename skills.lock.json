@@ -85,6 +85,20 @@
       "license": "Apache-2.0",
       "relation": "verbatim",
       "install": "npx skills add heygen-com/hyperframes --skill media-use --agent claude-code --agent codex --global --yes"
+    },
+    {
+      "name": "unslop",
+      "source": "theclaymethod/unslop",
+      "license": "MIT",
+      "relation": "verbatim",
+      "install": "npx skills add theclaymethod/unslop --skill unslop --agent claude-code --agent codex --global --yes"
+    },
+    {
+      "name": "i-have-adhd",
+      "source": "ayghri/i-have-adhd",
+      "license": "MIT",
+      "relation": "verbatim",
+      "install": "npx skills add ayghri/i-have-adhd --skill i-have-adhd --agent claude-code --agent codex --global --yes"
     }
   ],
   "dependencies": [

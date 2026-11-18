@@ -11,7 +11,7 @@ description: Plan one feature spec-driven, from its sources to the requirement c
 **Output:** one plan folder, `<plans.dir>/YYYY-MM-DD-<slug>/`, dated the day it is written:
 
 - `plan.yaml`, the **contract** (`plan/2`): the requirements the plan adds to, modifies in or removes from its spec, each with its scenarios, and the tickets. `plan approve` digests it.
-- `brief.md`, the **brief**: the design doc the user reviews and comments on in place. Its shape is in [references/brief.md](references/brief.md). Not digested.
+- `brief.md`, the **brief**: the human-readable design doc the user reviews and comments on in place. Its shape is in [references/brief.md](references/brief.md). The requirements and tickets live in `plan.yaml` only. Not digested.
 
 The **spec** (`spec`, one capability per file) states what the system does today; the archive applies the plan's changes to it.
 
@@ -24,6 +24,8 @@ The **spec** (`spec`, one capability per file) states what the system does today
 The gather (step 2) runs in a fresh agent: agent-runtime's `spawn` (`kind: worker`, `cli` this session's harness, the medium class as `model`) with the packet as its `task`, then `wait`; its report is the answer. The agent works with no inherited context (its packet alone), under the `wait`'s timeout, read-only, answers with the structured JSON its packet names, and fails loudly: a spawn failure, a timeout, a missing report or a malformed answer fails the step. `collect` diagnoses a missing report; it never stands in for one.
 
 `grilling` (step 3) is an upstream skill (`skills.lock.json`), installed separately. Before the grill run `python3 <skill-dir>/scripts/check_deps.py grilling`: it prints `FOUND grilling: <path>`, or exits non-zero naming the install command (`scripts/install-upstream.sh grilling`). When it is missing, stop and name that command; the grill runs through the skill or not at all.
+
+The unslop review (step 7) runs the same way, with the small class as `model` and [the unslop packet](references/unslop-packet.md) as its `task`. It is read-only and fails loudly; step 7 skips it on failure.
 
 ## 0. Pick the lane
 
@@ -54,11 +56,7 @@ Create `brief.md` with the first decision and write each into its `## Decisions`
 - A fork a run can settle (prototype, query) → run it and record the D-line with its evidence.
 - A product or preference call → the `grilling` skill, with the gather's counts and edge cases in the questions.
 
-Each grill round:
-
-- **At most 5 questions.** The rest of the frontier waits for the next round.
-- **Opens with one state line:** decisions settled so far, the round number, and the estimated rounds left.
-- **Mid-round questions** go into the next round.
+Run `python3 <skill-dir>/scripts/check_deps.py i-have-adhd`. When FOUND, read its `SKILL.md` and apply its rules to every grill round and to the step 8 reply. Its list cap means at most 5 questions per round, and the rest of the frontier waits for the next round. When missing, go on without it.
 
 Done when no decision is open and every decision has its D-line naming what it rejected and its source.
 
@@ -97,11 +95,18 @@ Done when `plan check` exits 0 on the final contract.
 
 ## 7. Write the brief
 
-Finish `brief.md` per [references/brief.md](references/brief.md): every section, the copied Requirements and Tickets, and the header. Its Decisions were written at step 3.
+Finish `brief.md` per [references/brief.md](references/brief.md): every section and the header. Its Decisions were written at step 3.
+
+Then run `python3 <skill-dir>/scripts/check_deps.py unslop`.
+
+- **FOUND:** dispatch the unslop review with `<unslop-dir>` set to the folder of the printed `SKILL.md`. Apply each confirmed finding; reject any that touches an ID, a path, a source, a D-line's format, or changes meaning.
+- **Missing, or the review fails:** skip it.
+
+Either way, the reply carries one line: `unslop: <n> found, <m> applied`, or `unslop: skipped (<why>)`.
 
 The brief has two readers: the user, who approves the plan, and the worker, who builds it. A decision that must be enforced becomes a scenario (testable behaviour) or a rule in the repository's rulebook; any other decision is guidance for the worker, and review does not check it. The reviewer judges code against the scenarios and the rulebook only, so an implementation instruction in the brief ("inject it as a callable") would make it police coding choices instead of behaviour.
 
-Done when every heading of [references/brief.md](references/brief.md) is present, Requirements and Tickets match `plan.yaml`, and every ticket's `delivers` reads as a What changes line.
+Done when every heading of [references/brief.md](references/brief.md) is present, every scenario ID and ticket ID in `plan.yaml` is cited in What Changes, and the unslop line is known.
 
 ## 8. Approve
 
@@ -109,6 +114,5 @@ Reply, then stop for one approval; build nothing yet. On a mark in brief.md, run
 
 Then hand off to `/orchestrate <plan.yaml>`.
 
-**Reply:** the first line is the action: "Comment in brief.md, or say yes to approve (`plan approve <plan.yaml>`)." Then the lane and its cell, the plan path, the decisions, the requirement changes (added, modified, removed, by title), the tickets with size and difficulty, and what stays open. Show at most 5 items per group and name the count of the rest, which are in brief.md. The last line is the single next action.
-
+**Reply:** the first line is the action: "Comment in brief.md, or say yes to approve (`plan approve <plan.yaml>`)." Then the lane and its cell, the plan path, the decisions, the requirement changes (added, modified, removed, by title), the tickets with size and difficulty, and what stays open.
 Done when the grep prints nothing on brief.md and `plan approve` exits 0.
