@@ -11,7 +11,7 @@ description: Plan one feature spec-driven, from its sources to the requirement c
 **Output:** one plan folder, `<plans.dir>/YYYY-MM-DD-<slug>/`, dated the day it is written:
 
 - `plan.yaml`, the **contract** (`plan/2`): the requirements the plan adds to, modifies in or removes from its spec, each with its scenarios, and the tickets. `plan approve` digests it.
-- `brief.md`, the **brief**: the plan's diff in plain words, and its decisions. Not digested.
+- `brief.md`, the **brief**: the design doc the owner reviews and comments on in place. Its shape is in [references/brief.md](references/brief.md). Not digested.
 
 The **spec** (`spec`, one capability per file) states what the system does today; the archive applies the plan's changes to it.
 
@@ -54,6 +54,12 @@ Create `brief.md` with the first decision and write each into its `## Decisions`
 - A fork a run can settle (prototype, query) → run it and record the D-line with its evidence.
 - A product or preference call → the `grilling` skill, with the gather's counts and edge cases in the questions.
 
+Each grill round:
+
+- **At most 5 questions.** The rest of the frontier waits for the next round.
+- **Opens with one state line:** decisions settled so far, the round number, and the estimated rounds left.
+- **Mid-round questions** go into the next round.
+
 Done when no decision is open and every decision has its D-line naming what it rejected and its source.
 
 ## 4. Write the requirement changes
@@ -91,28 +97,18 @@ Done when `plan check` exits 0 on the final contract.
 
 ## 7. Write the brief
 
-Finish `brief.md` around its Decisions: the plan's **diff** in plain words, what a person reads before approving. It cites requirement titles and ticket IDs; their text lives in the contract.
-
-```markdown
-# Brief: <feature>
-
-Slug: `<slug>`. Contract: `plan.yaml`. Lane: Plan, <its cell and why>.
-
-## What changes   (one line per behaviour: `<path or area>`: before → after (T<n>))
-## Decisions      (written at step 3)
-## Out of scope   (only when something is)
-```
-
-Write each line as the change itself, the way a commit message would; its reasoning belongs to its D-line.
+Finish `brief.md` per [references/brief.md](references/brief.md): every section, the copied Requirements and Tickets, and the header. Its Decisions were written at step 3. It cites requirement titles and ticket IDs; their text lives in the contract.
 
 The brief has two readers: the user, who approves the plan, and the worker, who builds it. A decision that must be enforced becomes a scenario (testable behaviour) or a rule in the repository's rulebook; any other decision is guidance for the worker, and review does not check it. The reviewer judges code against the scenarios and the rulebook only, so an implementation instruction in the brief ("inject it as a callable") would make it police coding choices instead of behaviour.
 
-Done when every ticket's `delivers` reads as a What changes line.
+Done when every heading of [references/brief.md](references/brief.md) is present, Requirements and Tickets match `plan.yaml`, and every ticket's `delivers` reads as a What changes line.
 
 ## 8. Approve
 
-Reply, then stop for one approval; build nothing yet. On the user's yes, run `<engine> plan approve <plan.yaml>`: it records the approval and digests `plan.yaml`. When it refuses, fix what it names. A fix or any later edit that changes the contract needs the user's yes and a new `plan approve <plan.yaml> --reason "<why>"`.
+Reply, then stop for one approval; build nothing yet. The owner comments in brief.md; run the review round from [references/brief.md](references/brief.md) on each mark. On the user's yes, run the round's grep, then `<engine> plan approve <plan.yaml>`: it records the approval and digests `plan.yaml`. When it refuses, fix what it names. A fix or any later edit that changes the contract needs the user's yes and a new `plan approve <plan.yaml> --reason "<why>"`.
 
 Then hand off to `/orchestrate <plan.yaml>`.
 
-**Reply:** the lane and its cell, the plan path, the decisions, the requirement changes (added, modified, removed, by title), the tickets with size and difficulty, and what stays open.
+**Reply:** the first line is the action: "Approve? yes runs `plan approve <plan.yaml>`" or, while the owner may still comment, an invitation to comment in brief.md. Then the lane and its cell, the plan path, the decisions, the requirement changes (added, modified, removed, by title), the tickets with size and difficulty, and what stays open. Show at most 5 items per group and name the count of the rest, which are in brief.md. The last line is the single next action.
+
+Done when `plan approve` exits 0 on the user's yes, or the reply names the one next action the user owes.
