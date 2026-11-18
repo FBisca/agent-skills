@@ -48,7 +48,7 @@ At the first decision, create `brief.md` from the template; add each decision to
 - A fork a run can settle (prototype, query) → run it; the D-line cites the result.
 - A product or preference call → the `grilling` skill, with the gather's counts and edge cases in the questions. Run `<deps> grilling` first; when it is missing, stop and name its install command: the grill runs through the skill or not at all.
 
-When `<deps> i-have-adhd` finds it, read its `SKILL.md` and apply it to every grill round (at most 5 questions; the rest of the frontier waits) and to the step 8 reply.
+When `<deps> i-have-adhd` finds it, read its `SKILL.md` and apply it to every grill round and to the step 8 reply.
 
 Done when no decision is open and every D-line names what it rejected and its source.
 
