@@ -1,0 +1,5 @@
+interface:
+  display_name: "Fix Root Causes"
+  short_description: "Trace a symptom to its first fault and fix it there"
+policy:
+  allow_implicit_invocation: false

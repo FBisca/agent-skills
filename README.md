@@ -47,6 +47,7 @@ Own = written for this repo. Derivative = modified from an upstream, with attrib
 | [`handoff`](skills/handoff) | Compacts a conversation into a handoff document for another agent | Derivative (Matt Pocock, MIT) |
 | [`tdd`](skills/tdd) | Test-first red → green loop, with an admission rule so each test earns its place at the cheapest level | Derivative (Matt Pocock, MIT) |
 | [`zoom-out`](skills/zoom-out) | Asks for broader context on unfamiliar code | Upstream copy (Matt Pocock, MIT) |
+| [`fix-root-causes`](skills/fix-root-causes) | Traces each symptom to the first place the system went wrong and fixes it there; loads only when invoked | Own |
 | [`in-your-own-words`](skills/in-your-own-words) | Restates the user's goals and problem in the agent's own words; loads only when invoked | Upstream copy (Lauren Tan / Cursor plugins, MIT) |
 | [`process-business-writing`](skills/process-business-writing) | Plans, drafts and edits clear English business prose; loads only when invoked | Derivative (aleberriz, Apache-2.0) |
 | [`analytics-data-storytelling`](skills/analytics-data-storytelling) | Analyses, charts and narrates data for human readers; loads only when invoked | Derivative (aleberriz, Apache-2.0) |
@@ -59,6 +60,7 @@ These skills ship no `scripts/` folder: their behaviour is instructions for an a
 - `assemble-crew`
 - `cold-read`
 - `deep-prompt`
+- `fix-root-causes`
 - `gh-pr-create`
 - `git-commit`
 - `handoff`
