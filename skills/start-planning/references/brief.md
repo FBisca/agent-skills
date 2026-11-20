@@ -5,12 +5,8 @@ A review document in two parts. **Above the rule** is what the user reads to app
 Copy this template to `brief.md`. Replace each comment; a section with nothing to say holds `None.`
 
 ````markdown
----
-status: in review
-plan: plan.yaml
-lane: <cell>
----
 # <The feature, as the user would name it>
+Lane: <cell>, <why>.
 
 <!-- 3–4 sentences, no IDs: the problem, what changes and for whom, what it costs (tickets, repositories, people).
      A reader who stops here knows what a yes buys. -->
@@ -66,7 +62,7 @@ lane: <cell>
 
 ## Review
 
-The user marks `brief.md` with CriticMarkup, in Obsidian or any editor: `{>> comment <<}`, `{== highlight ==}`, `{~~old~>new~~}`, `{++ insert ++}`, `{-- delete --}`, or ticks a box in Your calls. A comment on the contract cites its ID (`{>> S3: also the empty set <<}`); `plan.yaml` holds no marks, since `{` breaks its YAML.
+The user marks `brief.md` with CriticMarkup, in any editor: `{>> comment <<}`, `{== highlight ==}`, `{~~old~>new~~}`, `{++ insert ++}`, `{-- delete --}`, or ticks a box in Your calls. A comment on the contract cites its ID (`{>> S3: also the empty set <<}`); `plan.yaml` holds no marks, since `{` breaks its YAML.
 
 List the marks with their lines:
 
@@ -76,4 +72,4 @@ grep -nE '\{(>>|==|~~|\+\+|--)' brief.md
 
 Resolve each one (edit the brief; edit `plan.yaml` and rerun `plan check`; add a D-line; or answer it in the reply), then delete it. A call left empty keeps its default; a ticked or commented one moves to the Decision log as a D-line with source `user`. The round's reply holds one line per mark: the mark quoted, then what changed and where.
 
-The review is done when the grep prints nothing. On approval, set `status: approved`.
+The review is done when the grep prints nothing.

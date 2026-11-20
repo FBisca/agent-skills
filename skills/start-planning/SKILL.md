@@ -106,11 +106,10 @@ Done when every section is filled, every scenario ID appears in What changes and
 
 Build nothing yet. Reply with the plan path, the number of open calls and the number of tickets; the brief holds the rest. Then ask "Approve this plan?":
 
-- **Open in Obsidian**: only when `python3 <skill-dir>/scripts/open_brief.py <brief.md> --check` exits 0. Run it without `--check`, then ask again without this option.
 - **Approve**: with [the review's](references/brief.md#review) grep empty, run `<engine> plan approve <plan.yaml>` and fix whatever it refuses. With marks left, resolve them first and ask again.
 - **I left comments**: resolve the marks per the review, reply with its line per mark, and ask again.
 - Free text is a comment on the plan: resolve it the same way.
 
 A later contract change needs the user's yes and `plan approve <plan.yaml> --reason "<why>"`. After approval, end the reply with the next command on its own line, the plan path filled in: `/orchestrate <plan.yaml>`.
 
-Done when the review's grep prints nothing, `plan approve` exits 0, the brief's `status` is `approved` and the reply ends with the orchestrate command.
+Done when the review's grep prints nothing, `plan approve` exits 0 and the reply ends with the orchestrate command.
