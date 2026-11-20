@@ -46,7 +46,16 @@ Judge the request from the request itself plus a glance at the code it names, an
 
 ## Class to model
 
-The driver resolves each class to backend, model and effort from a typed route file and reads no model table: `--routes-file`, else the repository's `.orchestrate/routes.json`, else the user's profile for `--cli`; `--route CLASS=BACKEND/MODEL[@EFFORT]` and `--step STEP=BACKEND/MODEL[@EFFORT]` win over all of them. Backends are `claude`, `codex` and `pi`. `<engine> run --help` holds the file paths and the format. A run with no route file, or an invalid one, stops before any spawn, with no billable fallback.
+The driver resolves each class to backend, model and effort from a typed route file (`--routes-file`, `--route`, `--step`; `<engine> run --help` has the order, paths and format). Backends: `claude`, `codex`, `pi`. A run with no valid route file stops before any spawn, with no billable fallback.
+
+```json
+{"version": 1,
+ "routes": [
+   {"class": "small",  "backend": "claude", "model": "haiku",  "effort": "low"},
+   {"class": "medium", "backend": "claude", "model": "sonnet", "effort": "medium"},
+   {"class": "large",  "backend": "codex",  "model": "gpt-l",   "effort": "high"}
+ ]}
+```
 
 Model selection occurs at spawn (the cache boundary). Live workers keep their model for fixes; dead panes get fresh workers in the same cell.
 
