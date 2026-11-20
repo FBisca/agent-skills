@@ -21,11 +21,11 @@ The Python driver handles dispatch, the ticket gate, review/fix rounds, CI, unbl
 
 ## The ticket gate
 
-An implementation provides its evidence. Each scenario the ticket satisfies needs a covering test the ticket changed, tagged with its requirement's title and mapped in its report's `covers` (`S<n>` → `path::test_name`), and seen red first: the report's `red` (`S<n>` → the failing output from before the fix, naming the node) proves it. CI green on the same head proves the tests pass. The gate, `verify`, checks scope (the diff stays in the ticket's `paths`), integrity (the ticket leaves its plan folder untouched), covers (every satisfied scenario maps to test nodes that exist and changed in the ticket) and red (every satisfied scenario has an excerpt naming one of its nodes); the reviewer judges whether each excerpt is a genuine assertion failure. Say the same when you answer a worker: the tests it writes, seen red, are the ticket's only evidence.
+An implementation provides its evidence. Each scenario the ticket satisfies needs a covering test the ticket changed, tagged with its requirement's title and mapped in its report's `covers` (`S<n>` → `path::test_name`), and seen red first: the report's `red` (`S<n>` → the failing output from before the fix, naming the node) proves it. CI green on the same head proves the tests pass. The gate, `verify`, checks integrity (the ticket leaves its plan folder untouched), covers (every satisfied scenario maps to test nodes that exist and changed in the ticket) and red (every satisfied scenario has an excerpt naming one of its nodes); the reviewer judges whether each excerpt is a genuine assertion failure. Say the same when you answer a worker: the tests it writes, seen red, are the ticket's only evidence.
 
 ## Change the plan: re-approve
 
-The plan records scope and decisions; approval covers its bytes. Record user decisions in the brief and scope changes in the contract's requirements, tickets or `paths`. A file outside a ticket's `paths` needs no re-approval: the gate refuses only a file another unfinished ticket lists. A contract edit needs the user's yes, then:
+The plan records scope and decisions; approval covers its bytes. Record user decisions in the brief and scope changes in the contract's requirements, tickets or `paths`. A file outside a ticket's `paths` needs no re-approval: the worker keeps the change, and a file another unfinished ticket also lists raises an `overlap` warning to you (below). A contract edit needs the user's yes, then:
 
 ```
 <engine> plan approve <plan> --reason "<why>"
@@ -54,6 +54,7 @@ In Herdr, `orchestrate-<slug>` nests under the Lead's terminal, falling back to 
 
 - `IN PROGRESS · awaiting merge (<PR>)`: user merges; driver then marks COMPLETE and unblocks dependents.
 - `needs you: <reason>`: person required.
+- `overlap` event (also a warn line in the pane and a note in the archive PR): a ticket changed a file another unfinished ticket lists. No answer needed; order the tickets if the other must build on the change, or expect a rebase when both land.
 - `orphaned` event: restarted drive found an open task whose agent runtime no longer lists. An implementer missing its report is redispatched alone as `t<N>o<k>`, retaining worktree, branch, and worker name.
 
 `<run>` = `~/.local/state/orchestrate/<repo-key>/<slug>/`:
