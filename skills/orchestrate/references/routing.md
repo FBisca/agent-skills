@@ -46,7 +46,7 @@ Judge the request from the request itself plus a glance at the code it names, an
 
 ## Class to model
 
-The driver resolves each class to backend, model and effort from a typed route file and reads no model table. The engine's `models.md`, beside `routes.py`, is the source of truth: the file's format, which file a run reads, and the `claude`, `codex` and `pi` backends. A missing or invalid route file stops the run before any spawn, with no billable fallback.
+The driver resolves each class to backend, model and effort from a typed route file and reads no model table: `--routes-file`, else the repository's `.orchestrate/routes.json`, else the user's profile for `--cli`; `--route CLASS=BACKEND/MODEL[@EFFORT]` and `--step STEP=BACKEND/MODEL[@EFFORT]` win over all of them. Backends are `claude`, `codex` and `pi`. `<engine> run --help` holds the file paths and the format. A run with no route file, or an invalid one, stops before any spawn, with no billable fallback.
 
 Model selection occurs at spawn (the cache boundary). Live workers keep their model for fixes; dead panes get fresh workers in the same cell.
 
