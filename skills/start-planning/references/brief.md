@@ -16,12 +16,9 @@ lane: <cell>
      A reader who stops here knows what a yes buys. -->
 
 ## Your calls
-<!-- What needs the user's answer, before anything else. One checkbox per call:
-     - a question the plan left open;
-     - a decision the user has not seen: settled by a source or a run, or assumed without asking.
-     Each: the question in bold, then "Default:" what the plan does, and its D<n>. The user ticks the box to accept
-     the default or comments to change it; a box left empty keeps the default.
-     A decision the user made in the grill is theirs already: it goes to the Decision log only. -->
+<!-- The calls the user deferred in the grill, one checkbox each: the question in bold, then "Default:" what the plan
+     does, and its D<n>. The user ticks the box to accept the default or comments to change it; a box left empty keeps
+     the default. None deferred → None. -->
 - [ ] **<question>** Default: <what the plan does>. (D<n>)
 
 ## What changes

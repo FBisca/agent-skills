@@ -45,14 +45,17 @@ Done when the gatherer has returned its sources, its settled decisions and the s
 
 ## 3. Decide
 
-At the first decision, create `brief.md` from the template; add each decision to its Decision log as a D-line as it settles. Decisions the gather settled enter unasked, with their source.
+At the first decision, create `brief.md` from the template; add each decision to its Decision log as a D-line as it settles.
 
 - A fork a run can settle (prototype, query) → run it; the D-line cites the result.
+- A decision the gather settled → put to the user in the grill for a yes, with its source.
 - A product or preference call → the `grilling` skill, with the gather's counts and edge cases in the questions. Run `<deps> grilling` first; when it is missing, stop and name its install command: the grill runs through the skill or not at all.
 
 When `<deps> i-have-adhd` finds it, read its `SKILL.md` and apply it to every grill round and to the step 8 reply.
 
-Done when no decision is open and every D-line names what it rejected and its source.
+A call the user defers in the grill keeps the plan's default and goes to the brief's Your calls.
+
+Done when the user has answered or deferred every decision, and every D-line names what it rejected and its source.
 
 ## 4. Write the requirement changes
 
@@ -66,6 +69,7 @@ An added or modified requirement is one SHALL sentence and 1–3 scenarios. Scen
 
 - **One behaviour.** One WHEN, one THEN. An "and", an "until" or a second clause is two scenarios: a compound one gets half-tested.
 - **Observable.** `then` is what a test asserts, at a seam the gather named or an interface a decision fixes.
+- **Model behaviour.** A `then` only the model produces (Claude replies, lists, hands over) has no seam to test: a person's run is its evidence, in the ticket that runs it. No test of the skill's prose stands in.
 - **Measured numbers.** A threshold, limit or timeout cites a measurement in the brief, or the ticket's first job measures it and the scenario says so: guessed numbers get disproved by the code. A number that is the requirement itself (`daily at 09:00`) needs neither.
 - **No WHEN/THEN, no scenario.** A behaviour you cannot phrase that way is an open decision: back to step 3.
 
@@ -94,15 +98,13 @@ Done when it exits 0.
 
 ## 7. Write the brief
 
-Fill every section of `brief.md`, by [its rules for the reviewer](references/brief.md#writing-for-the-reviewer). Above the rule its reader is the user, who approves; the Reference serves the worker, who builds. Your calls holds every open question and every decision the user has not seen. A decision that must be enforced becomes a scenario or a rule in the repository's rulebook, and review checks only those; any other decision is guidance. Keep implementation instructions ("inject it as a callable") out, or review polices coding choices instead of behaviour.
+Fill every section of `brief.md`, by [its rules for the reviewer](references/brief.md#writing-for-the-reviewer). Above the rule its reader is the user, who approves; the Reference serves the worker, who builds. A decision that must be enforced becomes a scenario or a rule in the repository's rulebook, and review checks only those; any other decision is guidance. Keep implementation instructions ("inject it as a callable") out, or review polices coding choices instead of behaviour.
 
-When `<deps> unslop` finds it, spawn a fresh agent (small class) with the task: "Use the unslop skill at `<path>`: run cleanup in report mode, crisp preset, on everything above the rule in `<plan-dir>/brief.md`. Edit nothing. Also flag density: a line packing several facts, a code name where plain words would do. Report each finding as section, span and suggestion." Apply the suggestions that keep the meaning and every ID, path and source, then stop the agent.
-
-Done when every section is filled, every scenario ID appears in What changes, every ticket ID in Build order, the unslop agent is stopped, and the unslop line is known: `unslop: <n> found, <m> applied` or `unslop: skipped (<why>)`.
+Done when every section is filled, every scenario ID appears in What changes and every ticket ID in Build order.
 
 ## 8. Approve
 
-Build nothing yet. Reply with the plan path, the lane and its cell, the count of open calls, the requirement changes by title (added, modified, removed), the tickets with size and difficulty, and the unslop line. Then ask "Approve this plan?":
+Build nothing yet. Reply with the plan path, the number of open calls and the number of tickets; the brief holds the rest. Then ask "Approve this plan?":
 
 - **Open in Obsidian**: only when `python3 <skill-dir>/scripts/open_brief.py <brief.md> --check` exits 0. Run it without `--check`, then ask again without this option.
 - **Approve**: with [the review's](references/brief.md#review) grep empty, run `<engine> plan approve <plan.yaml>` and fix whatever it refuses. With marks left, resolve them first and ask again.
