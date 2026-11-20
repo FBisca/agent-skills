@@ -17,7 +17,7 @@ The **spec** (one capability per file) is what the system does today; the archiv
 
 `<engine>` is `python3 <skill-dir>/../orchestrate/scripts/orchestrate.py`. `<deps> <name>` is `python3 <skill-dir>/scripts/check_deps.py <name>`: it prints `FOUND <name>: <path>`, or exits non-zero naming the install command.
 
-A **fresh agent** is the agent-runtime MCP server's `spawn` tool (`kind: worker`, `cli` this session's harness, the class as `model`, the task), then its `wait`; its report is the answer. A harness that defers MCP tools loads `spawn`, `wait` and `stop` through its tool search. A spawn failure, a timeout or a missing report fails it; `collect` diagnoses a missing report and never stands in for one. Once its report is read, or it has failed, `stop` it: no agent of this skill outlives its step.
+A **fresh agent** is one `spawn` of the agent-runtime MCP server (`kind: worker`, `cli` this session's harness, `model` resolved from the class, the task), then `wait`; its report is the answer. A harness that defers MCP tools loads `spawn`, `wait` and `stop` through its tool search. A spawn failure, a timeout or a missing report fails it; `collect` only diagnoses a missing report. Once the report is read or the agent has failed, `stop` it: every agent of this skill ends with its step.
 
 To **ask** is to put a decision to the user through the harness's interactive question tool, one option per answer, the recommended one first; without such a tool, as a numbered list.
 
