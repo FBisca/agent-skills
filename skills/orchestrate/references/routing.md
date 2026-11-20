@@ -46,22 +46,7 @@ Judge the request from the request itself plus a glance at the code it names, an
 
 ## Class to model
 
-Resolve class → backend/model/effort:
-
-- **Typed config** (`--routes-file`): versioned JSON (YAML requires PyYAML), schema in engine `routes.py`. Unknown backends/classes/fields/efforts or missing classes stop the run before spawn, without billable fallback.
-
-  ```json
-  {"version": 1,
-   "routes": [
-     {"class": "small",  "backend": "claude", "model": "haiku",  "effort": "low"},
-     {"class": "medium", "backend": "claude", "model": "sonnet", "effort": "medium"},
-     {"class": "large",  "backend": "codex",  "model": "gpt-l",   "effort": "high"}
-   ]}
-  ```
-
-  Workers support `claude` and `codex`. `pi` is lead-only; Pi worker routes fail explicitly without substitution. A named config is self-sufficient: the legacy table is never read or required.
-
-- **Legacy default** (`--models-file`): `Model classes` in `~/.claude/CLAUDE.md`; used without `--routes-file`, with a deprecation notice. Effort comes from the matrix. Missing classes/backend columns—including `--brain-cli`'s—are errors.
+The driver resolves each class to backend, model and effort from a typed route file and reads no model table. The engine's `models.md`, beside `routes.py`, is the source of truth: the file's format, which file a run reads, and the `claude`, `codex` and `pi` backends. A missing or invalid route file stops the run before any spawn, with no billable fallback.
 
 Model selection occurs at spawn (the cache boundary). Live workers keep their model for fixes; dead panes get fresh workers in the same cell.
 
