@@ -11,13 +11,15 @@ description: Plan one feature spec-driven, from its sources to the requirement c
 **Output:** `<plans.dir>/YYYY-MM-DD-<slug>/`, dated the day it is written:
 
 - `plan.yaml`, the **contract** (`plan/2`, from [the skeleton](references/plan-yaml.md)): the requirement changes with their scenarios, and the tickets. `plan check` is its authority; `plan approve` digests it.
-- `brief.md`, the **brief** (from [the template](references/brief.md)): the design doc the user reads and comments on. It cites the contract's IDs, never copies its text, and is not digested.
+- `brief.md`, the **brief** (from [the template](references/brief.md)): the review document the user reads and comments on, with a Reference for the worker. It cites the contract's IDs, never copies its text, and is not digested.
 
 The **spec** (one capability per file) is what the system does today; the archive applies the plan's changes to it. **The implementation brings the evidence:** the ticket that satisfies a scenario writes its tests, tagged with the requirement's title, and maps them in its report's `covers`. The plan holds no tests.
 
 `<engine>` is `python3 <skill-dir>/../orchestrate/scripts/orchestrate.py`. `<deps> <name>` is `python3 <skill-dir>/scripts/check_deps.py <name>`: it prints `FOUND <name>: <path>`, or exits non-zero naming the install command.
 
-A **fresh agent** is agent-runtime's `spawn` (`kind: worker`, `cli` this session's harness, the class as `model`, the task), then `wait`; its report is the answer. A spawn failure, a timeout or a missing report fails it; `collect` diagnoses a missing report and never stands in for one.
+A **fresh agent** is agent-runtime's `spawn` (`kind: worker`, `cli` this session's harness, the class as `model`, the task), then `wait`; its report is the answer. A spawn failure, a timeout or a missing report fails it; `collect` diagnoses a missing report and never stands in for one. Once its report is read, or it has failed, `stop` it: no agent of this skill outlives its step.
+
+To **ask** is to put a decision to the user through the harness's interactive question tool, one option per answer, the recommended one first; without such a tool, as a numbered list.
 
 ## 0. Lane
 
@@ -39,18 +41,21 @@ Spawn a fresh agent (medium class) with [the gather packet](references/gather-pa
 
 Its answer is the only evidence: fill no gap from your memory of the conversation. When the gather fails, stop.
 
-Done when the gatherer has returned its sources, its settled decisions and the seams.
+Done when the gatherer has returned its sources, its settled decisions and the seams, and is stopped.
 
 ## 3. Decide
 
-At the first decision, create `brief.md` from the template; add each decision to its Decisions as a D-line as it settles. Decisions the gather settled enter unasked, with their source.
+At the first decision, create `brief.md` from the template; add each decision to its Decision log as a D-line as it settles.
 
 - A fork a run can settle (prototype, query) → run it; the D-line cites the result.
+- A decision the gather settled → put to the user in the grill for a yes, with its source.
 - A product or preference call → the `grilling` skill, with the gather's counts and edge cases in the questions. Run `<deps> grilling` first; when it is missing, stop and name its install command: the grill runs through the skill or not at all.
 
 When `<deps> i-have-adhd` finds it, read its `SKILL.md` and apply it to every grill round and to the step 8 reply.
 
-Done when no decision is open and every D-line names what it rejected and its source.
+A call the user defers in the grill keeps the plan's default and goes to the brief's Your calls.
+
+Done when the user has answered or deferred every decision, and every D-line names what it rejected and its source.
 
 ## 4. Write the requirement changes
 
@@ -64,6 +69,7 @@ An added or modified requirement is one SHALL sentence and 1–3 scenarios. Scen
 
 - **One behaviour.** One WHEN, one THEN. An "and", an "until" or a second clause is two scenarios: a compound one gets half-tested.
 - **Observable.** `then` is what a test asserts, at a seam the gather named or an interface a decision fixes.
+- **Model behaviour.** A `then` only the model produces (Claude replies, lists, hands over) has no seam to test: a person's run is its evidence, in the ticket that runs it. No test of the skill's prose stands in.
 - **Measured numbers.** A threshold, limit or timeout cites a measurement in the brief, or the ticket's first job measures it and the scenario says so: guessed numbers get disproved by the code. A number that is the requirement itself (`daily at 09:00`) needs neither.
 - **No WHEN/THEN, no scenario.** A behaviour you cannot phrase that way is an open decision: back to step 3.
 
@@ -92,16 +98,18 @@ Done when it exits 0.
 
 ## 7. Write the brief
 
-Fill every section of `brief.md`. Its readers are the user, who approves, and the worker, who builds. A decision that must be enforced becomes a scenario or a rule in the repository's rulebook, and review checks only those; any other decision is guidance. Keep implementation instructions ("inject it as a callable") out, or review polices coding choices instead of behaviour.
+Fill every section of `brief.md`, by [its rules for the reviewer](references/brief.md#writing-for-the-reviewer). Above the rule its reader is the user, who approves; the Reference serves the worker, who builds. A decision that must be enforced becomes a scenario or a rule in the repository's rulebook, and review checks only those; any other decision is guidance. Keep implementation instructions ("inject it as a callable") out, or review polices coding choices instead of behaviour.
 
-When `<deps> unslop` finds it, spawn a fresh agent (small class) with the task: "Use the unslop skill at `<path>`: run cleanup in report mode, crisp preset, on the What Changes, Capabilities, Impact, Context and Example sections of `<plan-dir>/brief.md`. Edit nothing. Also flag density: a line packing several facts, a code name where plain words would do. Report each finding as section, span and suggestion." Apply the suggestions that keep the meaning and every ID, path and source.
-
-Done when every section is filled, every scenario and ticket ID appears in What Changes, and the unslop line is known: `unslop: <n> found, <m> applied` or `unslop: skipped (<why>)`.
+Done when every section is filled, every scenario ID appears in What changes and every ticket ID in Build order.
 
 ## 8. Approve
 
-Reply, then stop; build nothing yet. The reply opens with "Comment in brief.md, or say yes to approve (`plan approve <plan.yaml>`)." Then: the lane and its cell, the plan path, the decisions, the requirement changes by title (added, modified, removed), the tickets with size and difficulty, what stays open, and the unslop line.
+Build nothing yet. Reply with the plan path, the number of open calls and the number of tickets; the brief holds the rest. Then ask "Approve this plan?":
 
-Resolve the user's marks per [the brief's review](references/brief.md#review), reply again and stop again. On the user's yes, with the review's grep empty, run `<engine> plan approve <plan.yaml>` and fix whatever it refuses. A later contract change needs the user's yes and `plan approve <plan.yaml> --reason "<why>"`. Then hand off to `/orchestrate <plan.yaml>`.
+- **Approve**: with [the review's](references/brief.md#review) grep empty, run `<engine> plan approve <plan.yaml>` and fix whatever it refuses. With marks left, resolve them first and ask again.
+- **I left comments**: resolve the marks per the review, reply with its line per mark, and ask again.
+- Free text is a comment on the plan: resolve it the same way.
 
-Done when the review's grep prints nothing and `plan approve` exits 0.
+A later contract change needs the user's yes and `plan approve <plan.yaml> --reason "<why>"`. After approval, end the reply with the next command on its own line, the plan path filled in: `/orchestrate <plan.yaml>`.
+
+Done when the review's grep prints nothing, `plan approve` exits 0 and the reply ends with the orchestrate command.
