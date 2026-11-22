@@ -67,5 +67,6 @@ Before admitting a borderline test, writing one that needs expensive setup or a 
 ## Rules of the loop
 
 - **Red before green.** Make a test go red first (a new admitted test, or an existing one extended), then write only enough code to pass it. Don't anticipate future tests or add speculative features.
+- **Red is an assertion failure, by name.** A test file that fails to import or compile (the module isn't written yet, generated code isn't built) prints no test name and proves nothing. First write the smallest skeleton that compiles: the new signatures, returning an empty or neutral value. Then run the test and keep the output where it fails by name on its assertion.
 - **One slice at a time.** One seam, one test, one minimal implementation per cycle.
 - **Refactoring is not part of the loop.** It belongs to the review stage (see the `code-review` skill), not the red → green implementation cycle.
